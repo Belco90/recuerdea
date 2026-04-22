@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/crates/oxc_linter/src/rules.rs",
+  "plugins": ["react", "react-hooks", "typescript", "unicorn"],
+  "env": {
+    "browser": true,
+    "es2022": true
+  },
+  "rules": {
+    "no-unused-vars": "error",
+    "no-console": "warn",
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn"
+  }
+}

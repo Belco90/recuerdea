@@ -2,7 +2,6 @@
   "name": "recuerdea",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@10.30.2",
   "imports": {
     "#/*": "./src/*"
   },
@@ -10,7 +9,12 @@
     "dev": "vite dev --port 3000",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint . --fix",
+    "format": "oxfmt .",
+    "format:check": "oxfmt . --check",
+    "prepare": "simple-git-hooks"
   },
   "dependencies": {
     "@chakra-ui/react": "^3.34.0",
@@ -34,14 +38,32 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
     "jsdom": "^28.1.0",
+    "nano-staged": "^1.0.2",
+    "oxfmt": "^0.46.0",
+    "oxlint": "^1.61.0",
+    "simple-git-hooks": "^2.13.1",
     "typescript": "^5.7.2",
     "vite": "^8.0.0",
     "vitest": "^3.0.5"
   },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm nano-staged"
+  },
+  "nano-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "oxlint --fix",
+      "oxfmt"
+    ],
+    "*.{json,css}": [
+      "oxfmt"
+    ]
+  },
+  "packageManager": "pnpm@10.30.2",
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild",
-      "lightningcss"
+      "lightningcss",
+      "simple-git-hooks"
     ]
   }
 }

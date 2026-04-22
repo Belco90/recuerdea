@@ -1,7 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { Box, Heading, Text, Code } from '@chakra-ui/react'
+import { createFileRoute } from "@tanstack/react-router";
+import { Box, Heading, Text, Code } from "@chakra-ui/react";
 
-export const Route = createFileRoute('/')({ component: Home })
+export const Route = createFileRoute("/")({ component: Home });
 
 function Home() {
   return (
@@ -11,5 +11,5 @@ function Home() {
         Edit <Code>src/routes/index.tsx</Code> to get started.
       </Text>
     </Box>
-  )
+  );
 }
