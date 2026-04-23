@@ -3,6 +3,7 @@ import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 
+import { IdentityProvider } from "#/lib/auth/identity-context";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({
@@ -10,13 +11,14 @@ export const Route = createRootRoute({
     meta: [
       {
         charSet: "utf-8",
+        lang: "es",
       },
       {
         name: "viewport",
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "TanStack Start Starter",
+        title: "Recuerdea",
       },
     ],
     links: [
@@ -37,18 +39,20 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         <ChakraProvider value={defaultSystem}>
-          {children}
-          <TanStackDevtools
-            config={{
-              position: "bottom-right",
-            }}
-            plugins={[
-              {
-                name: "Tanstack Router",
-                render: <TanStackRouterDevtoolsPanel />,
-              },
-            ]}
-          />
+          <IdentityProvider>
+            {children}
+            <TanStackDevtools
+              config={{
+                position: "bottom-right",
+              }}
+              plugins={[
+                {
+                  name: "Tanstack Router",
+                  render: <TanStackRouterDevtoolsPanel />,
+                },
+              ]}
+            />
+          </IdentityProvider>
         </ChakraProvider>
         <Scripts />
       </body>
