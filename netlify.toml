@@ -2,6 +2,7 @@
   command = "vite build"
   dir = "dist/client"
 [dev]
+  framework = "tanstack-start"
   command = "pnpm dev"
   targetPort = 3000
   port = 8888
