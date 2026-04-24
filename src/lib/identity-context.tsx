@@ -1,5 +1,13 @@
 import { type User, getUser, logout as nfLogout, onAuthChange } from '@netlify/identity'
-import { createContext, type ReactNode, useContext, useEffect, useState } from 'react'
+import {
+	createContext,
+	type ReactNode,
+	useCallback,
+	useContext,
+	useEffect,
+	useMemo,
+	useState,
+} from 'react'
 
 type IdentityValue = {
 	user: User | null
@@ -29,12 +37,14 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
 		}
 	}, [])
 
-	async function logout() {
+	const logout = useCallback(async () => {
 		await nfLogout()
 		window.location.href = '/login'
-	}
+	}, [])
 
-	return <IdentityContext value={{ user, ready, logout }}>{children}</IdentityContext>
+	const value = useMemo(() => ({ user, ready, logout }), [user, ready, logout])
+
+	return <IdentityContext value={value}>{children}</IdentityContext>
 }
 
 export function useIdentity(): IdentityValue {
