@@ -11,7 +11,6 @@ export const Route = createRootRoute({
     meta: [
       {
         charSet: "utf-8",
-        lang: "es",
       },
       {
         name: "viewport",
@@ -33,7 +32,7 @@ export const Route = createRootRoute({
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="es">
       <head>
         <HeadContent />
       </head>
