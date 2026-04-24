@@ -31,7 +31,7 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
 
   async function logout() {
     await nfLogout();
-    setUser(null);
+    window.location.href = "/login";
   }
 
   return <IdentityContext value={{ user, ready, logout }}>{children}</IdentityContext>;
