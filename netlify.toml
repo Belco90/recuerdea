@@ -1,8 +1,8 @@
 [build]
-  command = "vite build"
-  publish = "dist/client"
+command = "vite build"
+publish = "dist/client"
 [dev]
-  framework = "tanstack-start"
-  command = "pnpm dev"
-  targetPort = 3000
-  port = 8888
+framework = "tanstack-start"
+command = "pnpm dev"
+targetPort = 3000
+port = 8888

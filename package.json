@@ -1,77 +1,77 @@
 {
-  "name": "recuerdea",
-  "private": true,
-  "type": "module",
-  "imports": {
-    "#/*": "./src/*"
-  },
-  "scripts": {
-    "dev": "vite dev --port 3000",
-    "build": "vite build",
-    "preview": "vite preview",
-    "netlify": "netlify",
-    "test": "vitest run",
-    "type-check": "tsc --noEmit",
-    "lint": "oxlint .",
-    "lint:fix": "oxlint . --fix",
-    "format": "oxfmt .",
-    "format:check": "oxfmt . --check",
-    "prepare": "simple-git-hooks"
-  },
-  "dependencies": {
-    "@chakra-ui/react": "^3.34.0",
-    "@netlify/identity": "^1.0.0",
-    "@tanstack/react-devtools": "latest",
-    "@tanstack/react-router": "latest",
-    "@tanstack/react-router-devtools": "latest",
-    "@tanstack/react-router-ssr-query": "latest",
-    "@tanstack/react-start": "latest",
-    "@tanstack/router-plugin": "^1.132.0",
-    "lucide-react": "^0.545.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
-  },
-  "devDependencies": {
-    "@netlify/vite-plugin-tanstack-start": "^1.2.15",
-    "@tanstack/devtools-vite": "latest",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/react": "^16.3.0",
-    "@types/node": "^22.10.2",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^6.0.1",
-    "jsdom": "^28.1.0",
-    "nano-staged": "^1.0.2",
-    "netlify-cli": "^25.3.0",
-    "oxfmt": "^0.46.0",
-    "oxlint": "^1.61.0",
-    "simple-git-hooks": "^2.13.1",
-    "typescript": "^5.7.2",
-    "vite": "^8.0.0",
-    "vitest": "^3.0.5"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "pnpm nano-staged"
-  },
-  "nano-staged": {
-    "*.{js,jsx,ts,tsx}": [
-      "oxlint --fix",
-      "oxfmt"
-    ],
-    "*.{json,css}": [
-      "oxfmt"
-    ]
-  },
-  "packageManager": "pnpm@10.30.2",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "esbuild",
-      "lightningcss",
-      "netlify-cli",
-      "sharp",
-      "simple-git-hooks",
-      "unix-dgram"
-    ]
-  }
+	"name": "recuerdea",
+	"private": true,
+	"type": "module",
+	"imports": {
+		"#/*": "./src/*"
+	},
+	"scripts": {
+		"dev": "vite dev --port 3000",
+		"build": "vite build",
+		"preview": "vite preview",
+		"netlify": "netlify",
+		"test": "vitest run",
+		"type-check": "tsc --noEmit",
+		"lint": "oxlint .",
+		"lint:fix": "oxlint . --fix",
+		"format": "oxfmt .",
+		"format:check": "oxfmt . --check",
+		"prepare": "simple-git-hooks"
+	},
+	"dependencies": {
+		"@chakra-ui/react": "^3.34.0",
+		"@netlify/identity": "^1.0.0",
+		"@tanstack/react-devtools": "latest",
+		"@tanstack/react-router": "latest",
+		"@tanstack/react-router-devtools": "latest",
+		"@tanstack/react-router-ssr-query": "latest",
+		"@tanstack/react-start": "latest",
+		"@tanstack/router-plugin": "^1.132.0",
+		"lucide-react": "^0.545.0",
+		"react": "^19.2.0",
+		"react-dom": "^19.2.0"
+	},
+	"devDependencies": {
+		"@netlify/vite-plugin-tanstack-start": "^1.2.15",
+		"@tanstack/devtools-vite": "latest",
+		"@testing-library/dom": "^10.4.1",
+		"@testing-library/react": "^16.3.0",
+		"@types/node": "^22.10.2",
+		"@types/react": "^19.2.0",
+		"@types/react-dom": "^19.2.0",
+		"@vitejs/plugin-react": "^6.0.1",
+		"jsdom": "^28.1.0",
+		"nano-staged": "^1.0.2",
+		"netlify-cli": "^25.3.0",
+		"oxfmt": "^0.46.0",
+		"oxlint": "^1.61.0",
+		"simple-git-hooks": "^2.13.1",
+		"typescript": "^5.7.2",
+		"vite": "^8.0.0",
+		"vitest": "^3.0.5"
+	},
+	"simple-git-hooks": {
+		"pre-commit": "pnpm nano-staged"
+	},
+	"nano-staged": {
+		"*.{js,jsx,ts,tsx}": [
+			"oxlint --fix",
+			"oxfmt"
+		],
+		"*.{json,css}": [
+			"oxfmt"
+		]
+	},
+	"packageManager": "pnpm@10.30.2",
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"@parcel/watcher",
+			"esbuild",
+			"lightningcss",
+			"netlify-cli",
+			"sharp",
+			"simple-git-hooks",
+			"unix-dgram"
+		]
+	}
 }
