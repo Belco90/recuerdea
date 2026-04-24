@@ -1,6 +1,7 @@
 import { type SubmitEventHandler, useEffect, useState } from "react";
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { acceptInvite, getUser, handleAuthCallback, login, updateUser } from "@netlify/identity";
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { acceptInvite, handleAuthCallback, login, updateUser } from "@netlify/identity";
+import { getServerUser } from "#/lib/auth";
 import { Box, Button, Field, Heading, Input, Text, VStack } from "@chakra-ui/react";
 
 export const Route = createFileRoute("/login")({
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/login")({
     ) {
       return;
     }
-    const user = await getUser();
+    const user = await getServerUser();
     if (user) throw redirect({ to: "/" });
   },
   component: LoginPage,
@@ -22,8 +23,6 @@ export const Route = createFileRoute("/login")({
 type Mode = "login" | "invite" | "recovery";
 
 function LoginPage() {
-  const navigate = useNavigate();
-
   const [mode, setMode] = useState<Mode>("login");
   const [inviteToken, setInviteToken] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,10 +39,10 @@ function LoginPage() {
         setMode("recovery");
       } else if (result.user) {
         // OAuth, confirmation, or email change — already logged in.
-        void navigate({ to: "/", replace: true });
+        window.location.href = "/";
       }
     });
-  }, [navigate]);
+  }, []);
 
   const handleSubmit: SubmitEventHandler<HTMLFormElement> = async (e) => {
     e.preventDefault();
@@ -62,7 +61,7 @@ function LoginPage() {
         // recovery: user is already logged in; just set the new password.
         await updateUser({ password });
       }
-      await navigate({ to: "/", replace: true });
+      window.location.href = "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

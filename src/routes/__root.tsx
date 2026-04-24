@@ -3,7 +3,7 @@ import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import { ChakraProvider, defaultSystem } from "@chakra-ui/react";
 
-import { IdentityProvider } from "#/lib/auth/identity-context";
+import { IdentityProvider } from "#/lib/identity-context";
 import appCss from "../styles.css?url";
 
 export const Route = createRootRoute({

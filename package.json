@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "netlify": "netlify",
     "test": "vitest run",
+    "type-check": "tsc --noEmit",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "format": "oxfmt .",

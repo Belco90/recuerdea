@@ -1,11 +1,11 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { getUser } from "@netlify/identity";
 import { Box, Button, Heading, Text } from "@chakra-ui/react";
-import { useIdentity } from "#/lib/auth/identity-context";
+import { useIdentity } from "#/lib/identity-context";
+import { getServerUser } from "#/lib/auth";
 
 export const Route = createFileRoute("/")({
   beforeLoad: async ({ location }) => {
-    const user = await getUser();
+    const user = await getServerUser();
     if (!user) {
       throw redirect({
         to: "/login",
