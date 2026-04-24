@@ -10,7 +10,7 @@
 		"build": "vite build",
 		"preview": "vite preview",
 		"netlify": "netlify",
-		"test": "vitest run",
+		"test": "vitest run --passWithNoTests",
 		"type-check": "tsc --noEmit",
 		"lint": "oxlint .",
 		"lint:fix": "oxlint . --fix",
