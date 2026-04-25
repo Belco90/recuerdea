@@ -4,16 +4,16 @@ import { render, renderHook } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 
 import { IdentityProvider, useIdentity } from './identity-context'
-import { navigateTo } from './navigation'
+import { hardNavigate } from './navigation'
 
 vi.mock('./navigation', () => ({
-	navigateTo: vi.fn<() => unknown>(),
+	hardNavigate: vi.fn<() => unknown>(),
 }))
 
 const mockedGetUser = vi.mocked(getUser)
 const mockedLogout = vi.mocked(logout)
 const mockedOnAuthChange = vi.mocked(onAuthChange)
-const mockedNavigateTo = vi.mocked(navigateTo)
+const mockedHardNavigate = vi.mocked(hardNavigate)
 
 type AuthCallback = (event: string, user: User | null) => void
 
@@ -114,7 +114,7 @@ describe('IdentityProvider', () => {
 		await userEvent.click(page.getByRole('button', { name: /log out/i }))
 
 		expect(mockedLogout).toHaveBeenCalledOnce()
-		expect(mockedNavigateTo).toHaveBeenCalledWith('/login')
+		expect(mockedHardNavigate).toHaveBeenCalledWith('/login')
 	})
 
 	it('cleans up so unmount before getUser resolves does not update state', async () => {

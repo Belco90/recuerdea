@@ -9,7 +9,7 @@ import {
 	useState,
 } from 'react'
 
-import { navigateTo } from './navigation'
+import { hardNavigate } from './navigation'
 
 type IdentityValue = {
 	user: User | null
@@ -41,7 +41,7 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
 
 	const logout = useCallback(async () => {
 		await nfLogout()
-		navigateTo('/login')
+		hardNavigate('/login')
 	}, [])
 
 	const value = useMemo(() => ({ user, ready, logout }), [user, ready, logout])
