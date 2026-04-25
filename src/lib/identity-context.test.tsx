@@ -7,7 +7,7 @@ import { IdentityProvider, useIdentity } from './identity-context'
 import { hardNavigate } from './navigation'
 
 vi.mock('./navigation', () => ({
-	hardNavigate: vi.fn<() => unknown>(),
+	hardNavigate: vi.fn<(url: string) => unknown>(),
 }))
 
 const mockedGetUser = vi.mocked(getUser)

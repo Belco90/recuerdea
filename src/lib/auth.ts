@@ -5,12 +5,8 @@ import { getCookie } from '@tanstack/react-start/server'
 type ServerUser = { id: string; email?: string }
 type JwtClaims = { sub: string; email?: string; exp?: number }
 
-/**
- * Decodes a JSON Web Token (JWT) and extracts its claims. Returns null if the token is invalid or expired.
- *
- * Only for local dev purposes, will be stripped in prod.
- */
-export function decodeJwt(token: string): JwtClaims | null {
+// Local dev only; whole `if (DEV)` branch in getServerUser is stripped in prod.
+function decodeJwt(token: string): JwtClaims | null {
 	try {
 		const [, payload] = token.split('.')
 		if (!payload) return null
