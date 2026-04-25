@@ -1,22 +1,8 @@
 import { getUser } from '@netlify/identity'
 import { getCookie } from '@tanstack/react-start/server'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { decodeJwt, getServerUser } from './auth'
-
-vi.mock('@netlify/identity', () => ({
-	getUser: vi.fn<() => unknown>(),
-}))
-
-vi.mock('@tanstack/react-start/server', () => ({
-	getCookie: vi.fn<() => unknown>(),
-}))
-
-vi.mock('@tanstack/react-start', () => ({
-	createServerFn: () => ({
-		handler: <T>(fn: T) => fn,
-	}),
-}))
 
 const mockedGetUser = vi.mocked(getUser)
 const mockedGetCookie = vi.mocked(getCookie)
@@ -30,8 +16,8 @@ function makeJwt(claims: Record<string, unknown>): string {
 describe('decodeJwt', () => {
 	it('returns claims for a valid token with future exp', () => {
 		const exp = Math.floor(Date.now() / 1000) + 3600
-		const token = makeJwt({ sub: 'user-1', email: 'a@b.com', exp })
-		expect(decodeJwt(token)).toEqual({ sub: 'user-1', email: 'a@b.com', exp })
+		const token = makeJwt({ sub: 'user-1', email: 'a@test.com', exp })
+		expect(decodeJwt(token)).toEqual({ sub: 'user-1', email: 'a@test.com', exp })
 	})
 
 	it('returns claims when no exp is present', () => {
@@ -68,20 +54,15 @@ describe('decodeJwt', () => {
 })
 
 describe('getServerUser', () => {
-	beforeEach(() => {
-		mockedGetUser.mockReset()
-		mockedGetCookie.mockReset()
-	})
-
 	afterEach(() => {
 		vi.unstubAllEnvs()
 	})
 
 	it('returns the netlify user when getUser resolves with one', async () => {
-		mockedGetUser.mockResolvedValue({ id: 'nf-1', email: 'me@nf.com' } as never)
+		mockedGetUser.mockResolvedValue({ id: 'nf-1', email: 'me@test.com' } as never)
 		await expect(getServerUser()).resolves.toEqual({
 			id: 'nf-1',
-			email: 'me@nf.com',
+			email: 'me@test.com',
 		})
 	})
 
@@ -95,7 +76,6 @@ describe('getServerUser', () => {
 	it('returns null in dev when no nf_jwt cookie is present', async () => {
 		vi.stubEnv('DEV', true)
 		mockedGetUser.mockResolvedValue(null as never)
-		mockedGetCookie.mockReturnValue(undefined)
 		await expect(getServerUser()).resolves.toBeNull()
 		expect(mockedGetCookie).toHaveBeenCalledWith('nf_jwt')
 	})
@@ -104,10 +84,10 @@ describe('getServerUser', () => {
 		vi.stubEnv('DEV', true)
 		mockedGetUser.mockResolvedValue(null as never)
 		const exp = Math.floor(Date.now() / 1000) + 3600
-		mockedGetCookie.mockReturnValue(makeJwt({ sub: 'jwt-user', email: 'jwt@x.com', exp }))
+		mockedGetCookie.mockReturnValue(makeJwt({ sub: 'jwt-user', email: 'jwt@test.com', exp }))
 		await expect(getServerUser()).resolves.toEqual({
 			id: 'jwt-user',
-			email: 'jwt@x.com',
+			email: 'jwt@test.com',
 		})
 	})
 

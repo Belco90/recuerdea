@@ -1,3 +1,3 @@
-export function getCookie(_name: string): string | undefined {
-	return undefined
-}
+import { vi } from 'vitest'
+
+export const getCookie = vi.fn<(name: string) => string | undefined>()

@@ -9,11 +9,14 @@ export default defineConfig({
 	plugins: [viteReact()],
 	resolve: {
 		alias: {
+			'@netlify/identity': stub('netlify-identity.ts'),
 			'@tanstack/react-start/server': stub('tanstack-react-start-server.ts'),
 			'@tanstack/react-start': stub('tanstack-react-start.ts'),
 		},
 	},
 	test: {
+		clearMocks: true,
+		mockReset: true,
 		browser: {
 			enabled: true,
 			provider: playwright(),
