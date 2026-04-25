@@ -70,7 +70,7 @@ function LoginPage() {
   };
 
   const title =
-    mode === "login" ? "Sign in" : mode === "invite" ? "Accept invitation" : "Set new password";
+    mode === "login" ? "Iniciar sesión" : mode === "invite" ? "Aceptar invitación" : "Establecer nueva contraseña";
 
   return (
     <Box minH="100vh" display="flex" alignItems="center" justifyContent="center" p={4}>
@@ -84,13 +84,13 @@ function LoginPage() {
             <VStack gap={4} align="stretch">
               {mode === "login" && (
                 <Field.Root>
-                  <Field.Label>Email</Field.Label>
+                  <Field.Label>Correo electrónico</Field.Label>
                   <Input type="email" name="email" required autoComplete="email" />
                 </Field.Root>
               )}
 
               <Field.Root>
-                <Field.Label>{mode === "login" ? "Password" : "Choose a password"}</Field.Label>
+                <Field.Label>{mode === "login" ? "Contraseña" : "Elige una contraseña"}</Field.Label>
                 <Input
                   type="password"
                   name="password"

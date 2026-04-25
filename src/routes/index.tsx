@@ -21,12 +21,12 @@ function Home() {
 
   return (
     <Box p={8}>
-      <Heading size="2xl">Welcome back</Heading>
+      <Heading size="2xl">Bienvenido</Heading>
       <Text mt={4} fontSize="lg">
-        Signed in as {user?.email}
+        Conectado como {user?.email}
       </Text>
       <Button mt={6} onClick={() => void logout()}>
-        Sign out
+        Cerrar sesión
       </Button>
     </Box>
   );
