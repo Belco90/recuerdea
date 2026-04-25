@@ -10,7 +10,7 @@ type JwtClaims = { sub: string; email?: string; exp?: number }
  *
  * Only for local dev purposes, will be stripped in prod.
  */
-function decodeJwt(token: string): JwtClaims | null {
+export function decodeJwt(token: string): JwtClaims | null {
 	try {
 		const [, payload] = token.split('.')
 		if (!payload) return null

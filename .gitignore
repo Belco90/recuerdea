@@ -17,3 +17,7 @@ todos.json
 
 # TanStack CLI metadata
 .cta.json
+
+# Vitest browser-mode failure artifacts
+.vitest-attachments
+__screenshots__
