@@ -73,6 +73,7 @@
 			"@parcel/watcher",
 			"esbuild",
 			"lightningcss",
+			"msw",
 			"netlify-cli",
 			"sharp",
 			"simple-git-hooks",
