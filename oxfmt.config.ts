@@ -16,5 +16,12 @@ export default defineConfig({
 			'unknown',
 		],
 	},
-	ignorePatterns: ['.claude', 'dist', 'node_modules', 'pnpm-lock.yaml', '.gitignore'],
+	ignorePatterns: [
+		'.claude',
+		'dist',
+		'node_modules',
+		'pnpm-lock.yaml',
+		'.gitignore',
+		'routeTree.gen.ts',
+	],
 })
