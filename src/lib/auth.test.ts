@@ -30,8 +30,37 @@ describe('getServerUser', () => {
 		await expect(getServerUser()).resolves.toEqual({
 			id: 'nf-1',
 			email: 'me@test.com',
+			isAdmin: false,
 		})
 		expect(jsonParseSpy).not.toHaveBeenCalled()
+	})
+
+	it('marks the user as admin when getUser returns role: "admin"', async () => {
+		mockedGetUser.mockResolvedValue({ id: 'nf-2', email: 'a@test.com', role: 'admin' } as never)
+		await expect(getServerUser()).resolves.toEqual({
+			id: 'nf-2',
+			email: 'a@test.com',
+			isAdmin: true,
+		})
+	})
+
+	it('marks the user as admin when getUser returns roles array containing "admin"', async () => {
+		mockedGetUser.mockResolvedValue({
+			id: 'nf-3',
+			email: 'b@test.com',
+			roles: ['editor', 'admin'],
+		} as never)
+		await expect(getServerUser()).resolves.toMatchObject({ id: 'nf-3', isAdmin: true })
+	})
+
+	it('marks the user as non-admin when role/roles do not include "admin"', async () => {
+		mockedGetUser.mockResolvedValue({
+			id: 'nf-4',
+			email: 'c@test.com',
+			role: 'editor',
+			roles: ['viewer'],
+		} as never)
+		await expect(getServerUser()).resolves.toMatchObject({ id: 'nf-4', isAdmin: false })
 	})
 
 	it('skips the dev fallback (no cookie read, no JWT parse) when not in dev', async () => {
@@ -58,15 +87,37 @@ describe('getServerUser', () => {
 		await expect(getServerUser()).resolves.toEqual({
 			id: 'jwt-user',
 			email: 'jwt@test.com',
+			isAdmin: false,
 		})
 		expect(jsonParseSpy).toHaveBeenCalled()
+	})
+
+	it('marks the dev jwt user as admin when app_metadata.roles includes "admin"', async () => {
+		vi.stubEnv('DEV', true)
+		mockedGetUser.mockResolvedValue(null as never)
+		mockedGetCookie.mockReturnValue(
+			makeJwt({
+				sub: 'jwt-admin',
+				email: 'admin@test.com',
+				app_metadata: { roles: ['admin'] },
+			}),
+		)
+		await expect(getServerUser()).resolves.toEqual({
+			id: 'jwt-admin',
+			email: 'admin@test.com',
+			isAdmin: true,
+		})
 	})
 
 	it('returns claims with no email when the jwt has no email', async () => {
 		vi.stubEnv('DEV', true)
 		mockedGetUser.mockResolvedValue(null as never)
 		mockedGetCookie.mockReturnValue(makeJwt({ sub: 'no-email' }))
-		await expect(getServerUser()).resolves.toEqual({ id: 'no-email', email: undefined })
+		await expect(getServerUser()).resolves.toEqual({
+			id: 'no-email',
+			email: undefined,
+			isAdmin: false,
+		})
 	})
 
 	it('returns null in dev when nf_jwt is expired', async () => {
@@ -110,6 +161,6 @@ describe('getServerUser', () => {
 		expect(cookie).toMatch(/[-_]/)
 		expect(cookie).not.toMatch(/=/)
 		mockedGetCookie.mockReturnValue(cookie)
-		await expect(getServerUser()).resolves.toEqual({ id: '>>>???', email: 'a' })
+		await expect(getServerUser()).resolves.toEqual({ id: '>>>???', email: 'a', isAdmin: false })
 	})
 })
