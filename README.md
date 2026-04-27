@@ -6,7 +6,8 @@ To run this application:
 
 ```bash
 pnpm install
-pnpm dev
+pnpm netlify link # (if you haven't already linked your Netlify site)
+pnpm netlify dev
 ```
 
 # Building For Production
