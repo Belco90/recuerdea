@@ -35,6 +35,9 @@ importers:
       lucide-react:
         specifier: ^0.545.0
         version: 0.545.0(react@19.2.5)
+      pcloud-kit:
+        specifier: ^0.1.2
+        version: 0.1.2
       react:
         specifier: ^19.2.0
         version: 19.2.5
@@ -5306,6 +5309,10 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
+
+  pcloud-kit@0.1.2:
+    resolution: {integrity: sha512-7I9woKReq5RwA1TjerJuqSSxX2zhIrXlIonREZJHl57f7Ud82nQuWxRv51zGmUbtUj1aWePujIPTOMnGy09Aiw==}
+    engines: {node: '>=22.18.0'}
 
   pend@1.2.0:
     resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
@@ -12882,6 +12889,8 @@ snapshots:
   pathe@1.1.2: {}
 
   pathe@2.0.3: {}
+
+  pcloud-kit@0.1.2: {}
 
   pend@1.2.0: {}
 
