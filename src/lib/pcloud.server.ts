@@ -58,7 +58,6 @@ async function fetchVideoStreamUrl(client: Client, fileid: number): Promise<stri
 }
 
 async function safeExtractCaptureDate(client: Client, file: FileMetadata): Promise<Date | null> {
-	const fileLabel = { fileid: file.fileid, name: file.name, contenttype: file.contenttype }
 	try {
 		const downloadUrl = await client.getfilelink(file.fileid)
 		const exifCapture = isVideo(file)
@@ -68,20 +67,10 @@ async function safeExtractCaptureDate(client: Client, file: FileMetadata): Promi
 
 		const filenameCapture = parseFilenameCaptureDate(file.name)
 		if (filenameCapture) {
-			// eslint-disable-next-line no-console
-			console.log('[memories] capture date from filename', {
-				...fileLabel,
-				captureIso: filenameCapture.toISOString(),
-			})
 			return filenameCapture
 		}
-
-		// eslint-disable-next-line no-console
-		console.warn('[memories] no capture date', fileLabel)
 		return null
-	} catch (err) {
-		// eslint-disable-next-line no-console
-		console.warn('[memories] extractor threw', { ...fileLabel, error: String(err) })
+	} catch {
 		return null
 	}
 }
