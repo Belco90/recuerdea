@@ -3,6 +3,9 @@ import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 import { createClient } from 'pcloud-kit'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { CaptureCacheStore, CaptureCacheValue } from './capture-cache'
+
+import { getCaptureCacheStore } from './capture-cache.server'
 import { extractCaptureDate } from './exif'
 import { fetchTodayMemories } from './pcloud.server'
 import { extractVideoCaptureDate } from './video-meta'
@@ -10,10 +13,23 @@ import { extractVideoCaptureDate } from './video-meta'
 vi.mock('pcloud-kit')
 vi.mock('./exif')
 vi.mock('./video-meta')
+vi.mock('./capture-cache.server')
 
 const mockedCreateClient = vi.mocked(createClient)
 const mockedExtractCaptureDate = vi.mocked(extractCaptureDate)
 const mockedExtractVideoCaptureDate = vi.mocked(extractVideoCaptureDate)
+const mockedGetCaptureCacheStore = vi.mocked(getCaptureCacheStore)
+
+function makeFakeStore() {
+	const data = new Map<number, CaptureCacheValue>()
+	const get = vi.fn<CaptureCacheStore['get']>(async (fileid) => data.get(fileid))
+	const set = vi.fn<CaptureCacheStore['set']>(async (fileid, value) => {
+		data.set(fileid, value)
+	})
+	return { get, set, data } satisfies CaptureCacheStore & { data: typeof data }
+}
+
+let fakeStore: ReturnType<typeof makeFakeStore>
 
 function makeFile(
 	overrides: Partial<FileMetadata> & Pick<FileMetadata, 'fileid' | 'name' | 'contenttype'>,
@@ -78,6 +94,8 @@ const pdfE = makeFile({ fileid: 500, name: 'e.pdf', contenttype: 'application/pd
 beforeEach(() => {
 	process.env.PCLOUD_TOKEN = 'test-token'
 	process.env.PCLOUD_MEMORIES_FOLDER_ID = '42'
+	fakeStore = makeFakeStore()
+	mockedGetCaptureCacheStore.mockReturnValue(fakeStore)
 })
 
 afterEach(() => {
@@ -325,5 +343,93 @@ describe('fetchTodayMemories', () => {
 		await expect(fetchTodayMemories({ month: 4, day: 27 })).rejects.toThrow(
 			'PCLOUD_MEMORIES_FOLDER_ID must be an integer',
 		)
+	})
+
+	describe('capture-date cache', () => {
+		it('hits cache and skips getfilelink + extractor when fileid+hash match', async () => {
+			const file = makeFile({
+				fileid: 100,
+				name: 'a.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'abc',
+			})
+			fakeStore.data.set(100, { hash: 'abc', captureDate: '2020-04-27T10:00:00.000Z' })
+			const client = fakeClient({
+				listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([file])),
+			})
+			mockedCreateClient.mockReturnValue(client)
+
+			const result = await fetchTodayMemories({ month: 4, day: 27 })
+
+			expect(result).toHaveLength(1)
+			expect(result[0]?.name).toBe('a.jpg')
+			expect(client.getfilelink).not.toHaveBeenCalled()
+			expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
+			expect(mockedExtractVideoCaptureDate).not.toHaveBeenCalled()
+			expect(fakeStore.set).not.toHaveBeenCalled()
+		})
+
+		it('runs extractor on miss and writes the result back', async () => {
+			const file = makeFile({
+				fileid: 100,
+				name: 'a.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'abc',
+			})
+			const client = fakeClient({
+				listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([file])),
+			})
+			mockedCreateClient.mockReturnValue(client)
+			mockedExtractCaptureDate.mockResolvedValue(new Date('2020-04-27T10:00:00.000Z'))
+
+			await fetchTodayMemories({ month: 4, day: 27 })
+
+			expect(mockedExtractCaptureDate).toHaveBeenCalledTimes(1)
+			expect(fakeStore.set).toHaveBeenCalledWith(100, {
+				hash: 'abc',
+				captureDate: '2020-04-27T10:00:00.000Z',
+			})
+		})
+
+		it('treats hash mismatch as miss and overwrites the stale entry', async () => {
+			const file = makeFile({
+				fileid: 100,
+				name: 'a.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'new-hash',
+			})
+			fakeStore.data.set(100, { hash: 'old-hash', captureDate: '2018-01-01T00:00:00.000Z' })
+			const client = fakeClient({
+				listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([file])),
+			})
+			mockedCreateClient.mockReturnValue(client)
+			mockedExtractCaptureDate.mockResolvedValue(new Date('2021-04-27T10:00:00.000Z'))
+
+			await fetchTodayMemories({ month: 4, day: 27 })
+
+			expect(mockedExtractCaptureDate).toHaveBeenCalledTimes(1)
+			expect(fakeStore.set).toHaveBeenCalledWith(100, {
+				hash: 'new-hash',
+				captureDate: '2021-04-27T10:00:00.000Z',
+			})
+		})
+
+		it('caches a negative result so undated files are not re-extracted', async () => {
+			const file = makeFile({
+				fileid: 700,
+				name: 'IMG_4567.HEIC',
+				contenttype: 'image/heic',
+				hash: 'abc',
+			})
+			const client = fakeClient({
+				listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([file])),
+			})
+			mockedCreateClient.mockReturnValue(client)
+			mockedExtractCaptureDate.mockResolvedValue(null)
+
+			await fetchTodayMemories({ month: 4, day: 27 })
+
+			expect(fakeStore.set).toHaveBeenCalledWith(700, { hash: 'abc', captureDate: null })
+		})
 	})
 })

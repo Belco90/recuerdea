@@ -2,6 +2,10 @@ import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 
 import { createClient } from 'pcloud-kit'
 
+import type { CaptureCache } from './capture-cache'
+
+import { createCaptureCache } from './capture-cache'
+import { getCaptureCacheStore } from './capture-cache.server'
 import { extractCaptureDate } from './exif'
 import { parseFilenameCaptureDate } from './filename-date'
 import { extractVideoCaptureDate } from './video-meta'
@@ -59,22 +63,26 @@ async function fetchVideoStreamUrl(client: Client, fileid: number): Promise<stri
 	return client.getfilelink(fileid)
 }
 
-async function safeExtractCaptureDate(client: Client, file: FileMetadata): Promise<Date | null> {
+async function safeExtractCaptureDate(
+	client: Client,
+	file: FileMetadata,
+	cache: CaptureCache,
+): Promise<Date | null> {
+	const cached = await cache.lookup(file.fileid, file.hash)
+	if (cached !== undefined) return cached
+
+	let result: Date | null = null
 	try {
 		const downloadUrl = await client.getfilelink(file.fileid)
 		const exifCapture = isVideo(file)
 			? await extractVideoCaptureDate(downloadUrl)
 			: await extractCaptureDate(downloadUrl)
-		if (exifCapture) return exifCapture
-
-		const filenameCapture = parseFilenameCaptureDate(file.name)
-		if (filenameCapture) {
-			return filenameCapture
-		}
-		return null
+		result = exifCapture ?? parseFilenameCaptureDate(file.name) ?? null
 	} catch {
-		return null
+		result = null
 	}
+	await cache.remember(file.fileid, file.hash, result)
+	return result
 }
 
 async function buildMemoryItem(
@@ -107,32 +115,19 @@ export async function fetchTodayMemories(today: {
 }): Promise<MemoryItem[]> {
 	const { token, folderId } = getEnvConfig()
 	const client = createClient({ token, type: 'pcloud' })
+	const cache = createCaptureCache(getCaptureCacheStore())
 	const files = await listMediaFiles(client, folderId)
 
 	type Match = { file: FileMetadata; capture: Date }
 	const candidates = await Promise.all(
 		files.map(async (file): Promise<Match | null> => {
-			const capture = await safeExtractCaptureDate(client, file)
+			const capture = await safeExtractCaptureDate(client, file, cache)
 			if (!capture) return null
 			const matched = capture.getMonth() + 1 === today.month && capture.getDate() === today.day
-			// eslint-disable-next-line no-console
-			console.log('[memories] file', {
-				fileid: file.fileid,
-				name: file.name,
-				contenttype: file.contenttype,
-				captureIso: capture.toISOString(),
-				matched,
-			})
 			return matched ? { file, capture } : null
 		}),
 	)
 	const matches = candidates.filter((m): m is Match => m !== null)
-	// eslint-disable-next-line no-console
-	console.log('[memories] summary', {
-		today,
-		totalFiles: files.length,
-		matched: matches.length,
-	})
 
 	// Oldest year first; tiebreak by fileid asc. Deterministic per (folder, day).
 	matches.sort(

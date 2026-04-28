@@ -16,14 +16,14 @@ See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
 ## Phase 3 — Wire cache into the server pipeline
 
-- [ ] **T3** — `src/lib/pcloud.server.ts` + `src/lib/pcloud.server.test.ts`. `safeExtractCaptureDate` takes a cache, looks up first, only calls `getfilelink` + extractors on miss/mismatch, writes back the result (including `null`). Drop the two `[memories]` `console.log` blocks (`pcloud.server.ts:118–125`, `:130–135`). New tests: hit (no extractor calls), miss (extractor + remember), hash mismatch (extractor + overwrite).
+- [x] **T3** — `src/lib/pcloud.server.ts` + `src/lib/pcloud.server.test.ts`. `safeExtractCaptureDate` takes a cache, looks up first, only calls `getfilelink` + extractors on miss/mismatch, writes back the result (including `null`). Drop the two `[memories]` `console.log` blocks (`pcloud.server.ts:118–125`, `:130–135`). New tests: hit (no extractor calls), miss (extractor + remember), hash mismatch (extractor + overwrite).
 
 ## Checkpoint 1 — Server layer green
 
-- [ ] `pnpm test` (full suite)
-- [ ] `pnpm type-check`
-- [ ] `pnpm lint`
-- [ ] `pnpm format:check`
+- [x] `pnpm test` (full suite)
+- [x] `pnpm type-check`
+- [x] `pnpm lint`
+- [x] `pnpm format:check`
 
 ## Phase 4 — End-to-end verification
 
