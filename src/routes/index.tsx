@@ -88,10 +88,11 @@ function MemoryView({ item }: { item: MemoryItem }) {
 				<Box maxW="md">
 					<video
 						controls
+						preload="metadata"
 						poster={item.posterUrl}
-						src={item.url}
 						style={{ width: '100%', display: 'block' }}
 					>
+						<source src={item.url} type={item.mimeType} />
 						<track kind="captions" />
 					</video>
 				</Box>

@@ -34,7 +34,15 @@ describe('extractCaptureDate', () => {
 		await expect(extractCaptureDate('https://x.test/a.jpg')).resolves.toEqual(expected)
 	})
 
-	it('falls back to DateTime when DateTimeOriginal is absent', async () => {
+	it('falls back to CreateDate when DateTimeOriginal is absent', async () => {
+		mockOkResponse()
+		const expected = new Date('2021-07-08T12:00:00Z')
+		mockedParse.mockResolvedValue({ CreateDate: expected })
+
+		await expect(extractCaptureDate('https://x.test/a.jpg')).resolves.toEqual(expected)
+	})
+
+	it('falls back to DateTime when DateTimeOriginal and CreateDate are absent', async () => {
 		mockOkResponse()
 		const expected = new Date('2020-01-15T09:00:00Z')
 		mockedParse.mockResolvedValue({ DateTime: expected })
@@ -42,13 +50,27 @@ describe('extractCaptureDate', () => {
 		await expect(extractCaptureDate('https://x.test/a.jpg')).resolves.toEqual(expected)
 	})
 
-	it('prefers DateTimeOriginal over DateTime', async () => {
+	it('prefers DateTimeOriginal over CreateDate over DateTime', async () => {
 		mockOkResponse()
 		const original = new Date('2019-04-27T14:30:00Z')
+		const created = new Date('2022-06-01T00:00:00Z')
 		const modified = new Date('2024-01-01T00:00:00Z')
-		mockedParse.mockResolvedValue({ DateTimeOriginal: original, DateTime: modified })
+		mockedParse.mockResolvedValue({
+			DateTimeOriginal: original,
+			CreateDate: created,
+			DateTime: modified,
+		})
 
 		await expect(extractCaptureDate('https://x.test/a.jpg')).resolves.toEqual(original)
+	})
+
+	it('prefers CreateDate over DateTime when DateTimeOriginal is absent', async () => {
+		mockOkResponse()
+		const created = new Date('2022-06-01T00:00:00Z')
+		const modified = new Date('2024-01-01T00:00:00Z')
+		mockedParse.mockResolvedValue({ CreateDate: created, DateTime: modified })
+
+		await expect(extractCaptureDate('https://x.test/a.jpg')).resolves.toEqual(created)
 	})
 
 	it('sends a Range header for the EXIF segment', async () => {

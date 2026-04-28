@@ -1,14 +1,21 @@
 import { type Client, type FileMetadata, type FolderMetadata, createClient } from 'pcloud-kit'
 
 import { extractCaptureDate } from './exif'
+import { parseFilenameCaptureDate } from './filename-date'
 import { extractVideoCaptureDate } from './video-meta'
 
 export type MemoryItem =
 	| { kind: 'image'; url: string; name: string; captureDate: string }
-	| { kind: 'video'; url: string; posterUrl: string; name: string; captureDate: string }
+	| {
+			kind: 'video'
+			url: string
+			mimeType: string
+			posterUrl: string
+			name: string
+			captureDate: string
+	  }
 
 type GetThumbLinkResponse = { hosts: string[]; path: string }
-type GetVideoLinkResponse = { hosts: string[]; path: string }
 
 function getEnvConfig(): { token: string; folderId: number } {
 	const token = process.env.PCLOUD_TOKEN
@@ -47,17 +54,34 @@ async function fetchThumbnailUrl(client: Client, fileid: number): Promise<string
 }
 
 async function fetchVideoStreamUrl(client: Client, fileid: number): Promise<string> {
-	const link = await client.call<GetVideoLinkResponse>('getvideolink', { fileid })
-	return `https://${link.hosts[0]}${link.path}`
+	return client.getfilelink(fileid)
 }
 
 async function safeExtractCaptureDate(client: Client, file: FileMetadata): Promise<Date | null> {
+	const fileLabel = { fileid: file.fileid, name: file.name, contenttype: file.contenttype }
 	try {
 		const downloadUrl = await client.getfilelink(file.fileid)
-		return isVideo(file)
+		const exifCapture = isVideo(file)
 			? await extractVideoCaptureDate(downloadUrl)
 			: await extractCaptureDate(downloadUrl)
-	} catch {
+		if (exifCapture) return exifCapture
+
+		const filenameCapture = parseFilenameCaptureDate(file.name)
+		if (filenameCapture) {
+			// eslint-disable-next-line no-console
+			console.log('[memories] capture date from filename', {
+				...fileLabel,
+				captureIso: filenameCapture.toISOString(),
+			})
+			return filenameCapture
+		}
+
+		// eslint-disable-next-line no-console
+		console.warn('[memories] no capture date', fileLabel)
+		return null
+	} catch (err) {
+		// eslint-disable-next-line no-console
+		console.warn('[memories] extractor threw', { ...fileLabel, error: String(err) })
 		return null
 	}
 }
@@ -73,7 +97,14 @@ async function buildMemoryItem(
 			fetchVideoStreamUrl(client, file.fileid),
 			fetchThumbnailUrl(client, file.fileid),
 		])
-		return { kind: 'video', url, posterUrl, name: file.name, captureDate }
+		return {
+			kind: 'video',
+			url,
+			mimeType: file.contenttype,
+			posterUrl,
+			name: file.name,
+			captureDate,
+		}
 	}
 	const url = await fetchThumbnailUrl(client, file.fileid)
 	return { kind: 'image', url, name: file.name, captureDate }
@@ -92,12 +123,25 @@ export async function fetchTodayMemories(today: {
 		files.map(async (file): Promise<Match | null> => {
 			const capture = await safeExtractCaptureDate(client, file)
 			if (!capture) return null
-			if (capture.getMonth() + 1 !== today.month) return null
-			if (capture.getDate() !== today.day) return null
-			return { file, capture }
+			const matched = capture.getMonth() + 1 === today.month && capture.getDate() === today.day
+			// eslint-disable-next-line no-console
+			console.log('[memories] file', {
+				fileid: file.fileid,
+				name: file.name,
+				contenttype: file.contenttype,
+				captureIso: capture.toISOString(),
+				matched,
+			})
+			return matched ? { file, capture } : null
 		}),
 	)
 	const matches = candidates.filter((m): m is Match => m !== null)
+	// eslint-disable-next-line no-console
+	console.log('[memories] summary', {
+		today,
+		totalFiles: files.length,
+		matched: matches.length,
+	})
 
 	// Oldest year first; tiebreak by fileid asc. Deterministic per (folder, day).
 	matches.sort(

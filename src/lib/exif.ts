@@ -8,7 +8,11 @@ const { parse } = exifr
 
 const RANGE_HEADER = 'bytes=0-65535'
 
-type ExifTags = { DateTimeOriginal?: unknown; DateTime?: unknown }
+type ExifTags = {
+	DateTimeOriginal?: unknown
+	CreateDate?: unknown
+	DateTime?: unknown
+}
 
 export async function extractCaptureDate(downloadUrl: string): Promise<Date | null> {
 	const res = await fetch(downloadUrl, { headers: { Range: RANGE_HEADER } })
@@ -17,12 +21,14 @@ export async function extractCaptureDate(downloadUrl: string): Promise<Date | nu
 
 	let tags: ExifTags | undefined
 	try {
-		tags = (await parse(buffer, ['DateTimeOriginal', 'DateTime'])) as ExifTags | undefined
+		tags = (await parse(buffer, ['DateTimeOriginal', 'CreateDate', 'DateTime'])) as
+			| ExifTags
+			| undefined
 	} catch {
 		return null
 	}
 
-	const candidate = tags?.DateTimeOriginal ?? tags?.DateTime
+	const candidate = tags?.DateTimeOriginal ?? tags?.CreateDate ?? tags?.DateTime
 	if (!(candidate instanceof Date) || Number.isNaN(candidate.getTime())) return null
 	return candidate
 }
