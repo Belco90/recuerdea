@@ -1,54 +1,39 @@
-# Recuerdea v1 — Task List
+# Recuerdea v2 — Task List
 
 See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
-**Status: v1 complete.** Shipped in commit `fba8d66 Implement today's memory view`. Browser-verified by user 2026-04-27.
+## Prerequisites (resolved)
 
-## Prerequisites (blocking)
-
-- [x] **P0** — Approve EXIF library. → `exifr@^7.1.3` installed.
+- [x] **P0** — MP4/MOV parser approach. **APPROVED: hand-rolled `mvhd` reader** (no new dep). T1 unblocked.
 
 ## Phase 1 — Logic layer
 
-- [x] **T1** — `src/lib/exif.ts` + `src/lib/exif.test.ts` (`extractCaptureDate`). 11 tests passing.
-- [x] **T2** — `src/lib/pcloud.server.ts`: `fetchTodayMemoryImage`, `fetchRandomMemoryImage`; `MemoryImage.captureDate: string | null`; `fetchFirstMemoryImage` removed. 13 tests passing.
+- [ ] **T1** — `src/lib/video-meta.ts` + `src/lib/video-meta.test.ts` (`extractVideoCaptureDate`). Handles `moov`-at-start and `moov`-at-end layouts.
+- [ ] **T2** — `src/lib/pcloud.server.ts`: introduce `MemoryItem` discriminated union, add `fetchTodayMemories`, broaden filter to `isMediaFile`, dispatch capture-date by kind, build per-kind URLs (`getvideolink` + `getthumblink` for video). Remove `MemoryImage`, `fetchTodayMemoryImage`, `fetchRandomMemoryImage`, `isImageFile`. Update tests.
 
 ## Phase 2 — Server contract
 
-- [x] **T3** — `src/lib/pcloud.ts`: `getTodayMemoryImage` + `getRandomMemoryImage` shipped.
+- [ ] **T3** — `src/lib/pcloud.ts`: rename `getTodayMemoryImage` → `getTodayMemories` returning `MemoryItem[]`; remove `getRandomMemoryImage`. Admin override flow unchanged.
 
 ## Checkpoint 1 — Server layer
 
-- [x] `pnpm type-check` clean
-- [x] `pnpm test` green
-- [x] Real pCloud folder smoke-test (deferred to Checkpoint 2 browser run)
+- [ ] `pnpm test` green for `video-meta.test.ts` and `pcloud.server.test.ts`
+- [ ] `pnpm lint` clean for changed `src/lib/` files
+- [ ] (`pnpm type-check` will still flag `index.tsx` until T4 — that's expected.)
 
 ## Phase 3 — UI layer
 
-- [x] **T4** — `src/routes/index.tsx`: today / empty / random states + random fallback button.
+- [ ] **T4** — `src/routes/index.tsx`: loader returns array, render `Stack` of `MemoryView` items dispatching by `kind` (image vs video). Drop random state, random button, "Show another" button. Empty state stays (no button).
 
 ## Checkpoint 2 — End-to-end
 
-- [x] `pnpm test` green (44 tests)
-- [x] `pnpm type-check` clean
-- [x] `pnpm lint` clean
-- [x] `pnpm format:check` clean
-- [x] Manual browser walkthrough — user-verified in `pnpm dev`
-- [x] `git status` clean after commit `fba8d66`
-
-## Follow-up work shipped after v1
-
-- [x] **SSR interop fix** — `exifr` CJS-at-runtime broke SSR; default-import + module-scope destructure with targeted lint suppression. Commit pending review of the broader date-override branch.
-- [x] **Admin-only date override** (side request, not in original plan) — `auth.server.ts` + `?date=YYYY-MM-DD` search param + Chakra `DatePicker`. Server-side admin re-check. Uncommitted in working tree.
-
-## Currently uncommitted (working tree)
-
-```
-M src/lib/auth.test.ts
-M src/lib/auth.ts
-M src/lib/pcloud.ts
-M src/routes/index.tsx
-?? src/lib/auth.server.ts
-```
-
-These are the admin-override changes plus the `exifr` SSR fix.
+- [ ] `pnpm test` green (full suite)
+- [ ] `pnpm type-check` clean
+- [ ] `pnpm lint` clean
+- [ ] `pnpm format:check` clean
+- [ ] Manual browser walkthrough:
+  - [ ] A day with multiple image+video matches renders in oldest-year-first order
+  - [ ] Videos play via native controls with poster
+  - [ ] An empty day renders the friendly empty state with no random button
+  - [ ] Admin DatePicker still drives the override
+- [ ] `git status` shows only the expected files modified
