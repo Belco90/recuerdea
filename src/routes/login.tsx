@@ -1,8 +1,10 @@
+import type { SubmitEventHandler } from 'react'
+
 import { getServerUser } from '#/lib/auth'
 import { Box, Button, Field, Heading, Input, Text, VStack } from '@chakra-ui/react'
 import { acceptInvite, handleAuthCallback, login, updateUser } from '@netlify/identity'
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { type SubmitEventHandler, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export const Route = createFileRoute('/login')({
 	beforeLoad: async () => {

@@ -1,4 +1,6 @@
-import { type Client, type FileMetadata, type FolderMetadata, createClient } from 'pcloud-kit'
+import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
+
+import { createClient } from 'pcloud-kit'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { extractCaptureDate } from './exif'
@@ -81,7 +83,6 @@ beforeEach(() => {
 afterEach(() => {
 	process.env.PCLOUD_TOKEN = ''
 	process.env.PCLOUD_MEMORIES_FOLDER_ID = ''
-	vi.clearAllMocks()
 })
 
 describe('fetchTodayMemories', () => {

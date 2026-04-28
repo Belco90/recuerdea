@@ -1,4 +1,6 @@
-import { type User, getUser, logout, onAuthChange } from '@netlify/identity'
+import type { User } from '@netlify/identity'
+
+import { getUser, logout, onAuthChange } from '@netlify/identity'
 import { describe, expect, it, vi } from 'vitest'
 import { render, renderHook } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'

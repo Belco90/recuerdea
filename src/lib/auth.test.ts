@@ -1,6 +1,8 @@
+import type { MockInstance } from 'vitest'
+
 import { getUser } from '@netlify/identity'
 import { getCookie } from '@tanstack/react-start/server'
-import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getServerUser } from './auth'
 

@@ -1,13 +1,8 @@
-import { type User, getUser, logout as nfLogout, onAuthChange } from '@netlify/identity'
-import {
-	createContext,
-	type ReactNode,
-	useCallback,
-	useContext,
-	useEffect,
-	useMemo,
-	useState,
-} from 'react'
+import type { User } from '@netlify/identity'
+import type { ReactNode } from 'react'
+
+import { getUser, logout as nfLogout, onAuthChange } from '@netlify/identity'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 import { hardNavigate } from './navigation'
 

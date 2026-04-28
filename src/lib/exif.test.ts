@@ -19,7 +19,6 @@ describe('extractCaptureDate', () => {
 
 	afterEach(() => {
 		fetchSpy.mockRestore()
-		vi.clearAllMocks()
 	})
 
 	function mockOkResponse(): void {

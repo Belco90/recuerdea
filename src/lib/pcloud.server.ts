@@ -1,4 +1,6 @@
-import { type Client, type FileMetadata, type FolderMetadata, createClient } from 'pcloud-kit'
+import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
+
+import { createClient } from 'pcloud-kit'
 
 import { extractCaptureDate } from './exif'
 import { parseFilenameCaptureDate } from './filename-date'

@@ -77,7 +77,6 @@ describe('extractVideoCaptureDate', () => {
 
 	afterEach(() => {
 		fetchSpy.mockRestore()
-		vi.clearAllMocks()
 	})
 
 	it('parses moov-at-start with v0 mvhd', async () => {
