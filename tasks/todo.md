@@ -1,43 +1,45 @@
-# Recuerdea v2 — Task List
+# Recuerdea v3 — Task List
 
 See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
-## Prerequisites (resolved)
+## Prerequisites
 
-- [x] **P0** — MP4/MOV parser approach. **APPROVED: hand-rolled `mvhd` reader** (no new dep). T1 unblocked.
+- [ ] **P0** — Add `@netlify/blobs` to `dependencies` (per `SPEC.md §7` "ask first" boundary). Approved direction; explicit dep ack still required before T1.
 
-## Phase 1 — Logic layer
+## Phase 1 — Cache abstraction
 
-- [x] **T1** — `src/lib/video-meta.ts` + `src/lib/video-meta.test.ts` (`extractVideoCaptureDate`). Handles `moov`-at-start and `moov`-at-end layouts. _(commit `ba37a98`)_
-- [x] **T2** — `src/lib/pcloud.server.ts`: introduce `MemoryItem` discriminated union, add `fetchTodayMemories`, broaden filter to `isMediaFile`, dispatch capture-date by kind, build per-kind URLs. Remove `MemoryImage`, `fetchTodayMemoryImage`, `fetchRandomMemoryImage`, `isImageFile`. Update tests. _(commit `71dc6ae`; video uses `getfilelink` per plan's documented fallback)_
+- [ ] **T1** — `src/lib/capture-cache.ts` + `src/lib/capture-cache.test.ts`. Pure `createCaptureCache(store)` with `lookup` / `remember`. Hash mismatch returns `undefined` (treated as miss). `null` capture dates round-trip correctly.
 
-## Phase 2 — Server contract
+## Phase 2 — Netlify Blobs adapter
 
-- [x] **T3** — `src/lib/pcloud.ts`: rename `getTodayMemoryImage` → `getTodayMemories` returning `MemoryItem[]`; remove `getRandomMemoryImage`. Admin override flow unchanged. _(commit `71dc6ae`)_
+- [ ] **T2** — `src/lib/capture-cache.server.ts` + `src/lib/capture-cache.server.test.ts`. Memoized `getCaptureCacheStore()`. Try `getStore({ name: 'capture-date-cache', consistency: 'eventual' })`; on failure fall back to a no-op store and `console.warn` once. Live-store branch verified manually in T4.
 
-## Checkpoint 1 — Server layer
+## Phase 3 — Wire cache into the server pipeline
 
-- [x] `pnpm test` green for `video-meta.test.ts` and `pcloud.server.test.ts`
-- [x] `pnpm lint` clean for changed `src/lib/` files
-- [x] (`pnpm type-check` will still flag `index.tsx` until T4 — that's expected.)
+- [ ] **T3** — `src/lib/pcloud.server.ts` + `src/lib/pcloud.server.test.ts`. `safeExtractCaptureDate` takes a cache, looks up first, only calls `getfilelink` + extractors on miss/mismatch, writes back the result (including `null`). Drop the two `[memories]` `console.log` blocks (`pcloud.server.ts:118–125`, `:130–135`). New tests: hit (no extractor calls), miss (extractor + remember), hash mismatch (extractor + overwrite).
 
-## Phase 3 — UI layer
+## Checkpoint 1 — Server layer green
 
-- [x] **T4** — `src/routes/index.tsx`: loader returns array, render `Stack` of `MemoryView` items dispatching by `kind` (image vs video). Drop random state, random button, "Show another" button. Empty state stays (no button). _(commit `71dc6ae`, follow-ups `b0a8cd0` `404fe77` `a3c1b23`)_
+- [ ] `pnpm test` (full suite)
+- [ ] `pnpm type-check`
+- [ ] `pnpm lint`
+- [ ] `pnpm format:check`
 
-## Checkpoint 2 — End-to-end
+## Phase 4 — End-to-end verification
 
-- [x] `pnpm test` green (full suite)
-- [x] `pnpm type-check` clean
-- [x] `pnpm lint` clean
-- [x] `pnpm format:check` clean
-- [x] Manual browser walkthrough:
-  - [x] A day with multiple image+video matches renders in oldest-year-first order
-  - [x] Videos play via native controls with poster
-  - [x] An empty day renders the friendly empty state with no random button
-  - [x] Admin DatePicker still drives the override
-- [x] `git status` shows only the expected files modified
+- [ ] **T4** — Run under `pnpm netlify dev` (port 8888, Blobs runtime injected):
+  - [ ] Cold visit: latency similar to v2.
+  - [ ] Warm reload: visibly faster; far fewer `getfilelink` calls in DevTools network tab.
+  - [ ] Empty state, video playback, admin `?date=YYYY-MM-DD` override all unchanged.
+  - [ ] Rename a file in pCloud (no content change) → cache still hits (hash unchanged).
+  - [ ] No `[memories] ...` console noise in dev.
 
-## Post-merge cleanup (optional)
+## Checkpoint 2 — Prod smoke
 
-- [x] Remove leftover `console.log` instrumentation in `src/lib/pcloud.server.ts:118` and `:130` (commit `42d5750` removed others; these two slipped through).
+- [ ] Deploy to Netlify (auto on merge).
+- [ ] Hit prod `/`, hard reload, then reload again — second reload visibly faster.
+- [ ] Netlify dashboard → Blobs → `capture-date-cache` store shows entries.
+
+## Spec sync (post-implementation)
+
+- [ ] `SPEC.md` — add §10 "v2 → v3 changes summary" mirroring §9; update §8.3 from "agreed direction" to "shipped for capture-date cache."

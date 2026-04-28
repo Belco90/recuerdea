@@ -1,312 +1,299 @@
-# Recuerdea v2 Implementation Plan — Multi-media + video support
+# Recuerdea v3 Implementation Plan — Capture-date cache via Netlify Blobs
 
 ## Context
 
-`SPEC.md` v2 (commit `6ae4e88`) expands scope from "single image" to "every photo and video taken on today's month/day in any past year." Three concrete shifts vs. v1:
+Recuerdea v2 (shipped) calls `client.listfolder` and then, **for every media file in the folder on every page load**, runs:
 
-1. **Multi-item return** — server returns `MemoryItem[]`, not a single image.
-2. **Videos as first-class** — videos parse `creation_time` from MP4/MOV `mvhd` atoms; render via `<video controls>` with a poster.
-3. **Random fallback retired** — empty state is just text; no "show random" button.
+1. `client.getfilelink(fileid)` — 1 pCloud API call per file
+2. `extractCaptureDate(url)` (image) or `extractVideoCaptureDate(url)` (video) — 1 HTTP range-fetch per image, 1–2 for videos with `moov` at the end of the file
 
-Sort rule (oldest year first, fileid tiebreak), admin date override, EXIF for images, and route auth all carry over from v1 unchanged.
+That's the dominant latency on the home route and it doesn't get faster as the archive grows — it gets linearly worse. The capture date for a given file's bytes is _eternal_: the only thing that invalidates it is the file content itself changing.
 
-This plan slices the work vertically: each task delivers a complete, testable layer the next task builds on. SPEC §7 boundaries are honored — no stack swaps, secrets stay behind `createServerFn`, all `src/lib/` logic colocated with Vitest tests.
+`SPEC.md §8.3` already nominates **Netlify Blobs** as the future metadata store. v3 cashes that in for a single, narrow win: cache `(fileid, hash) → captureDate | null` so the home route stops range-fetching unchanged files on every visit.
 
-## Prerequisite (resolved)
+**Out of scope for v3** (do not let this plan grow):
 
-### P0: MP4/MOV metadata parser approach — **APPROVED: hand-rolled `mvhd` reader**
+- Caching pCloud listing (cheap, and we _need_ it to detect new files).
+- Caching `getfilelink` / `getthumblink` / `getvideolink` URLs — pCloud signs them with short expiry; cached values would 403.
+- Any UI change. The route renders the same `MemoryItem[]` shape.
+- Tagging / captioning / blob-stored user metadata — `SPEC.md §1` non-goal, future work.
+- Cache GC / pruning of deleted files — stale blobs are harmless; revisit if it becomes a problem.
 
-User selected hand-rolled over `mp4box` (~80KB) and `mediainfo.js` (~3MB WASM). Rationale carried into the implementation:
+## Prerequisites
 
-- The `mvhd` atom is 100 bytes inside the `moov` box. Pulling `creation_time` (32-bit seconds since 1904-01-01 in v0; 64-bit in v1) is a tight, well-specified parse.
-- Works for both MP4 and MOV — both use ISO Base Media File Format with the same atom layout.
-- Reuses the existing Range-fetch primitive in `src/lib/exif.ts:14`.
-- Zero new top-level deps → no `package.json` / `pnpm-lock.yaml` churn.
+### P0: New top-level dep `@netlify/blobs` — **needs explicit ack**
 
-T1 may begin immediately.
+`SPEC.md §7` ("ask first") flags new top-level deps. The dep is `@netlify/blobs` (Netlify's own SDK, ~small, no transitive concerns, the canonical way to use Blobs from a Netlify-hosted server function). Picking it is implied by the v3 direction, but listing it here so the boundary check is explicit before T1 begins.
 
-## Dependency Graph
+Add to `dependencies` (not `devDependencies` — it runs in the server function bundle).
+
+## Architecture decisions
+
+### What gets cached
+
+Exactly one thing: **the final result of `safeExtractCaptureDate`** for a given file. That includes the EXIF/mvhd parse _and_ the `parseFilenameCaptureDate` fallback, so a cache hit means zero `getfilelink` calls and zero range fetches for that file.
+
+### Key + value shape
 
 ```
-P0: parser-approach approval
-    │
-    ▼
-T1: src/lib/video-meta.ts (extractVideoCaptureDate)
-    + src/lib/video-meta.test.ts
-    │
-    ▼
-T2: src/lib/pcloud.server.ts
-    (MemoryImage → MemoryItem, fetchTodayMemoryImage → fetchTodayMemories,
-     drop fetchRandomMemoryImage, broaden isImageFile → isMediaFile,
-     per-kind capture-date dispatch)
-    + update src/lib/pcloud.server.test.ts
-    │
-    ▼
-T3: src/lib/pcloud.ts
-    (getTodayMemoryImage → getTodayMemories returning array,
-     drop getRandomMemoryImage)
-    │
-    ▼
-[CHECKPOINT 1: server layer returns the array shape]
-    │
-    ▼
-T4: src/routes/index.tsx
-    (loader → array, render vertical feed, MemoryView dispatches kind,
-     drop random state + button)
-    │
-    ▼
-[CHECKPOINT 2: end-to-end via pnpm dev]
+key:   capture-date/v1/${fileid}
+value: { hash: string, captureDate: string | null }   // ISO string or explicit null (negative cache)
 ```
 
-## Architecture Decisions
+- `hash` is `FileMetadata.hash` (pcloud-kit types it as `string`). Cache hit requires both `fileid` match (key) and `hash` match (value).
+- `null` is cached on purpose — files we tried and failed to date should not be re-fetched on every visit.
+- The `v1/` prefix lets us bulk-invalidate by bumping to `v2/` if the extraction logic (EXIF tags considered, filename parser, mvhd reader) changes in a way that could yield different results for the same bytes.
 
-### Type shape
+### Local-dev fallback
 
-```ts
-export type MemoryItem =
-	| { kind: 'image'; url: string; name: string; captureDate: string }
-	| { kind: 'video'; url: string; posterUrl: string; name: string; captureDate: string }
+`@netlify/blobs` requires a Netlify runtime context (auto-injected by `netlify dev` and prod). Plain `pnpm dev` (Vite, port 3000) has no context and `getStore()` will throw on first access. Two-mode store:
+
+- **Live store** when `getStore` resolves (prod, `netlify dev`).
+- **No-op store** otherwise: `get` always returns `undefined` (miss), `set` is a no-op, both still return Promises so the call sites stay async.
+
+Detection happens once at module load (lazy `getStore` inside a try/catch wrapped in a memoized factory). `pnpm dev` keeps working with no setup; full caching kicks in under `netlify dev` and prod.
+
+### Per-file flow after v3
+
+```
+listfolder
+  └─ for each media file (parallel):
+       └─ cache.get(fileid, hash)
+             ├─ hit  → use cached captureDate (no API call, no range fetch)
+             └─ miss → getfilelink → extractor → fallback parse
+                        └─ cache.set(fileid, hash, result)
 ```
 
-Discriminated union by `kind`. `captureDate` is required (SPEC §2: items without a parseable date are skipped, so v1's `string | null` collapses to `string`). Video gets an additional `posterUrl` for the `<video poster>` attribute.
+Match check, sort, and per-kind URL build (which still need fresh `getthumblink` / `getfilelink` per visit) are unchanged.
 
-### Per-kind capture-date dispatch (in `fetchTodayMemories`)
+### Concurrency / write contention
 
-For each file in the folder:
+`Promise.all` over many files can fire many `cache.set` writes in parallel. Netlify Blobs handles concurrent writes safely (last-writer-wins), and we never read the same key inside the same request twice, so no coordination is needed. No locking, no debouncing.
 
-- **Image** (`contenttype.startsWith('image/')`): `client.getfilelink(fileid)` → `extractCaptureDate(url)` (existing).
-- **Video** (`contenttype.startsWith('video/')`): `client.getfilelink(fileid)` → `extractVideoCaptureDate(url)` (new).
-- Returns `null` → skip the file.
+## Dependency graph
 
-The fan-out stays parallel (`Promise.all`), like v1.
-
-### Display URL dispatch
-
-After the file qualifies for "today":
-
-- **Image**: `getthumblink` → `https://${host}${path}` (existing).
-- **Video**: `getthumblink` → poster URL; `getvideolink` → streaming URL.
-  - `getvideolink` isn't typed in `pcloud-kit` — call via `client.call<VideoLinkResponse>('getvideolink', { fileid })`. Response shape verified during T2.
-  - Fallback if `getvideolink`'s response is awkward: use `getfilelink(fileid)` (returns a direct file URL) for the video `src`. Browsers handle MP4/MOV natively. Document the choice in code.
-
-### `mvhd` parsing strategy (T1 internals)
-
-The `mvhd` atom lives inside the `moov` box. The `moov` box can be:
-
-1. **At the start of the file** (`moov` first, `mdat` after) — common for streaming-optimized files. First 64KB will contain `moov`.
-2. **At the end of the file** (`mdat` first, `moov` last) — common for camera-recorded files (the recorder writes `mdat` as it captures and finalizes `moov` last).
-
-Algorithm in `extractVideoCaptureDate(url)`:
-
-1. Range-fetch bytes `0-65535`.
-2. Walk top-level atoms (each atom = 4-byte size + 4-byte type + body). If `moov` found, dive in for `mvhd`, extract `creation_time` (offset 4 in mvhd v0, offset 8 in v1), convert from 1904 epoch to JS `Date`.
-3. If no `moov` found in the first 64KB but `mdat` was, do a HEAD request for `Content-Length`, then Range-fetch the last 1MB, and re-walk.
-4. If still no `moov`, return `null`.
-
-Edge cases handled by tests: 64-bit atom sizes (`size === 1` → next 8 bytes are the actual size), version-1 mvhd (64-bit `creation_time`), invalid bytes → return `null` not throw.
+```
+P0: dep ack (@netlify/blobs)
+    │
+    ▼
+T1: src/lib/capture-cache.ts          (pure cache abstraction + types)
+    + src/lib/capture-cache.test.ts   (in-memory fake store)
+    │
+    ▼
+T2: src/lib/capture-cache.server.ts   (Netlify-Blobs-backed store + no-op fallback)
+    + src/lib/capture-cache.server.test.ts (only the no-op-on-error branch is unit-testable)
+    │
+    ▼
+T3: src/lib/pcloud.server.ts          (wire cache into safeExtractCaptureDate)
+    + src/lib/pcloud.server.test.ts   (assert hit skips network; miss writes; hash mismatch invalidates)
+    │
+    ▼
+[CHECKPOINT 1: server tests + typecheck + lint]
+    │
+    ▼
+T4: Manual e2e under `netlify dev` — confirm 2nd visit is dramatically faster
+    + drop the v2 [memories] console.log lines now that we have a real signal
+    │
+    ▼
+[CHECKPOINT 2: prod deploy + manual smoke]
+```
 
 ## Tasks
 
-### T1: Video capture-date extraction
+### T1 — Cache abstraction (pure)
 
 **Files:**
 
-- NEW `src/lib/video-meta.ts`
-- NEW `src/lib/video-meta.test.ts`
+- NEW `src/lib/capture-cache.ts`
+- NEW `src/lib/capture-cache.test.ts`
 
 **API:**
 
 ```ts
-export async function extractVideoCaptureDate(downloadUrl: string): Promise<Date | null>
+export type CaptureCacheValue = { hash: string; captureDate: string | null }
+
+export type CaptureCacheStore = {
+	get(fileid: number): Promise<CaptureCacheValue | undefined>
+	set(fileid: number, value: CaptureCacheValue): Promise<void>
+}
+
+export function createCaptureCache(store: CaptureCacheStore): {
+	lookup(fileid: number, hash: string): Promise<Date | null | undefined> // undefined = miss
+	remember(fileid: number, hash: string, captureDate: Date | null): Promise<void>
+}
 ```
 
 **Behavior:**
 
-- Range-fetch bytes 0-65535. Walk top-level atoms looking for `moov` (Box ↗ `mvhd` Box).
-- If `moov` not found at start, HEAD the URL, then Range-fetch last ~1MB and walk again.
-- Parse `mvhd.creation_time` (v0: 32-bit, v1: 64-bit) — seconds since 1904-01-01 → JS `Date`.
-- Return `null` on parse error, missing `moov`, or invalid date.
-- Throws on network errors (caller decides).
+- `lookup` reads, returns `undefined` on miss _or_ hash mismatch (treat mismatch as miss so caller refetches), returns the parsed `Date` or `null` on hit.
+- `remember` writes `{ hash, captureDate: capture?.toISOString() ?? null }`.
+- Pure module — receives the store, never imports `@netlify/blobs`.
 
 **Acceptance criteria:**
 
-- Given a fixture buffer with `moov` first containing v0 `mvhd` with `creation_time` for `2019-04-27T14:30:00Z`, returns matching `Date`.
-- Given a fixture with `moov` at the end (mdat-first layout), returns the same date after the second range fetch.
-- Given a fixture with no `mvhd`, returns `null`.
-- Given an HTTP 4xx/5xx, returns `null` (does not throw).
+- Hit returns the right `Date` instance (round-trips ISO string).
+- Hit on `null` returns `null` (not `undefined`).
+- Hash mismatch returns `undefined`.
+- Miss returns `undefined`.
+- `remember(... null)` writes `captureDate: null`.
 
-**Verification:**
-
-- `pnpm test src/lib/video-meta.test.ts` — all assertions pass.
-- Mock `fetch` in tests; never hit the network.
+**Verification:** `pnpm test src/lib/capture-cache.test.ts` green; tests use a `Map`-backed fake store.
 
 ---
 
-### T2: pCloud server-side multi-item fetch
+### T2 — Netlify-Blobs-backed store + no-op fallback
+
+**Files:**
+
+- NEW `src/lib/capture-cache.server.ts`
+- NEW `src/lib/capture-cache.server.test.ts`
+
+**API:**
+
+```ts
+export function getCaptureCacheStore(): CaptureCacheStore
+```
+
+**Behavior:**
+
+- Memoized factory. First call: try `getStore({ name: 'capture-date-cache', consistency: 'eventual' })` from `@netlify/blobs`. Wrap in try/catch.
+- On success: return a real store — keys formatted `v1/${fileid}`, values via `getJSON` / `setJSON`.
+- On failure (no Netlify runtime in `pnpm dev`): return a no-op store (`get` → `undefined`, `set` → resolved void). Log once at `console.warn` so the dev knows caching is off.
+- Server-only — uses `@netlify/blobs`. Import only from `*.server.ts` callers, per `SPEC.md §7` "never import server-only modules from client code."
+
+**Acceptance criteria:**
+
+- Factory returns the same store instance on repeated calls (memoized).
+- The no-op branch is exercised by a test that forces `getStore` to throw and asserts `set` is silently a no-op and `get` returns `undefined`.
+
+**Verification:** `pnpm test src/lib/capture-cache.server.test.ts` green. Live-store branch is _not_ unit-tested (no Netlify runtime in Vitest); covered by T4's manual run.
+
+---
+
+### T3 — Wire cache into `pcloud.server.ts`
 
 **Files:**
 
 - MODIFY `src/lib/pcloud.server.ts`
 - MODIFY `src/lib/pcloud.server.test.ts`
 
-**API:**
+**Change:** `safeExtractCaptureDate(client, file)` becomes `safeExtractCaptureDate(client, file, cache)`. New flow:
 
 ```ts
-export type MemoryItem =
-	| { kind: 'image'; url: string; name: string; captureDate: string }
-	| { kind: 'video'; url: string; posterUrl: string; name: string; captureDate: string }
+async function safeExtractCaptureDate(
+	client: Client,
+	file: FileMetadata,
+	cache: ReturnType<typeof createCaptureCache>,
+): Promise<Date | null> {
+	const cached = await cache.lookup(file.fileid, file.hash)
+	if (cached !== undefined) return cached
 
-export async function fetchTodayMemories(today: {
-	month: number
-	day: number
-}): Promise<MemoryItem[]>
+	let result: Date | null = null
+	try {
+		const url = await client.getfilelink(file.fileid)
+		const exif = isVideo(file)
+			? await extractVideoCaptureDate(url)
+			: await extractCaptureDate(url)
+		result = exif ?? parseFilenameCaptureDate(file.name) ?? null
+	} catch {
+		result = null
+	}
+	await cache.remember(file.fileid, file.hash, result)
+	return result
+}
 ```
 
-**Behavior:**
+`fetchTodayMemories` instantiates the cache once at the top:
 
-1. Read env (existing helper `getEnvConfig`).
-2. `client.listfolder(folderId)` → filter via new `isMediaFile` predicate (image/_ OR video/_).
-3. For each media file, dispatch capture-date extraction by content type:
-   - image → `extractCaptureDate(url)`
-   - video → `extractVideoCaptureDate(url)`
-   - Skip if `null` or month/day mismatch.
-4. Sort matches: `captureDate.getFullYear()` asc, then `fileid` asc.
-5. For each match, build a `MemoryItem`:
-   - image → `getthumblink` → `{ kind: 'image', url, name, captureDate: iso }`
-   - video → `getvideolink` (streaming URL) + `getthumblink` (poster) → `{ kind: 'video', url, posterUrl, name, captureDate: iso }`
-6. Return the array (possibly empty).
+```ts
+const cache = createCaptureCache(getCaptureCacheStore())
+```
 
-**Cleanup:** Remove `fetchRandomMemoryImage`, `MemoryImage`, `fetchTodayMemoryImage` (this task supersedes them). Remove `isImageFile`; replace with `isMediaFile`.
+and threads it into the `Promise.all` map. No other behavior changes; per-kind URL build for matched items is untouched.
+
+**Cleanup in this same task:** the two `console.log('[memories] ...')` blocks at `src/lib/pcloud.server.ts:118–125` and `:130–135` go away. They were debugging breadcrumbs from v2; once cache hit/miss is observable through latency they have no audience. (`a3c1b23` already removed siblings; these two were left for the v2 cache-gap investigation.)
 
 **Acceptance criteria:**
 
-- Mocked client with one matching image, one matching video, one non-matching image → returns 2 items in correct order, with correct `kind` and URLs.
-- Items without a parseable capture date are skipped.
-- Empty folder → returns `[]`.
-- Two matches with same year → ordered by `fileid` asc.
-- Existing env-validation tests still pass.
+- Existing `pcloud.server.test.ts` still passes once tests pass an injected cache (use the in-memory fake from T1 or a tiny inline one).
+- New test: hit case — cache pre-populated, neither `getfilelink` nor extractor mocks are called.
+- New test: miss case — extractors called once, then `cache.remember` called with the right `(fileid, hash, captureDate)`.
+- New test: hash mismatch — pre-populated cache with stale `hash`, extractors run, cache overwritten.
 
 **Verification:**
 
-- `pnpm test src/lib/pcloud.server.test.ts` passes.
-- All `pcloud-kit` calls mocked; `extractCaptureDate` and `extractVideoCaptureDate` mocked.
-
----
-
-### T3: Server function contract
-
-**Files:**
-
-- MODIFY `src/lib/pcloud.ts`
-
-**API:**
-
-```ts
-export const getTodayMemories = createServerFn({ method: 'GET' })
-  .inputValidator(...)  // unchanged
-  .handler(async ({ data }): Promise<MemoryItem[]> => {
-    const { fetchTodayMemories } = await import('./pcloud.server')
-    let target = realToday()
-    if (data) {
-      const { loadServerUser } = await import('./auth.server')
-      const user = await loadServerUser()
-      if (user?.isAdmin) target = data
-    }
-    return fetchTodayMemories(target)
-  })
-```
-
-**Cleanup:** Remove `getRandomMemoryImage` and the `MemoryImage` re-export.
-
-**Acceptance criteria:**
-
-- `pnpm type-check` clean.
-- Admin override flow unchanged: validator parses `{ month, day }`, handler re-checks `isAdmin`.
-- No `getRandomMemoryImage` callers remain (verified by typecheck after T4).
+- `pnpm test src/lib/pcloud.server.test.ts` green.
+- `pnpm type-check` clean across the repo.
+- `pnpm lint` clean for changed files.
 
 ---
 
 ### CHECKPOINT 1 — Server layer green
 
-Before touching the route:
-
-- `pnpm type-check` clean (will still flag `index.tsx` calling old names — that's T4's territory).
-- `pnpm test` green for `pcloud.server.test.ts` and `video-meta.test.ts`.
-- `pnpm lint` clean for the new/changed `src/lib/` files.
+- `pnpm test` (full suite).
+- `pnpm type-check`.
+- `pnpm lint`.
+- `pnpm format:check`.
 
 ---
 
-### T4: Route — vertical feed of memories
+### T4 — Manual e2e under `netlify dev`
 
-**Files:**
+Not a code task — a verification gate. Done in this order:
 
-- MODIFY `src/routes/index.tsx`
-
-**Loader:**
-
-```ts
-loader: async ({ deps }) => ({ memories: await getTodayMemories({ data: override }) }),
-```
-
-**Render:**
-
-- `Route.useLoaderData()` returns `{ memories: MemoryItem[] }`.
-- Wrap the feed in a `Stack` (`gap={8}`).
-- Each item renders via `MemoryView` (refactored):
-  - `kind === 'image'` → `<Image src={item.url} alt={item.name} />` (existing).
-  - `kind === 'video'` → `<chakra.video controls poster={item.posterUrl} src={item.url} />` (or a styled `<video>`).
-- Capture date rendered below media (existing pattern).
-- Empty state (`memories.length === 0`): show "No memories on this day." (or with admin override caption). **No fallback button.**
-- Drop `randomMemory` state, `isLoadingRandom` state, `handleShowRandom`, "Show me a random memory" button, and "Show another random memory" button.
-- Admin `DatePicker` stays as-is.
-- Sign-out button stays.
+1. `pnpm install` (picks up `@netlify/blobs`).
+2. `pnpm netlify dev` (launches on port 8888 with Blobs runtime injected).
+3. Sign in, hit `/`. First visit: similar latency to v2 (cache cold).
+4. Reload `/`. Second visit: should be visibly faster — most files hit the cache, only newly-added ones run through the extractor.
+5. Browser DevTools network tab: confirm there are far fewer `getfilelink` calls on the second visit (one per matched file for the URL build, but none for capture-date extraction on cached files).
+6. Admin date override (`?date=YYYY-MM-DD`) still works, hits the same cache (cache is keyed on file, not on day).
 
 **Acceptance criteria:**
 
-- Authenticated visit to `/`:
-  - Folder has matching media → vertical feed renders all matches in order, mixed images and videos play/display correctly.
-  - Folder has no matches → friendly empty state, no random button visible.
-- Admin date override (`?date=YYYY-MM-DD`) re-fetches the array for that month/day.
-- Non-admin visiting `/?date=...` silently falls back to real today (server-side gate from v1 unchanged).
-- Sign-out works.
-- `pnpm type-check`, `pnpm test`, `pnpm lint`, `pnpm format:check` all clean.
-
-**Verification:**
-
-- `pnpm dev` and visit `/` after signing in:
-  - On a day with multiple matches (use the admin DatePicker to navigate), confirm feed order and that videos play.
-  - On a day with no matches, confirm empty state with no random button.
-- Browser DevTools network tab: confirm `getvideolink` returns a usable streaming URL.
+- Second visit is observably faster (eyeball or network tab; no perf budgets in CI).
+- No regression in feed correctness, video playback, empty state, admin override.
+- No `[memories] ...` console noise in dev (cleanup from T3 landed).
 
 ---
 
-### CHECKPOINT 2 — End-to-end
+### CHECKPOINT 2 — Prod smoke
 
-Final gate before declaring v2 complete:
+After merge + Netlify deploy:
 
-- All tests green: `pnpm test`.
-- Typecheck clean: `pnpm type-check`.
-- Lint + format clean.
-- Browser walkthrough of feed rendering, video playback, empty state, admin override.
-- No new top-level deps beyond the approved P0 parser approach.
-- `git status` shows only the expected files.
+- Visit prod home. Hard reload, then reload again. Second reload is visibly faster.
+- Netlify dashboard → Blobs → `capture-date-cache` store has entries.
 
-## Out of scope for v2 (do not touch)
+## Risks and mitigations
 
-- Tagging UI / metadata writes / gallery view / search — `SPEC §1` non-goals.
-- Netlify Blobs caching — `SPEC §8.3` deferred.
-- Video transcoding, thumbnail generation, or any pCloud-side mutation.
-- Re-introducing the random fallback — `SPEC §7` "never do."
-- Any change to `oxlint.config.ts`, `oxfmt.config.ts`, `vite.config.ts`, `tsconfig.json`, or `.github/workflows/ci.yml` — `SPEC §7` "ask first."
+| Risk | Impact | Mitigation |
+|---|---|---|
+| `@netlify/blobs` API drift between minor versions | Low | Pin via lockfile (`pnpm-lock.yaml`); the surface we use (`getStore`, `getJSON`, `setJSON`) is stable. |
+| `getStore()` throws at runtime in prod (mis-config) | Medium — page would crash | Same try/catch as the dev fallback wraps `getStore()` itself; on failure we degrade to no-op cache and log a warn. Page still renders. |
+| Stale negative cache after extractor improvement | Low | `v1/` key prefix; bump to `v2/` when the extractor's null/non-null decision boundary changes. |
+| Cache write storm on first visit to a large folder | Low | Netlify Blobs handles concurrent writes; each `set` is independent, last-writer-wins on a per-key basis. |
+| File renamed but content unchanged → wasted re-parse | Negligible | pCloud's `hash` is content-derived, so rename alone doesn't change `hash` — cache still hits. (Verify in T4 by renaming a known file in pCloud and reloading.) |
+
+## Open questions
+
+None blocking. P0 (dep ack) is the only gate before T1.
 
 ## File touch list
 
-| File                              | Action                                      |
-| --------------------------------- | ------------------------------------------- |
-| `src/lib/video-meta.ts`           | NEW (T1)                                    |
-| `src/lib/video-meta.test.ts`      | NEW (T1)                                    |
-| `src/lib/pcloud.server.ts`        | MODIFY (T2)                                 |
-| `src/lib/pcloud.server.test.ts`   | MODIFY (T2)                                 |
-| `src/lib/pcloud.ts`               | MODIFY (T3)                                 |
-| `src/routes/index.tsx`            | MODIFY (T4)                                 |
-| `package.json` / `pnpm-lock.yaml` | UNTOUCHED — hand-rolled parser, no new deps |
+| File | Action |
+|---|---|
+| `src/lib/capture-cache.ts` | NEW (T1) |
+| `src/lib/capture-cache.test.ts` | NEW (T1) |
+| `src/lib/capture-cache.server.ts` | NEW (T2) |
+| `src/lib/capture-cache.server.test.ts` | NEW (T2) |
+| `src/lib/pcloud.server.ts` | MODIFY (T3) — add cache wiring; drop `[memories]` logs |
+| `src/lib/pcloud.server.test.ts` | MODIFY (T3) — pass injected cache; new hit/miss/mismatch tests |
+| `package.json` / `pnpm-lock.yaml` | MODIFY (P0) — add `@netlify/blobs` to `dependencies` |
+| `SPEC.md` | MODIFY (small) — add a §10 "v3 changes" entry mirroring §9; update §8.3 from "agreed direction" to "shipped for capture-date cache" |
+
+## Out of scope (do not touch)
+
+- `oxlint.config.ts`, `oxfmt.config.ts`, `tsconfig.json`, `vite.config.ts`, `.github/workflows/ci.yml` — `SPEC.md §7` "ask first."
+- Any UI change in `src/routes/index.tsx`. `MemoryItem[]` shape is unchanged.
+- Cache eviction / GC of files no longer in the folder.
+- pCloud listing cache.
+- Anything tagging/captioning related — separate v4 spec when that arrives.
