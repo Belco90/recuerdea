@@ -36,10 +36,10 @@ See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
 ## Checkpoint 2 — Prod smoke
 
-- [ ] Deploy to Netlify (auto on merge).
-- [ ] Hit prod `/`, hard reload, then reload again — second reload visibly faster.
-- [ ] Netlify dashboard → Blobs → `capture-date-cache` store shows entries.
+- [x] Deploy to Netlify (auto on merge).
+- [x] Hit prod `/`, hard reload, then reload again — second reload visibly faster.
+- [x] Netlify dashboard → Blobs → `capture-date-cache` store shows entries.
 
 ## Spec sync (post-implementation)
 
-- [ ] `SPEC.md` — add §10 "v2 → v3 changes summary" mirroring §9; update §8.3 from "agreed direction" to "shipped for capture-date cache."
+- [x] `SPEC.md` — add §10 "v2 → v3 changes summary" mirroring §9; update §8.3 from "agreed direction" to "shipped for capture-date cache."

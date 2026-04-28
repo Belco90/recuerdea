@@ -58,6 +58,8 @@ src/
     pcloud.server.ts# pCloud SDK init (process.env secrets), fetch/sort logic
     exif.ts         # EXIF capture-date extraction (images)
     video-meta.ts   # MP4/MOV creation_time extraction (videos) — added in v2
+    capture-cache.ts        # Pure (fileid, hash) → captureDate cache abstraction — added in v3
+    capture-cache.server.ts # Netlify-Blobs-backed CaptureCacheStore + no-op fallback — added in v3
     identity-context.tsx
     navigation.ts   # hardNavigate (post-logout cookie refresh)
   router.tsx        # getRouter() factory
@@ -117,7 +119,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 
 1. **MP4/MOV metadata parser library** — needs approval per the "ask first" boundary. Candidates: `mp4box` (mature, ~80KB, MP4+MOV), hand-rolled `mvhd` atom reader (no dep, ~50 lines, supports both MP4 and MOV since both use ISO Base Media File Format), `mediainfo.js` (heaviest, ~3MB WASM). Recommendation will be made when planning the v2 implementation.
 2. **Range-fetch strategy for video EXIF** — the `mvhd` atom may sit at the start (`moov` first) or end (`mdat` first) of an MP4. The implementation must handle both, likely via a small two-step fetch (start, then tail if `moov` not found).
-3. **Future metadata store** — Netlify Blobs remains the agreed direction when tagging/upload features arrive in a later version. No schema work in v2.
+3. **Future metadata store** — Netlify Blobs is shipped for the capture-date cache (v3): `(fileid, hash) → captureDate | null` keyed under `v1/`, `consistency: 'eventual'`, with a no-op fallback when the Blobs runtime isn't reachable (plain `pnpm dev`). Tagging/upload metadata stores remain future work.
 
 ## 9. v1 → v2 changes summary
 
@@ -128,3 +130,12 @@ For readers diffing this spec against v1:
 - §4 Project Structure: adds `auth.server.ts` (already shipped) and `video-meta.ts` (planned).
 - §7 Boundaries: "ask first" adds the MP4/MOV parser; "never do" adds re-introducing the random fallback.
 - §8 Open Questions: replaces "EXIF library" (resolved → exifr) and "pick determinism" (resolved → oldest-year-first) with "MP4/MOV parser library" + "Range-fetch strategy for video EXIF".
+
+## 10. v2 → v3 changes summary
+
+For readers diffing this spec against v2:
+
+- §1 Objective and §2 Acceptance Criteria: unchanged. v3 is purely a latency/cost win — same memories, same sort, same UI shape.
+- §4 Project Structure: adds `capture-cache.ts` (pure abstraction over a `CaptureCacheStore`) and `capture-cache.server.ts` (Netlify-Blobs-backed store, memoized factory, no-op fallback when the Blobs runtime isn't reachable).
+- §7 Boundaries: `@netlify/blobs` landed under "ask first" as a `dependencies` (server-bundle) entry.
+- §8 Open Questions: §8.3 Future metadata store flips from "agreed direction" to "shipped for the capture-date cache." Capture-date extraction now consults the cache before calling `getfilelink` + EXIF/mvhd; cache hits skip both the API call and the range-fetch. pCloud's content-derived `hash` is part of the cache key, so renames don't invalidate; negative results (`null`) are cached too.
