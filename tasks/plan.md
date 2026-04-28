@@ -191,9 +191,7 @@ async function safeExtractCaptureDate(
 	let result: Date | null = null
 	try {
 		const url = await client.getfilelink(file.fileid)
-		const exif = isVideo(file)
-			? await extractVideoCaptureDate(url)
-			: await extractCaptureDate(url)
+		const exif = isVideo(file) ? await extractVideoCaptureDate(url) : await extractCaptureDate(url)
 		result = exif ?? parseFilenameCaptureDate(file.name) ?? null
 	} catch {
 		result = null
@@ -265,13 +263,13 @@ After merge + Netlify deploy:
 
 ## Risks and mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| `@netlify/blobs` API drift between minor versions | Low | Pin via lockfile (`pnpm-lock.yaml`); the surface we use (`getStore`, `getJSON`, `setJSON`) is stable. |
-| `getStore()` throws at runtime in prod (mis-config) | Medium — page would crash | Same try/catch as the dev fallback wraps `getStore()` itself; on failure we degrade to no-op cache and log a warn. Page still renders. |
-| Stale negative cache after extractor improvement | Low | `v1/` key prefix; bump to `v2/` when the extractor's null/non-null decision boundary changes. |
-| Cache write storm on first visit to a large folder | Low | Netlify Blobs handles concurrent writes; each `set` is independent, last-writer-wins on a per-key basis. |
-| File renamed but content unchanged → wasted re-parse | Negligible | pCloud's `hash` is content-derived, so rename alone doesn't change `hash` — cache still hits. (Verify in T4 by renaming a known file in pCloud and reloading.) |
+| Risk                                                 | Impact                    | Mitigation                                                                                                                                                     |
+| ---------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@netlify/blobs` API drift between minor versions    | Low                       | Pin via lockfile (`pnpm-lock.yaml`); the surface we use (`getStore`, `getJSON`, `setJSON`) is stable.                                                          |
+| `getStore()` throws at runtime in prod (mis-config)  | Medium — page would crash | Same try/catch as the dev fallback wraps `getStore()` itself; on failure we degrade to no-op cache and log a warn. Page still renders.                         |
+| Stale negative cache after extractor improvement     | Low                       | `v1/` key prefix; bump to `v2/` when the extractor's null/non-null decision boundary changes.                                                                  |
+| Cache write storm on first visit to a large folder   | Low                       | Netlify Blobs handles concurrent writes; each `set` is independent, last-writer-wins on a per-key basis.                                                       |
+| File renamed but content unchanged → wasted re-parse | Negligible                | pCloud's `hash` is content-derived, so rename alone doesn't change `hash` — cache still hits. (Verify in T4 by renaming a known file in pCloud and reloading.) |
 
 ## Open questions
 
@@ -279,16 +277,16 @@ None blocking. P0 (dep ack) is the only gate before T1.
 
 ## File touch list
 
-| File | Action |
-|---|---|
-| `src/lib/capture-cache.ts` | NEW (T1) |
-| `src/lib/capture-cache.test.ts` | NEW (T1) |
-| `src/lib/capture-cache.server.ts` | NEW (T2) |
-| `src/lib/capture-cache.server.test.ts` | NEW (T2) |
-| `src/lib/pcloud.server.ts` | MODIFY (T3) — add cache wiring; drop `[memories]` logs |
-| `src/lib/pcloud.server.test.ts` | MODIFY (T3) — pass injected cache; new hit/miss/mismatch tests |
-| `package.json` / `pnpm-lock.yaml` | MODIFY (P0) — add `@netlify/blobs` to `dependencies` |
-| `SPEC.md` | MODIFY (small) — add a §10 "v3 changes" entry mirroring §9; update §8.3 from "agreed direction" to "shipped for capture-date cache" |
+| File                                   | Action                                                                                                                              |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lib/capture-cache.ts`             | NEW (T1)                                                                                                                            |
+| `src/lib/capture-cache.test.ts`        | NEW (T1)                                                                                                                            |
+| `src/lib/capture-cache.server.ts`      | NEW (T2)                                                                                                                            |
+| `src/lib/capture-cache.server.test.ts` | NEW (T2)                                                                                                                            |
+| `src/lib/pcloud.server.ts`             | MODIFY (T3) — add cache wiring; drop `[memories]` logs                                                                              |
+| `src/lib/pcloud.server.test.ts`        | MODIFY (T3) — pass injected cache; new hit/miss/mismatch tests                                                                      |
+| `package.json` / `pnpm-lock.yaml`      | MODIFY (P0) — add `@netlify/blobs` to `dependencies`                                                                                |
+| `SPEC.md`                              | MODIFY (small) — add a §10 "v3 changes" entry mirroring §9; update §8.3 from "agreed direction" to "shipped for capture-date cache" |
 
 ## Out of scope (do not touch)
 
