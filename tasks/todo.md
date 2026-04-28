@@ -27,12 +27,12 @@ See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
 ## Phase 4 — End-to-end verification
 
-- [ ] **T4** — Run under `pnpm netlify dev` (port 8888, Blobs runtime injected):
-  - [ ] Cold visit: latency similar to v2.
-  - [ ] Warm reload: visibly faster; far fewer `getfilelink` calls in DevTools network tab.
-  - [ ] Empty state, video playback, admin `?date=YYYY-MM-DD` override all unchanged.
-  - [ ] Rename a file in pCloud (no content change) → cache still hits (hash unchanged).
-  - [ ] No `[memories] ...` console noise in dev.
+- [x] **T4** — Run under `pnpm netlify dev` (port 8888, Blobs runtime injected):
+  - [x] Cold visit: latency similar to v2.
+  - [x] Warm reload: visibly faster; far fewer `getfilelink` calls in DevTools network tab.
+  - [x] Empty state, video playback, admin `?date=YYYY-MM-DD` override all unchanged.
+  - [x] Rename a file in pCloud (no content change) → cache still hits (hash unchanged).
+  - [x] No `[memories] ...` console noise in dev.
 
 ## Checkpoint 2 — Prod smoke
 
