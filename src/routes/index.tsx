@@ -1,8 +1,8 @@
-import type { MemoryImage } from '#/lib/pcloud.server'
+import type { MemoryItem } from '#/lib/pcloud.server'
 
 import { getServerUser } from '#/lib/auth'
 import { useIdentity } from '#/lib/identity-context'
-import { getRandomMemoryImage, getTodayMemoryImage } from '#/lib/pcloud'
+import { getTodayMemories } from '#/lib/pcloud'
 import {
 	Box,
 	Button,
@@ -19,7 +19,6 @@ import {
 } from '@chakra-ui/react'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { Calendar } from 'lucide-react'
-import { useState } from 'react'
 
 const captureDateFormatter = new Intl.DateTimeFormat(undefined, {
 	year: 'numeric',
@@ -67,7 +66,7 @@ export const Route = createFileRoute('/')({
 	loaderDeps: ({ search }) => ({ date: search.date }),
 	loader: async ({ deps }) => {
 		const override = deps.date ? isoToOverride(deps.date) : null
-		return { memory: await getTodayMemoryImage({ data: override }) }
+		return { memories: await getTodayMemories({ data: override }) }
 	},
 	component: Home,
 })
@@ -79,15 +78,29 @@ function formatCaptureDate(iso: string | null): string | null {
 	return captureDateFormatter.format(date)
 }
 
-function MemoryView({ memory, caption }: { memory: MemoryImage; caption: string }) {
-	const formatted = formatCaptureDate(memory.captureDate)
+function MemoryView({ item }: { item: MemoryItem }) {
+	const formatted = formatCaptureDate(item.captureDate)
 	return (
-		<Stack mt={6} gap={2}>
-			<Text fontSize="md" color="gray.600">
-				{caption}
-			</Text>
-			<Image src={memory.url} alt={memory.name} maxW="md" />
-			{formatted && <Text fontSize="sm">Taken {formatted}</Text>}
+		<Stack gap={2}>
+			{item.kind === 'image' ? (
+				<Image src={item.url} alt={item.name} maxW="md" />
+			) : (
+				<Box maxW="md">
+					<video
+						controls
+						poster={item.posterUrl}
+						src={item.url}
+						style={{ width: '100%', display: 'block' }}
+					>
+						<track kind="captions" />
+					</video>
+				</Box>
+			)}
+			{formatted && (
+				<Text fontSize="sm" color="gray.600">
+					Taken {formatted}
+				</Text>
+			)}
 		</Stack>
 	)
 }
@@ -99,7 +112,7 @@ function AdminDateOverride({ activeDate }: { activeDate: string | undefined }) {
 	return (
 		<Stack mt={6} gap={2} maxW="sm">
 			<Text fontSize="sm" color="gray.600">
-				Admin: preview "today's memory" for any date
+				Admin: preview "today's memories" for any date
 			</Text>
 			<Flex gap={2} align="center">
 				<DatePicker.Root
@@ -187,25 +200,20 @@ function AdminDateOverride({ activeDate }: { activeDate: string | undefined }) {
 	)
 }
 
+function memoryKey(item: MemoryItem): string {
+	return `${item.captureDate}-${item.name}`
+}
+
 function Home() {
 	const { user, logout } = useIdentity()
-	const { memory } = Route.useLoaderData()
+	const { memories } = Route.useLoaderData()
 	const { date: activeDate } = Route.useSearch()
-	const [randomMemory, setRandomMemory] = useState<MemoryImage | null>(null)
-	const [isLoadingRandom, setIsLoadingRandom] = useState(false)
 
 	const isAdmin = user?.role === 'admin' || (user?.roles?.includes('admin') ?? false)
 
-	async function handleShowRandom() {
-		setIsLoadingRandom(true)
-		try {
-			setRandomMemory(await getRandomMemoryImage())
-		} finally {
-			setIsLoadingRandom(false)
-		}
-	}
-
-	const todayCaption = activeDate ? `On ${formatCaptureDate(activeDate)}` : 'On this day'
+	const emptyMessage = activeDate
+		? `No memories for ${formatCaptureDate(activeDate)}.`
+		: 'No memories on this day.'
 
 	return (
 		<Box p={8}>
@@ -216,27 +224,16 @@ function Home() {
 
 			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
 
-			{memory ? (
-				<MemoryView memory={memory} caption={todayCaption} />
-			) : randomMemory ? (
-				<MemoryView memory={randomMemory} caption="A random memory" />
+			{memories.length === 0 ? (
+				<Text mt={6} fontSize="md">
+					{emptyMessage}
+				</Text>
 			) : (
-				<Stack mt={6} gap={3}>
-					<Text fontSize="md">
-						{activeDate
-							? `No memories for ${formatCaptureDate(activeDate)}.`
-							: 'No memories on this day.'}
-					</Text>
-					<Button alignSelf="flex-start" onClick={handleShowRandom} loading={isLoadingRandom}>
-						Show me a random memory
-					</Button>
+				<Stack mt={6} gap={8}>
+					{memories.map((item) => (
+						<MemoryView key={memoryKey(item)} item={item} />
+					))}
 				</Stack>
-			)}
-
-			{randomMemory && (
-				<Button mt={4} variant="outline" onClick={handleShowRandom} loading={isLoadingRandom}>
-					Show another random memory
-				</Button>
 			)}
 
 			<Button mt={6} onClick={() => void logout()}>

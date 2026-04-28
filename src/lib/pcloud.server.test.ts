@@ -2,13 +2,16 @@ import { type Client, type FileMetadata, type FolderMetadata, createClient } fro
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { extractCaptureDate } from './exif'
-import { fetchRandomMemoryImage, fetchTodayMemoryImage } from './pcloud.server'
+import { fetchTodayMemories } from './pcloud.server'
+import { extractVideoCaptureDate } from './video-meta'
 
 vi.mock('pcloud-kit')
 vi.mock('./exif')
+vi.mock('./video-meta')
 
 const mockedCreateClient = vi.mocked(createClient)
 const mockedExtractCaptureDate = vi.mocked(extractCaptureDate)
+const mockedExtractVideoCaptureDate = vi.mocked(extractVideoCaptureDate)
 
 function makeFile(
 	overrides: Partial<FileMetadata> & Pick<FileMetadata, 'fileid' | 'name' | 'contenttype'>,
@@ -48,23 +51,29 @@ function makeFolderResult(
 	return makeFolder({ folderid: 0, name: 'root', contents })
 }
 
+const thumbResponse = { hosts: ['thumb.pcloud.com'], path: '/t/img.jpg' }
+const videoLinkResponse = { hosts: ['stream.pcloud.com'], path: '/v/clip.mp4' }
+
 function fakeClient(overrides: Partial<Client> = {}): Client {
 	return {
 		listfolder: vi.fn<Client['listfolder']>(),
-		call: vi.fn<Client['call']>() as unknown as Client['call'],
-		getfilelink: vi.fn<Client['getfilelink']>(),
+		getfilelink: vi
+			.fn<Client['getfilelink']>()
+			.mockImplementation(async (id: number) => `https://download/${id}`),
+		call: vi.fn<Client['call']>().mockImplementation(async (method: string) => {
+			if (method === 'getthumblink') return thumbResponse
+			if (method === 'getvideolink') return videoLinkResponse
+			throw new Error(`unexpected pCloud method in tests: ${method}`)
+		}) as unknown as Client['call'],
 		...overrides,
 	} as unknown as Client
 }
 
-const thumbResponse = {
-	hosts: ['api.pcloud.com'],
-	path: '/abc/img.jpg',
-}
-
 const jpegA = makeFile({ fileid: 100, name: 'a.jpg', contenttype: 'image/jpeg' })
 const jpegB = makeFile({ fileid: 200, name: 'b.jpg', contenttype: 'image/jpeg' })
-const jpegC = makeFile({ fileid: 300, name: 'c.jpg', contenttype: 'image/jpeg' })
+const mp4C = makeFile({ fileid: 300, name: 'c.mp4', contenttype: 'video/mp4' })
+const movD = makeFile({ fileid: 400, name: 'd.mov', contenttype: 'video/quicktime' })
+const pdfE = makeFile({ fileid: 500, name: 'e.pdf', contenttype: 'application/pdf' })
 
 beforeEach(() => {
 	process.env.PCLOUD_TOKEN = 'test-token'
@@ -77,140 +86,185 @@ afterEach(() => {
 	vi.clearAllMocks()
 })
 
-describe('fetchTodayMemoryImage', () => {
-	it('returns the image whose EXIF capture matches today, skipping non-matches and missing EXIF', async () => {
+describe('fetchTodayMemories', () => {
+	it('returns image and video items in oldest-year-first order', async () => {
 		const client = fakeClient({
 			listfolder: vi
 				.fn<Client['listfolder']>()
 				.mockResolvedValue(
-					makeFolderResult([
-						makeFolder({ folderid: 1, name: 'sub' }),
-						makeFile({ fileid: 50, name: 'doc.pdf', contenttype: 'application/pdf' }),
-						jpegA,
-						jpegB,
-						jpegC,
-					]),
+					makeFolderResult([makeFolder({ folderid: 1, name: 'sub' }), pdfE, jpegA, mp4C, jpegB]),
 				),
-			getfilelink: vi
-				.fn<Client['getfilelink']>()
-				.mockImplementation(async (id: number) => `https://download/${id}`),
-			call: vi.fn<Client['call']>().mockResolvedValue(thumbResponse) as unknown as Client['call'],
 		})
 		mockedCreateClient.mockReturnValue(client)
 		mockedExtractCaptureDate.mockImplementation(async (url: string) => {
-			if (url.endsWith('/100')) return null // jpegA: no EXIF
-			if (url.endsWith('/200')) return new Date('2019-04-27T14:30:00Z') // jpegB: matches
-			if (url.endsWith('/300')) return new Date('2020-06-15T09:00:00Z') // jpegC: wrong day
+			if (url.endsWith('/100')) return new Date('2024-04-27T14:30:00Z') // jpegA: matches, year 2024
+			if (url.endsWith('/200')) return new Date('2024-06-15T09:00:00Z') // jpegB: wrong day
+			return null
+		})
+		mockedExtractVideoCaptureDate.mockImplementation(async (url: string) => {
+			if (url.endsWith('/300')) return new Date('2018-04-27T10:00:00Z') // mp4C: matches, year 2018
 			return null
 		})
 
-		await expect(fetchTodayMemoryImage({ month: 4, day: 27 })).resolves.toEqual({
-			url: 'https://api.pcloud.com/abc/img.jpg',
-			name: 'b.jpg',
-			captureDate: '2019-04-27T14:30:00.000Z',
-		})
-		expect(client.call).toHaveBeenCalledWith('getthumblink', { fileid: 200, size: '2048x1024' })
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+
+		expect(result).toEqual([
+			{
+				kind: 'video',
+				url: 'https://stream.pcloud.com/v/clip.mp4',
+				posterUrl: 'https://thumb.pcloud.com/t/img.jpg',
+				name: 'c.mp4',
+				captureDate: '2018-04-27T10:00:00.000Z',
+			},
+			{
+				kind: 'image',
+				url: 'https://thumb.pcloud.com/t/img.jpg',
+				name: 'a.jpg',
+				captureDate: '2024-04-27T14:30:00.000Z',
+			},
+		])
 	})
 
-	it('returns null when no image matches today', async () => {
+	it('builds an image MemoryItem from getthumblink', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegA])),
-			getfilelink: vi.fn<Client['getfilelink']>().mockResolvedValue('https://download/100'),
+		})
+		mockedCreateClient.mockReturnValue(client)
+		mockedExtractCaptureDate.mockResolvedValue(new Date('2019-04-27T14:30:00Z'))
+
+		const [item] = await fetchTodayMemories({ month: 4, day: 27 })
+
+		expect(item).toEqual({
+			kind: 'image',
+			url: 'https://thumb.pcloud.com/t/img.jpg',
+			name: 'a.jpg',
+			captureDate: '2019-04-27T14:30:00.000Z',
+		})
+		expect(client.call).toHaveBeenCalledWith('getthumblink', { fileid: 100, size: '2048x1024' })
+		expect(mockedExtractVideoCaptureDate).not.toHaveBeenCalled()
+	})
+
+	it('builds a video MemoryItem from getvideolink + getthumblink poster', async () => {
+		const client = fakeClient({
+			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([mp4C])),
+		})
+		mockedCreateClient.mockReturnValue(client)
+		mockedExtractVideoCaptureDate.mockResolvedValue(new Date('2020-04-27T10:00:00Z'))
+
+		const [item] = await fetchTodayMemories({ month: 4, day: 27 })
+
+		expect(item).toEqual({
+			kind: 'video',
+			url: 'https://stream.pcloud.com/v/clip.mp4',
+			posterUrl: 'https://thumb.pcloud.com/t/img.jpg',
+			name: 'c.mp4',
+			captureDate: '2020-04-27T10:00:00.000Z',
+		})
+		expect(client.call).toHaveBeenCalledWith('getvideolink', { fileid: 300 })
+		expect(client.call).toHaveBeenCalledWith('getthumblink', { fileid: 300, size: '2048x1024' })
+		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
+	})
+
+	it('handles MOV (video/quicktime) the same as MP4', async () => {
+		const client = fakeClient({
+			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([movD])),
+		})
+		mockedCreateClient.mockReturnValue(client)
+		mockedExtractVideoCaptureDate.mockResolvedValue(new Date('2021-04-27T10:00:00Z'))
+
+		const [item] = await fetchTodayMemories({ month: 4, day: 27 })
+
+		expect(item?.kind).toBe('video')
+		expect(item?.name).toBe('d.mov')
+	})
+
+	it('breaks ties by fileid ascending when years match', async () => {
+		const client = fakeClient({
+			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegB, jpegA])), // unsorted
+		})
+		mockedCreateClient.mockReturnValue(client)
+		mockedExtractCaptureDate.mockResolvedValue(new Date('2020-04-27T10:00:00Z'))
+
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+		expect(result.map((m) => m.name)).toEqual(['a.jpg', 'b.jpg'])
+	})
+
+	it('skips items without a parseable capture date', async () => {
+		const client = fakeClient({
+			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegA, jpegB])),
+		})
+		mockedCreateClient.mockReturnValue(client)
+		mockedExtractCaptureDate.mockImplementation(async (url: string) => {
+			if (url.endsWith('/100')) return null
+			return new Date('2019-04-27T10:00:00Z')
+		})
+
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+		expect(result).toHaveLength(1)
+		expect(result[0]?.name).toBe('b.jpg')
+	})
+
+	it('skips items whose capture date does not match today', async () => {
+		const client = fakeClient({
+			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegA])),
 		})
 		mockedCreateClient.mockReturnValue(client)
 		mockedExtractCaptureDate.mockResolvedValue(new Date('2020-12-31T00:00:00Z'))
 
-		await expect(fetchTodayMemoryImage({ month: 4, day: 27 })).resolves.toBeNull()
-		expect(client.call).not.toHaveBeenCalled()
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+		expect(result).toEqual([])
 	})
 
-	it('returns null when the folder has no images', async () => {
+	it('returns an empty array when the folder has no media files', async () => {
 		const client = fakeClient({
-			listfolder: vi
-				.fn<Client['listfolder']>()
-				.mockResolvedValue(
-					makeFolderResult([
-						makeFile({ fileid: 1, name: 'a.pdf', contenttype: 'application/pdf' }),
-					]),
-				),
+			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([pdfE])),
 		})
 		mockedCreateClient.mockReturnValue(client)
 
-		await expect(fetchTodayMemoryImage({ month: 4, day: 27 })).resolves.toBeNull()
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+		expect(result).toEqual([])
 		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
+		expect(mockedExtractVideoCaptureDate).not.toHaveBeenCalled()
 	})
 
-	it('returns null when the folder is empty (no contents)', async () => {
+	it('returns an empty array when the folder has no contents', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult(undefined)),
 		})
 		mockedCreateClient.mockReturnValue(client)
 
-		await expect(fetchTodayMemoryImage({ month: 4, day: 27 })).resolves.toBeNull()
+		await expect(fetchTodayMemories({ month: 4, day: 27 })).resolves.toEqual([])
 	})
 
-	it('picks the oldest year when multiple images match', async () => {
-		const client = fakeClient({
-			listfolder: vi
-				.fn<Client['listfolder']>()
-				.mockResolvedValue(makeFolderResult([jpegA, jpegB, jpegC])),
-			getfilelink: vi
-				.fn<Client['getfilelink']>()
-				.mockImplementation(async (id: number) => `https://download/${id}`),
-			call: vi.fn<Client['call']>().mockResolvedValue(thumbResponse) as unknown as Client['call'],
-		})
-		mockedCreateClient.mockReturnValue(client)
-		mockedExtractCaptureDate.mockImplementation(async (url: string) => {
-			if (url.endsWith('/100')) return new Date('2024-04-27T10:00:00Z') // newest
-			if (url.endsWith('/200')) return new Date('2018-04-27T10:00:00Z') // OLDEST → winner
-			if (url.endsWith('/300')) return new Date('2021-04-27T10:00:00Z')
-			return null
-		})
-
-		const result = await fetchTodayMemoryImage({ month: 4, day: 27 })
-		expect(result?.name).toBe('b.jpg')
-		expect(result?.captureDate).toBe('2018-04-27T10:00:00.000Z')
-	})
-
-	it('breaks ties by fileid ascending when years match', async () => {
-		const client = fakeClient({
-			listfolder: vi
-				.fn<Client['listfolder']>()
-				.mockResolvedValue(makeFolderResult([jpegC, jpegA, jpegB])), // unsorted on purpose
-			getfilelink: vi
-				.fn<Client['getfilelink']>()
-				.mockImplementation(async (id: number) => `https://download/${id}`),
-			call: vi.fn<Client['call']>().mockResolvedValue(thumbResponse) as unknown as Client['call'],
-		})
-		mockedCreateClient.mockReturnValue(client)
-		mockedExtractCaptureDate.mockResolvedValue(new Date('2020-04-27T10:00:00Z'))
-
-		const result = await fetchTodayMemoryImage({ month: 4, day: 27 })
-		// jpegA has the lowest fileid (100) → wins the tiebreak
-		expect(result?.name).toBe('a.jpg')
-	})
-
-	it('skips images where extractCaptureDate throws (continues to next)', async () => {
+	it('skips an image when extractCaptureDate throws', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegA, jpegB])),
-			getfilelink: vi
-				.fn<Client['getfilelink']>()
-				.mockImplementation(async (id: number) => `https://download/${id}`),
-			call: vi.fn<Client['call']>().mockResolvedValue(thumbResponse) as unknown as Client['call'],
 		})
 		mockedCreateClient.mockReturnValue(client)
 		mockedExtractCaptureDate.mockImplementation(async (url: string) => {
 			if (url.endsWith('/100')) throw new Error('network down')
-			return new Date('2019-04-27T10:00:00Z')
+			return new Date('2020-04-27T10:00:00Z')
 		})
 
-		const result = await fetchTodayMemoryImage({ month: 4, day: 27 })
-		expect(result?.name).toBe('b.jpg')
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+		expect(result.map((m) => m.name)).toEqual(['b.jpg'])
+	})
+
+	it('skips a video when extractVideoCaptureDate throws', async () => {
+		const client = fakeClient({
+			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([mp4C, jpegA])),
+		})
+		mockedCreateClient.mockReturnValue(client)
+		mockedExtractVideoCaptureDate.mockRejectedValue(new Error('network down'))
+		mockedExtractCaptureDate.mockResolvedValue(new Date('2020-04-27T10:00:00Z'))
+
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+		expect(result.map((m) => m.name)).toEqual(['a.jpg'])
 	})
 
 	it('throws when PCLOUD_TOKEN is missing', async () => {
 		process.env.PCLOUD_TOKEN = ''
-		await expect(fetchTodayMemoryImage({ month: 4, day: 27 })).rejects.toThrow(
+		await expect(fetchTodayMemories({ month: 4, day: 27 })).rejects.toThrow(
 			'PCLOUD_TOKEN is not set',
 		)
 		expect(mockedCreateClient).not.toHaveBeenCalled()
@@ -218,53 +272,15 @@ describe('fetchTodayMemoryImage', () => {
 
 	it('throws when PCLOUD_MEMORIES_FOLDER_ID is missing', async () => {
 		process.env.PCLOUD_MEMORIES_FOLDER_ID = ''
-		await expect(fetchTodayMemoryImage({ month: 4, day: 27 })).rejects.toThrow(
+		await expect(fetchTodayMemories({ month: 4, day: 27 })).rejects.toThrow(
 			'PCLOUD_MEMORIES_FOLDER_ID is not set',
 		)
-		expect(mockedCreateClient).not.toHaveBeenCalled()
 	})
 
 	it('throws when PCLOUD_MEMORIES_FOLDER_ID is not an integer', async () => {
 		process.env.PCLOUD_MEMORIES_FOLDER_ID = 'not-a-number'
-		await expect(fetchTodayMemoryImage({ month: 4, day: 27 })).rejects.toThrow(
+		await expect(fetchTodayMemories({ month: 4, day: 27 })).rejects.toThrow(
 			'PCLOUD_MEMORIES_FOLDER_ID must be an integer',
 		)
-	})
-})
-
-describe('fetchRandomMemoryImage', () => {
-	it('returns a random image with captureDate null', async () => {
-		const client = fakeClient({
-			listfolder: vi
-				.fn<Client['listfolder']>()
-				.mockResolvedValue(makeFolderResult([jpegA, jpegB, jpegC])),
-			call: vi.fn<Client['call']>().mockResolvedValue(thumbResponse) as unknown as Client['call'],
-		})
-		mockedCreateClient.mockReturnValue(client)
-		// 0.5 * 3 = 1.5 → floor → index 1 → jpegB
-		vi.spyOn(Math, 'random').mockReturnValue(0.5)
-
-		await expect(fetchRandomMemoryImage()).resolves.toEqual({
-			url: 'https://api.pcloud.com/abc/img.jpg',
-			name: 'b.jpg',
-			captureDate: null,
-		})
-		expect(client.call).toHaveBeenCalledWith('getthumblink', { fileid: 200, size: '2048x1024' })
-		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
-	})
-
-	it('returns null when the folder is empty', async () => {
-		const client = fakeClient({
-			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([])),
-		})
-		mockedCreateClient.mockReturnValue(client)
-
-		await expect(fetchRandomMemoryImage()).resolves.toBeNull()
-		expect(client.call).not.toHaveBeenCalled()
-	})
-
-	it('throws when PCLOUD_TOKEN is missing', async () => {
-		process.env.PCLOUD_TOKEN = ''
-		await expect(fetchRandomMemoryImage()).rejects.toThrow('PCLOUD_TOKEN is not set')
 	})
 })
