@@ -117,6 +117,7 @@ function AdminDateOverride({ activeDate }: { activeDate: string | undefined }) {
 			<Flex gap={2} align="center">
 				<DatePicker.Root
 					selectionMode="single"
+					startOfWeek={1}
 					value={[parseDate(value)]}
 					onValueChange={({ value: picked }) => {
 						const next = picked[0]
