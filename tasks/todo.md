@@ -12,7 +12,7 @@ See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
 ## Phase 2 — Netlify Blobs adapter
 
-- [ ] **T2** — `src/lib/capture-cache.server.ts` + `src/lib/capture-cache.server.test.ts`. Memoized `getCaptureCacheStore()`. Try `getStore({ name: 'capture-date-cache', consistency: 'eventual' })`; on failure fall back to a no-op store and `console.warn` once. Live-store branch verified manually in T4.
+- [x] **T2** — `src/lib/capture-cache.server.ts` + `src/lib/capture-cache.server.test.ts`. Memoized `getCaptureCacheStore()`. Try `getStore({ name: 'capture-date-cache', consistency: 'eventual' })`; on failure fall back to a no-op store and `console.warn` once. Live-store branch verified manually in T4.
 
 ## Phase 3 — Wire cache into the server pipeline
 
