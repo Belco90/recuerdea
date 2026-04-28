@@ -11,6 +11,9 @@ importers:
       '@chakra-ui/react':
         specifier: ^3.34.0
         version: 3.34.0(@emotion/react@11.14.0(@types/react@19.2.14)(react@19.2.5))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@netlify/blobs':
+        specifier: ^10.7.4
+        version: 10.7.4(supports-color@10.2.2)
       '@netlify/identity':
         specifier: ^1.0.0
         version: 1.0.0

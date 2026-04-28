@@ -20,6 +20,7 @@
 	},
 	"dependencies": {
 		"@chakra-ui/react": "^3.34.0",
+		"@netlify/blobs": "^10.7.4",
 		"@netlify/identity": "^1.0.0",
 		"@tanstack/react-devtools": "latest",
 		"@tanstack/react-router": "latest",
