@@ -4,11 +4,11 @@ See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
 ## Prerequisites
 
-- [ ] **P0** — Add `@netlify/blobs` to `dependencies` (per `SPEC.md §7` "ask first" boundary). Approved direction; explicit dep ack still required before T1.
+- [x] **P0** — Add `@netlify/blobs` to `dependencies` (per `SPEC.md §7` "ask first" boundary). _(commit `3838d9e`)_
 
 ## Phase 1 — Cache abstraction
 
-- [ ] **T1** — `src/lib/capture-cache.ts` + `src/lib/capture-cache.test.ts`. Pure `createCaptureCache(store)` with `lookup` / `remember`. Hash mismatch returns `undefined` (treated as miss). `null` capture dates round-trip correctly.
+- [x] **T1** — `src/lib/capture-cache.ts` + `src/lib/capture-cache.test.ts`. Pure `createCaptureCache(store)` with `lookup` / `remember`. Hash mismatch returns `undefined` (treated as miss). `null` capture dates round-trip correctly.
 
 ## Phase 2 — Netlify Blobs adapter
 
