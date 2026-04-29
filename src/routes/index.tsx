@@ -3,7 +3,6 @@ import type { MemoryItem } from '#/lib/pcloud.server'
 import { getServerUser } from '#/lib/auth'
 import { useIdentity } from '#/lib/identity-context'
 import { getTodayMemories } from '#/lib/pcloud'
-import { PcloudClientProvider, useMemoryUrls } from '#/lib/pcloud-client'
 import {
 	Box,
 	Button,
@@ -67,7 +66,7 @@ export const Route = createFileRoute('/')({
 	loaderDeps: ({ search }) => ({ date: search.date }),
 	loader: async ({ deps }) => {
 		const override = deps.date ? isoToOverride(deps.date) : null
-		return await getTodayMemories({ data: override })
+		return { memories: await getTodayMemories({ data: override }) }
 	},
 	component: Home,
 })
@@ -81,22 +80,19 @@ function formatCaptureDate(iso: string | null): string | null {
 
 function MemoryView({ item }: { item: MemoryItem }) {
 	const formatted = formatCaptureDate(item.captureDate)
-	const urls = useMemoryUrls(item)
 	return (
 		<Stack gap={2}>
-			{!urls ? (
-				<Box maxW="md" h="200px" bg="gray.100" />
-			) : item.kind === 'image' ? (
-				<Image src={urls.url} alt={item.name} maxW="md" />
+			{item.kind === 'image' ? (
+				<Image src={item.url} alt={item.name} maxW="md" />
 			) : (
 				<Box maxW="md">
 					<video
 						controls
 						preload="metadata"
-						poster={urls.posterUrl}
+						poster={item.posterUrl}
 						style={{ width: '100%', display: 'block' }}
 					>
-						<source src={urls.url} type={item.contenttype} />
+						<source src={item.url} type={item.mimeType} />
 						<track kind="captions" />
 					</video>
 				</Box>
@@ -207,12 +203,12 @@ function AdminDateOverride({ activeDate }: { activeDate: string | undefined }) {
 }
 
 function memoryKey(item: MemoryItem): string {
-	return String(item.fileid)
+	return `${item.captureDate}-${item.name}`
 }
 
 function Home() {
 	const { user, logout } = useIdentity()
-	const { items, pcloudToken } = Route.useLoaderData()
+	const { memories } = Route.useLoaderData()
 	const { date: activeDate } = Route.useSearch()
 
 	const isAdmin = user?.role === 'admin' || (user?.roles?.includes('admin') ?? false)
@@ -230,18 +226,16 @@ function Home() {
 
 			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
 
-			{items.length === 0 ? (
+			{memories.length === 0 ? (
 				<Text mt={6} fontSize="md">
 					{emptyMessage}
 				</Text>
 			) : (
-				<PcloudClientProvider token={pcloudToken}>
-					<Stack mt={6} gap={8}>
-						{items.map((item) => (
-							<MemoryView key={memoryKey(item)} item={item} />
-						))}
-					</Stack>
-				</PcloudClientProvider>
+				<Stack mt={6} gap={8}>
+					{memories.map((item) => (
+						<MemoryView key={memoryKey(item)} item={item} />
+					))}
+				</Stack>
 			)}
 
 			<Button mt={6} onClick={() => void logout()}>

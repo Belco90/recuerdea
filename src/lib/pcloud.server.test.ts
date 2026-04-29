@@ -69,6 +69,8 @@ function makeFolderResult(
 	return makeFolder({ folderid: 0, name: 'root', contents })
 }
 
+const thumbResponse = { hosts: ['thumb.pcloud.com'], path: '/t/img.jpg' }
+
 function fakeClient(overrides: Partial<Client> = {}): Client {
 	return {
 		listfolder: vi.fn<Client['listfolder']>(),
@@ -76,6 +78,7 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
 			.fn<Client['getfilelink']>()
 			.mockImplementation(async (id: number) => `https://download/${id}`),
 		call: vi.fn<Client['call']>().mockImplementation(async (method: string) => {
+			if (method === 'getthumblink') return thumbResponse
 			throw new Error(`unexpected pCloud method in tests: ${method}`)
 		}) as unknown as Client['call'],
 		...overrides,
@@ -125,21 +128,22 @@ describe('fetchTodayMemories', () => {
 		expect(result).toEqual([
 			{
 				kind: 'video',
-				fileid: 300,
-				contenttype: 'video/mp4',
+				url: '/api/media/300?variant=stream',
+				mimeType: 'video/mp4',
+				posterUrl: '/api/media/300?variant=poster',
 				name: 'c.mp4',
 				captureDate: '2018-04-27T10:00:00.000Z',
 			},
 			{
 				kind: 'image',
-				fileid: 100,
+				url: '/api/media/100?variant=image',
 				name: 'a.jpg',
 				captureDate: '2024-04-27T14:30:00.000Z',
 			},
 		])
 	})
 
-	it('builds an image MemoryItem carrying the fileid', async () => {
+	it('builds an image MemoryItem with a relative /api/media URL', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegA])),
 		})
@@ -150,16 +154,17 @@ describe('fetchTodayMemories', () => {
 
 		expect(item).toEqual({
 			kind: 'image',
-			fileid: 100,
+			url: '/api/media/100?variant=image',
 			name: 'a.jpg',
 			captureDate: '2019-04-27T14:30:00.000Z',
 		})
-		// URL signing happens in the browser — the loader never calls getthumblink.
+		// pCloud signing endpoints are not invoked from buildMemoryItem in v4 — the
+		// route handler at /api/media/:fileid resolves URLs at request time.
 		expect(client.call).not.toHaveBeenCalledWith('getthumblink', expect.anything())
 		expect(mockedExtractVideoCaptureDate).not.toHaveBeenCalled()
 	})
 
-	it('builds a video MemoryItem carrying the fileid and contenttype', async () => {
+	it('builds a video MemoryItem with relative stream + poster URLs', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([mp4C])),
 		})
@@ -170,14 +175,15 @@ describe('fetchTodayMemories', () => {
 
 		expect(item).toEqual({
 			kind: 'video',
-			fileid: 300,
-			contenttype: 'video/mp4',
+			url: '/api/media/300?variant=stream',
+			mimeType: 'video/mp4',
+			posterUrl: '/api/media/300?variant=poster',
 			name: 'c.mp4',
 			captureDate: '2020-04-27T10:00:00.000Z',
 		})
 		// `client.getfilelink(300)` is still called by safeExtractCaptureDate to
-		// fetch the byte range for mvhd parsing — that URL is consumed in-handler
-		// and never leaked into the MemoryItem.
+		// fetch the byte range for mvhd parsing, but no signing URL leaks into the
+		// MemoryItem — both `url` and `posterUrl` are relative.
 		expect(client.call).not.toHaveBeenCalledWith('getthumblink', expect.anything())
 		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
 	})

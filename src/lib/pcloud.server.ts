@@ -11,11 +11,12 @@ import { parseFilenameCaptureDate } from './filename-date'
 import { extractVideoCaptureDate } from './video-meta'
 
 export type MemoryItem =
-	| { kind: 'image'; fileid: number; name: string; captureDate: string }
+	| { kind: 'image'; url: string; name: string; captureDate: string }
 	| {
 			kind: 'video'
-			fileid: number
-			contenttype: string
+			url: string
+			mimeType: string
+			posterUrl: string
 			name: string
 			captureDate: string
 	  }
@@ -75,15 +76,16 @@ function buildMemoryItem(file: FileMetadata, capture: Date): MemoryItem {
 	if (isVideo(file)) {
 		return {
 			kind: 'video',
-			fileid: file.fileid,
-			contenttype: file.contenttype,
+			url: `/api/media/${file.fileid}?variant=stream`,
+			mimeType: file.contenttype,
+			posterUrl: `/api/media/${file.fileid}?variant=poster`,
 			name: file.name,
 			captureDate,
 		}
 	}
 	return {
 		kind: 'image',
-		fileid: file.fileid,
+		url: `/api/media/${file.fileid}?variant=image`,
 		name: file.name,
 		captureDate,
 	}
