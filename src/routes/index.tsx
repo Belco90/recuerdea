@@ -37,11 +37,15 @@ export const Route = createFileRoute('/')({
 				search: { redirect: location.href },
 			})
 		}
+		return { user }
 	},
 	loaderDeps: ({ search }) => ({ date: search.date }),
-	loader: async ({ deps }) => {
+	loader: async ({ deps, context }) => {
 		const override = deps.date ? isoToOverride(deps.date) : null
-		return { memories: await getTodayMemories({ data: override }) }
+		return {
+			memories: await getTodayMemories({ data: override }),
+			isAdmin: context.user.isAdmin,
+		}
 	},
 	component: Home,
 })
@@ -52,10 +56,8 @@ function memoryKey(item: MemoryItem): string {
 
 function Home() {
 	const { user, logout } = useIdentity()
-	const { memories } = Route.useLoaderData()
+	const { memories, isAdmin } = Route.useLoaderData()
 	const { date: activeDate } = Route.useSearch()
-
-	const isAdmin = user?.role === 'admin' || (user?.roles?.includes('admin') ?? false)
 
 	const emptyMessage = activeDate
 		? `No memories for ${formatCaptureDate(activeDate)}.`
