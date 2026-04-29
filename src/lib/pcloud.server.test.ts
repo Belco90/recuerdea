@@ -128,22 +128,21 @@ describe('fetchTodayMemories', () => {
 		expect(result).toEqual([
 			{
 				kind: 'video',
-				url: '/api/media/300?variant=stream',
-				mimeType: 'video/mp4',
-				posterUrl: '/api/media/300?variant=poster',
+				fileid: 300,
+				contenttype: 'video/mp4',
 				name: 'c.mp4',
 				captureDate: '2018-04-27T10:00:00.000Z',
 			},
 			{
 				kind: 'image',
-				url: '/api/media/100?variant=image',
+				fileid: 100,
 				name: 'a.jpg',
 				captureDate: '2024-04-27T14:30:00.000Z',
 			},
 		])
 	})
 
-	it('builds an image MemoryItem with a relative /api/media URL', async () => {
+	it('builds an image MemoryItem carrying the fileid', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegA])),
 		})
@@ -154,17 +153,16 @@ describe('fetchTodayMemories', () => {
 
 		expect(item).toEqual({
 			kind: 'image',
-			url: '/api/media/100?variant=image',
+			fileid: 100,
 			name: 'a.jpg',
 			captureDate: '2019-04-27T14:30:00.000Z',
 		})
-		// pCloud signing endpoints are not invoked from buildMemoryItem in v4 — the
-		// route handler at /api/media/:fileid resolves URLs at request time.
+		// URL signing happens in the browser — the loader never calls getthumblink.
 		expect(client.call).not.toHaveBeenCalledWith('getthumblink', expect.anything())
 		expect(mockedExtractVideoCaptureDate).not.toHaveBeenCalled()
 	})
 
-	it('builds a video MemoryItem with relative stream + poster URLs', async () => {
+	it('builds a video MemoryItem carrying the fileid and contenttype', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([mp4C])),
 		})
@@ -175,15 +173,14 @@ describe('fetchTodayMemories', () => {
 
 		expect(item).toEqual({
 			kind: 'video',
-			url: '/api/media/300?variant=stream',
-			mimeType: 'video/mp4',
-			posterUrl: '/api/media/300?variant=poster',
+			fileid: 300,
+			contenttype: 'video/mp4',
 			name: 'c.mp4',
 			captureDate: '2020-04-27T10:00:00.000Z',
 		})
 		// `client.getfilelink(300)` is still called by safeExtractCaptureDate to
-		// fetch the byte range for mvhd parsing, but no signing URL leaks into the
-		// MemoryItem — both `url` and `posterUrl` are relative.
+		// fetch the byte range for mvhd parsing — that URL is consumed in-handler
+		// and never leaked into the MemoryItem.
 		expect(client.call).not.toHaveBeenCalledWith('getthumblink', expect.anything())
 		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
 	})

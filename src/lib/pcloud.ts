@@ -2,6 +2,8 @@ import { createServerFn } from '@tanstack/react-start'
 
 import type { MemoryItem } from './pcloud.server'
 
+export type LoaderPayload = { items: readonly MemoryItem[]; pcloudToken: string }
+
 type DateOverride = { month: number; day: number }
 
 function parseOverrideInput(input: unknown): DateOverride | null {
@@ -21,13 +23,20 @@ function realToday(): DateOverride {
 
 export const getTodayMemories = createServerFn({ method: 'GET' })
 	.inputValidator((input: unknown): DateOverride | null => parseOverrideInput(input))
-	.handler(async ({ data }): Promise<MemoryItem[]> => {
+	.handler(async ({ data }): Promise<LoaderPayload> => {
+		// Hard auth gate — the response includes the pCloud token, so unauthenticated
+		// callers must never reach this branch even though the route's `beforeLoad`
+		// already redirects them.
+		const { loadServerUser } = await import('./auth.server')
+		const user = await loadServerUser()
+		if (!user) throw new Error('unauthenticated')
+
+		const target = data && user.isAdmin ? data : realToday()
+
+		const pcloudToken = process.env.PCLOUD_TOKEN
+		if (!pcloudToken) throw new Error('PCLOUD_TOKEN is not set')
+
 		const { fetchTodayMemories } = await import('./pcloud.server')
-		let target = realToday()
-		if (data) {
-			const { loadServerUser } = await import('./auth.server')
-			const user = await loadServerUser()
-			if (user?.isAdmin) target = data
-		}
-		return fetchTodayMemories(target)
+		const items = await fetchTodayMemories(target)
+		return { items, pcloudToken }
 	})
