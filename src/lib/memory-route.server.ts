@@ -27,10 +27,33 @@ function defaultVariant(kind: CachedMedia['kind']): MediaVariant {
 
 export type ResolveStreamUrl = (code: string) => Promise<string>
 
+export type FetchBytes = (url: string, range: string | null) => Promise<Response>
+
 export type MemoryRequestDeps = {
 	loadServerUser: () => Promise<ServerUser | null>
 	mediaCache: MediaCache
 	resolveStreamUrl: ResolveStreamUrl
+	fetchBytes: FetchBytes
+}
+
+async function streamFromUpstream(
+	upstreamUrl: string,
+	range: string | null,
+	variant: MediaVariant,
+	contenttype: string,
+	fetchBytes: FetchBytes,
+): Promise<Response> {
+	const upstream = await fetchBytes(upstreamUrl, range)
+	const headers = new Headers({
+		'content-type': contenttype,
+		'accept-ranges': 'bytes',
+		'cache-control': CACHE_CONTROL[variant],
+	})
+	const contentLength = upstream.headers.get('content-length')
+	if (contentLength) headers.set('content-length', contentLength)
+	const contentRange = upstream.headers.get('content-range')
+	if (contentRange) headers.set('content-range', contentRange)
+	return new Response(upstream.body, { status: upstream.status, headers })
 }
 
 export async function handleMemoryRequest(
@@ -52,17 +75,16 @@ export async function handleMemoryRequest(
 	if (!meta) return new Response('not found', { status: 404 })
 
 	const variant: MediaVariant = variantParam ?? defaultVariant(meta.kind)
+	const range = request.headers.get('range')
 
 	try {
-		const target =
+		const upstreamUrl =
 			variant === 'stream' ? await deps.resolveStreamUrl(meta.code) : buildThumbUrl(meta.code)
-		return new Response(null, {
-			status: 302,
-			headers: {
-				location: target,
-				'cache-control': CACHE_CONTROL[variant],
-			},
-		})
+		// Byte-stream the bytes through the function so the public-link URL
+		// (and `code`) never reach the browser via a Location header. Public
+		// links aren't IP-bound, so the function-side fetch works even though
+		// the URL was minted on a different IP than the request.
+		return await streamFromUpstream(upstreamUrl, range, variant, meta.contenttype, deps.fetchBytes)
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'unknown error'
 		return new Response(`pCloud error: ${message}`, { status: 502 })

@@ -1,3 +1,5 @@
+import type { FetchBytes } from '#/lib/memory-route.server'
+
 import { loadServerUser } from '#/lib/auth.server'
 import { createMediaCache } from '#/lib/media-cache'
 import { getMediaCacheStore } from '#/lib/media-cache.server'
@@ -19,6 +21,12 @@ async function resolveStreamUrl(code: string): Promise<string> {
 	return `https://${host}${res.path}`
 }
 
+const fetchBytes: FetchBytes = async (url, range) => {
+	const headers = new Headers()
+	if (range) headers.set('range', range)
+	return fetch(url, { headers })
+}
+
 export const Route = createFileRoute('/api/memory/$uuid')({
 	server: {
 		handlers: {
@@ -28,6 +36,7 @@ export const Route = createFileRoute('/api/memory/$uuid')({
 					loadServerUser,
 					mediaCache: createMediaCache(getMediaCacheStore()),
 					resolveStreamUrl,
+					fetchBytes,
 				})
 			},
 		},

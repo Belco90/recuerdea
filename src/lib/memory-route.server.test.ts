@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import type { ServerUser } from './auth.server'
 import type { CachedMedia, MediaCache } from './media-cache'
-import type { MemoryRequestDeps, ResolveStreamUrl } from './memory-route.server'
+import type { FetchBytes, MemoryRequestDeps, ResolveStreamUrl } from './memory-route.server'
 
 import { handleMemoryRequest } from './memory-route.server'
 
@@ -52,13 +52,21 @@ function makeDeps(
 		loadServerUser: overrides.loadServerUser ?? (async () => authedUser),
 		mediaCache: overrides.mediaCache ?? makeMediaCache(overrides.entries),
 		resolveStreamUrl:
-			overrides.resolveStreamUrl ?? (async (code) => `https://cdn.pcloud.com/dl/${code}`),
+			overrides.resolveStreamUrl ?? (async (code) => `https://e1.pcloud.com/dl/${code}`),
+		fetchBytes:
+			overrides.fetchBytes ??
+			(async () =>
+				new Response('upstream-bytes', {
+					status: 200,
+					headers: { 'content-length': '14' },
+				})),
 	}
 }
 
-function makeRequest(variant?: string): Request {
+function makeRequest(variant?: string, range?: string): Request {
 	const search = variant ? `?variant=${variant}` : ''
-	return new Request(`https://example.com/api/memory/${VALID_UUID}${search}`)
+	const headers = range ? { range } : undefined
+	return new Request(`https://example.com/api/memory/${VALID_UUID}${search}`, { headers })
 }
 
 describe('handleMemoryRequest', () => {
@@ -91,43 +99,75 @@ describe('handleMemoryRequest', () => {
 		expect(res.status).toBe(404)
 	})
 
-	it('image (default for kind=image) → 302 to getpubthumb on eapi.pcloud.com', async () => {
-		const deps = makeDeps({ entries: { [VALID_UUID]: imageMeta } })
+	it('image (default for kind=image) → fetches getpubthumb URL and pipes bytes', async () => {
+		const fetchBytes = vi.fn<FetchBytes>(
+			async () =>
+				new Response('image-bytes', {
+					status: 200,
+					headers: { 'content-length': '11', 'content-type': 'image/jpeg' },
+				}),
+		)
+		const deps = makeDeps({ entries: { [VALID_UUID]: imageMeta }, fetchBytes })
+
 		const res = await handleMemoryRequest(makeRequest(), VALID_UUID, deps)
 
-		expect(res.status).toBe(302)
-		expect(res.headers.get('location')).toBe(
+		expect(fetchBytes).toHaveBeenCalledWith(
 			'https://eapi.pcloud.com/getpubthumb?code=IMG-CODE&size=2048x1024',
+			null,
 		)
-		expect(res.headers.get('cache-control')).toContain('private')
+		expect(res.status).toBe(200)
+		expect(res.headers.get('content-type')).toBe('image/jpeg')
 		expect(res.headers.get('cache-control')).toContain('immutable')
+		expect(res.headers.get('content-length')).toBe('11')
+		// No Location header — public-link URL must not leak to the browser.
+		expect(res.headers.get('location')).toBeNull()
+		expect(await res.text()).toBe('image-bytes')
 	})
 
-	it('explicit variant=poster on a video → 302 to getpubthumb', async () => {
-		const deps = makeDeps({ entries: { [VALID_UUID]: videoMeta } })
+	it('explicit variant=poster on a video → fetches getpubthumb', async () => {
+		const fetchBytes = vi.fn<FetchBytes>(async () => new Response('poster', { status: 200 }))
+		const deps = makeDeps({ entries: { [VALID_UUID]: videoMeta }, fetchBytes })
+
 		const res = await handleMemoryRequest(makeRequest('poster'), VALID_UUID, deps)
 
-		expect(res.status).toBe(302)
-		expect(res.headers.get('location')).toBe(
+		expect(fetchBytes).toHaveBeenCalledWith(
 			'https://eapi.pcloud.com/getpubthumb?code=VID-CODE&size=2048x1024',
+			null,
 		)
+		expect(res.status).toBe(200)
 	})
 
-	it('stream (default for kind=video) → 302 to derived CDN URL via resolveStreamUrl', async () => {
+	it('stream (default for kind=video) → resolves CDN URL then pipes bytes with Range', async () => {
 		const resolveStreamUrl = vi.fn<ResolveStreamUrl>(
 			async (code) => `https://e1.pcloud.com/dl/${code}`,
+		)
+		const fetchBytes = vi.fn<FetchBytes>(
+			async () =>
+				new Response('partial', {
+					status: 206,
+					headers: {
+						'content-length': '7',
+						'content-range': 'bytes 0-6/100',
+					},
+				}),
 		)
 		const deps = makeDeps({
 			entries: { [VALID_UUID]: videoMeta },
 			resolveStreamUrl,
+			fetchBytes,
 		})
-		const res = await handleMemoryRequest(makeRequest(), VALID_UUID, deps)
+
+		const res = await handleMemoryRequest(makeRequest(undefined, 'bytes=0-6'), VALID_UUID, deps)
 
 		expect(resolveStreamUrl).toHaveBeenCalledWith('VID-CODE')
-		expect(res.status).toBe(302)
-		expect(res.headers.get('location')).toBe('https://e1.pcloud.com/dl/VID-CODE')
-		expect(res.headers.get('cache-control')).toContain('private')
+		expect(fetchBytes).toHaveBeenCalledWith('https://e1.pcloud.com/dl/VID-CODE', 'bytes=0-6')
+		expect(res.status).toBe(206)
+		expect(res.headers.get('content-type')).toBe('video/mp4')
+		expect(res.headers.get('accept-ranges')).toBe('bytes')
+		expect(res.headers.get('content-range')).toBe('bytes 0-6/100')
+		expect(res.headers.get('content-length')).toBe('7')
 		expect(res.headers.get('cache-control')).toContain('max-age=60')
+		expect(res.headers.get('location')).toBeNull()
 	})
 
 	it('returns 502 when resolveStreamUrl throws', async () => {
@@ -143,12 +183,29 @@ describe('handleMemoryRequest', () => {
 		expect(await res.text()).toContain('upstream down')
 	})
 
-	it('encodes the code in the URL (defense against odd characters)', async () => {
-		const odd: CachedMedia = { ...imageMeta, code: 'a/b c' }
-		const deps = makeDeps({ entries: { [VALID_UUID]: odd } })
+	it('returns 502 when fetchBytes throws', async () => {
+		const deps = makeDeps({
+			entries: { [VALID_UUID]: imageMeta },
+			fetchBytes: async () => {
+				throw new Error('network down')
+			},
+		})
 		const res = await handleMemoryRequest(makeRequest(), VALID_UUID, deps)
-		expect(res.headers.get('location')).toBe(
+
+		expect(res.status).toBe(502)
+		expect(await res.text()).toContain('network down')
+	})
+
+	it('encodes the code in the upstream URL (defense against odd characters)', async () => {
+		const odd: CachedMedia = { ...imageMeta, code: 'a/b c' }
+		const fetchBytes = vi.fn<FetchBytes>(async () => new Response('ok', { status: 200 }))
+		const deps = makeDeps({ entries: { [VALID_UUID]: odd }, fetchBytes })
+
+		await handleMemoryRequest(makeRequest(), VALID_UUID, deps)
+
+		expect(fetchBytes).toHaveBeenCalledWith(
 			'https://eapi.pcloud.com/getpubthumb?code=a%2Fb%20c&size=2048x1024',
+			null,
 		)
 	})
 })
