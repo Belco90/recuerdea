@@ -2,13 +2,13 @@ import type { getStore } from '@netlify/blobs'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import type { CaptureCacheValue } from './capture-cache'
+import type { FolderSnapshot } from './folder-cache'
 
 vi.mock('@netlify/blobs', () => ({
 	getStore: vi.fn<typeof getStore>(),
 }))
 
-describe('getCaptureCacheStore', () => {
+describe('getFolderCacheStore', () => {
 	it('returns a memoized no-op store and warns once when @netlify/blobs is unavailable', async () => {
 		const blobs = await import('@netlify/blobs')
 		vi.mocked(blobs.getStore).mockImplementation(() => {
@@ -16,14 +16,14 @@ describe('getCaptureCacheStore', () => {
 		})
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-		const { getCaptureCacheStore } = await import('./capture-cache.server')
-		const a = getCaptureCacheStore()
-		const b = getCaptureCacheStore()
+		const { getFolderCacheStore } = await import('./folder-cache.server')
+		const a = getFolderCacheStore()
+		const b = getFolderCacheStore()
 
 		expect(a).toBe(b)
-		expect(await a.get(123)).toBeUndefined()
-		const value: CaptureCacheValue = { hash: 'abc', captureDate: null }
-		await expect(a.set(123, value)).resolves.toBeUndefined()
+		expect(await a.get()).toBeUndefined()
+		const snap: FolderSnapshot = { refreshedAt: '2026-04-29T04:00:00.000Z', uuids: ['a'] }
+		await expect(a.set(snap)).resolves.toBeUndefined()
 		expect(warn).toHaveBeenCalledTimes(1)
 	})
 })

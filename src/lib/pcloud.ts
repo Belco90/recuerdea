@@ -22,12 +22,13 @@ function realToday(): DateOverride {
 export const getTodayMemories = createServerFn({ method: 'GET' })
 	.inputValidator((input: unknown): DateOverride | null => parseOverrideInput(input))
 	.handler(async ({ data }): Promise<MemoryItem[]> => {
+		// Hard auth gate — every API endpoint in this app requires authentication.
+		const { loadServerUser } = await import('./auth.server')
+		const user = await loadServerUser()
+		if (!user) throw new Error('unauthenticated')
+
+		const target = data && user.isAdmin ? data : realToday()
+
 		const { fetchTodayMemories } = await import('./pcloud.server')
-		let target = realToday()
-		if (data) {
-			const { loadServerUser } = await import('./auth.server')
-			const user = await loadServerUser()
-			if (user?.isAdmin) target = data
-		}
 		return fetchTodayMemories(target)
 	})

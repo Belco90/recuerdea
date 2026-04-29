@@ -80,19 +80,21 @@ function formatCaptureDate(iso: string | null): string | null {
 
 function MemoryView({ item }: { item: MemoryItem }) {
 	const formatted = formatCaptureDate(item.captureDate)
+	const url = `/api/memory/${item.uuid}?variant=${item.kind === 'image' ? 'image' : 'stream'}`
+	const posterUrl = item.kind === 'video' ? `/api/memory/${item.uuid}?variant=poster` : undefined
 	return (
 		<Stack gap={2}>
 			{item.kind === 'image' ? (
-				<Image src={item.url} alt={item.name} maxW="md" />
+				<Image src={url} alt={item.name} maxW="md" />
 			) : (
 				<Box maxW="md">
 					<video
 						controls
 						preload="metadata"
-						poster={item.posterUrl}
+						poster={posterUrl}
 						style={{ width: '100%', display: 'block' }}
 					>
-						<source src={item.url} type={item.mimeType} />
+						<source src={url} type={item.contenttype} />
 						<track kind="captions" />
 					</video>
 				</Box>
@@ -203,7 +205,7 @@ function AdminDateOverride({ activeDate }: { activeDate: string | undefined }) {
 }
 
 function memoryKey(item: MemoryItem): string {
-	return `${item.captureDate}-${item.name}`
+	return item.uuid
 }
 
 function Home() {
