@@ -6,3 +6,6 @@ framework = "tanstack-start"
 command = "pnpm dev"
 targetPort = 3000
 port = 8888
+
+[functions."refresh-memories"]
+schedule = "0 4 * * *"
