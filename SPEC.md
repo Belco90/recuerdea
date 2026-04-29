@@ -26,7 +26,7 @@ Recuerdea is a personal **"on this day" memory surfacer**. Each visit to the hom
 - Videos render with `<video controls>`, no autoplay, with a poster from pCloud's `getthumblink`. Stream URL via pCloud's `getvideolink`.
 - If no item matches, render a friendly empty state ("No memories on this day"). **No random fallback button.**
 - Unauthenticated visits redirect to `/login` via `beforeLoad` (unchanged).
-- pCloud SDK access stays server-only via `createServerFn` (unchanged).
+- pCloud SDK access for folder listing + capture-date extraction stays server-only via `createServerFn`. Media URL signing happens in the browser (see §11): the SSR loader returns `{ items, pcloudToken }`, and the browser uses a shared `pcloud-kit` `Client` (provided via React context) to resolve `getthumblink` / `getfilelink` URLs on mount so signing-IP and consuming-IP match.
 - Admin date override (`?date=YYYY-MM-DD`) continues to work; it now drives the multi-item match instead of the single-item match.
 
 ## 3. Commands
@@ -49,31 +49,19 @@ CI (`.github/workflows/ci.yml`) runs type-check, test, lint, and format-check in
 src/
   routes/           # TanStack Router file-based routes
     __root.tsx
-    index.tsx       # Home route — wiring only; UI lives in components/ (v4)
+    index.tsx       # Home route — loader + Home component + MemoryView + AdminDateOverride
     login.tsx       # Netlify Identity login + invite/recovery callbacks
-    api/
-      media/
-        $uuid.ts     # GET /api/media/:uuid?variant=image|stream|poster → byte-stream from pCloud — added in v4. fileid never leaves the server. Streaming (not 302) because pCloud signed URLs are IP-bound.
-  components/       # Presentational React components (no server/IO)  — added in v4 (PascalCase filenames; lib/ stays kebab-case)
-    Home.tsx        # <Home> shell
-    MemoryView.tsx  # Renders one MemoryItem (image/video)
-    AdminDateOverride.tsx # Admin date picker
   lib/              # Pure logic + server functions; tests colocated as *.test.ts(x)
     auth.ts         # createServerFn wrapper for getServerUser
     auth.server.ts  # loadServerUser — server-only auth (isAdmin, JWT decode)
-    pcloud.ts       # createServerFn wrappers for pCloud
-    pcloud.server.ts# pCloud SDK init (process.env secrets), fetch/sort logic
+    pcloud.ts       # createServerFn wrapper for getTodayMemories — returns { items, pcloudToken }
+    pcloud.server.ts# pCloud SDK init (process.env secrets), folder listing + capture-date extraction
+    pcloud-client.tsx # Browser-side: PcloudClientProvider + usePcloudClient + useMemoryUrls — added in v4
     exif.ts         # EXIF capture-date extraction (images)
     video-meta.ts   # MP4/MOV creation_time extraction (videos) — added in v2
     filename-date.ts# Filename-based capture-date fallback
-    media-cache.ts          # Pure (uuid → CachedFileMeta) cache abstraction — v4 (replaces v3 capture-cache)
-    media-cache.server.ts   # Netlify-Blobs-backed MediaCacheStore + no-op fallback — v4
-    fileid-index.ts         # Pure (fileid → uuid) sidecar abstraction — v4 (cron writer)
-    fileid-index.server.ts  # Netlify-Blobs-backed FileidIndexStore + no-op fallback — v4
-    folder-cache.ts         # Pure folder-listing cache abstraction — added in v4
-    folder-cache.server.ts  # Netlify-Blobs-backed folder snapshot store — added in v4
-    media-proxy.server.ts   # Resolves fresh pCloud URLs on demand (no caching) — added in v4
-    date-utils.ts   # parseSearchDate, isoToOverride, todayIso, formatCaptureDate — added in v4
+    capture-cache.ts        # Pure (fileid → { hash, captureDate }) cache abstraction — v3
+    capture-cache.server.ts # Netlify-Blobs-backed store + no-op fallback — v3
     identity-context.tsx
     navigation.ts   # hardNavigate (post-logout cookie refresh)
   router.tsx        # getRouter() factory
@@ -83,9 +71,6 @@ test/
   stubs/            # Stubs for @tanstack/react-start in browser mode
 __mocks__/
   @netlify/identity.ts
-netlify/
-  functions/
-    refresh-cache.ts # Scheduled Netlify Function: pre-warms folder + per-file caches — added in v4 (registered via netlify.toml [functions."refresh-cache"] schedule)
 ```
 
 Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
@@ -116,7 +101,8 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - Colocate tests with source under `src/lib/` for any new pure logic.
 - Use the existing path alias `#/*` for `src/` imports.
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
-- **Resolve pCloud signed URLs at request time, not at SSR time**: media URLs go through `/api/media/:uuid?variant=...`. The route handler fetches a fresh `getfilelink` / `getthumblink` / `getvideolink` per request and **byte-streams the response** back to the browser (302 redirects don't work — pCloud signed URLs are bound to the caller's IP, so the browser hitting the URL from a different IP gets rejected with "another IP address"). Never persist a pCloud URL in SSR HTML, loader cache, or Blobs; the URL exists only inside one request handler invocation.
+- **Resolve pCloud signed URLs in the browser, not on the server.** pCloud signs `getfilelink` / `getthumblink` / `getvideolink` URLs bound to the **caller's IP**, so a server-signed URL is unusable in the browser ("another IP address" error). The SSR loader returns `{ items, pcloudToken }`; the browser instantiates one shared `pcloud-kit` `Client` via `PcloudClientProvider` (React context, `useState` lazy init); each `<MemoryView>` calls `useMemoryUrls(item)` to sign URLs on mount via that client. Server code may still call `getfilelink` for a one-shot in-handler fetch (e.g. EXIF range read at SSR time) — the URL just must not be serialized out to the browser.
+- **The home page HTML must not be public-cached.** Because the SSR response embeds `pcloudToken`, the response must be `Cache-Control: private` (or `no-store`) — never `public, s-maxage=...`. Verify on the deploy preview with `curl -I` after any change to the home loader.
 
 ### Ask first
 
@@ -128,24 +114,25 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 ### Never do
 
 - Disable per-route SSR as a shortcut for auth issues (use `beforeLoad` instead).
-- Import server-only modules (`*.server.ts`, anything reading `process.env`) from client-rendered code.
+- Import `*.server.ts` modules (Blobs, identity, anything reading `process.env`) from client-rendered code. `pcloud-kit` itself is fine to import in browser code — the Node-only methods (`download` / `downloadfile` / `uploadfile`) dynamic-import `node:fs` / `node:path` / `node:stream` and we never call them.
 - Edit `src/routeTree.gen.ts` — it is auto-generated.
 - Bypass `simple-git-hooks` with `--no-verify`.
 - Swap the stack: no React Native, no Next.js, no replacing Chakra UI v3, no replacing Vitest. Stack is locked.
 - Build a tagging / upload / metadata-mutation UI — out of scope for v1 and v2.
 - Re-introduce the random fallback — explicitly retired in v2.
-- **Serialize pCloud signed URLs anywhere outside a single request handler (v4+)**: never store `getfilelink` / `getthumblink` / `getvideolink` results in SSR HTML, loader cache, JSON responses, or Blobs. They are bound to the caller's IP, so any consumer with a different IP gets rejected — this was the real v3-era "410" bug. The cache holds content-derived metadata (`fileid`, `hash`, `kind`, `contenttype`, `name`, `captureDate`); URLs are minted fresh inside `/api/media/:uuid` and consumed by `fetch()` in the same handler.
+- **Sign a pCloud URL on the server and pass it to the browser.** The URL is bound to the signing IP — the browser's IP won't match, the request gets rejected with "another IP address". Either the browser signs it (the v4 design) or the server signs it and consumes it in the same handler (e.g. EXIF range fetch). Never serialize a server-signed pCloud URL into HTML, JSON, loader cache, or Blobs.
+- **Public-cache the home page HTML.** It embeds the pCloud token; `Cache-Control` must be `private` / `no-store` / absent — never `public, s-maxage=...`.
 - Push directly to `main` — open a PR from the version branch instead.
 
 ## 8. Open Questions (resolve before implementation)
 
 1. **MP4/MOV metadata parser library** — resolved in v2 (hand-rolled mvhd reader, no dep).
 2. **Range-fetch strategy for video EXIF** — resolved in v2 (two-step start/tail fetch).
-3. **Metadata store** — Netlify Blobs is shipped for the capture-date cache (v3) and expanded in v4 to hold the full `CachedFileMeta` ({ fileid, hash, kind, contenttype, name, captureDate }) keyed under `media/${uuid}`, with a `fileid-index/${fileid}` sidecar (`{ uuid }`) and a `folder/v1` listing snapshot. `consistency: 'eventual'`, with a no-op fallback when the Blobs runtime isn't reachable (plain `pnpm dev`). Tagging/upload metadata stores remain future work.
-4. **Media proxy strategy (v4)** — the `/api/media/:uuid?variant=image|stream|poster` endpoint resolves a fresh pCloud URL per request, fetches the bytes from pCloud server-side (so the signing IP matches the requester IP), and pipes the response back to the browser. **302 redirects don't work because pCloud's signed URLs are IP-bound** — the browser would be hitting the signed URL from a different IP than the function that requested it. Range requests are forwarded for video seek (`Range` header in → `206 Partial Content` out). `Cache-Control` is set per variant (`public, max-age=86400, immutable` for image/poster keyed by content-stable fileid; `public, max-age=600` for stream) so most requests hit Netlify's edge cache and bandwidth stays bounded. The `?variant=` param is explicit; default is inferred from the cached `kind` (image → `image`, video → `stream`; poster requires explicit `?variant=poster`).
-5. **Cron schedule (v4)** — daily at 04:00 UTC (`0 4 * * *`). **Cron is the only writer.** No on-demand loader fallback: if the snapshot is missing the home route renders an empty state and the loader logs a warn. The cron must be triggered manually before the first prod release so the snapshot exists when users hit the page.
-6. **Cache invalidation (v4)** — pCloud's `hash` invalidates per-file entries (rename ≠ content change). Folder snapshot is replaced wholesale by the cron. The cron also deletes stale `media/${uuid}` entries (uuids no longer in the snapshot) and their `fileid-index/${fileid}` sidecars.
-7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path must be ≤ 1 Blob read for the snapshot + N per-uuid reads (where N = files in folder, not matched-day items — `captureDate` lives in the per-uuid value, so all entries must be read to filter by today's day). No `listfolder` and no extractor calls on the hot path. Function timeout (10 s) is the operative ceiling on the cron.
+3. **Metadata store** — Netlify Blobs is shipped for the v3 capture-date cache (`{ hash, captureDate }` keyed by `fileid`). `consistency: 'eventual'`, with a no-op fallback when the Blobs runtime isn't reachable (plain `pnpm dev`). Tagging/upload metadata stores remain future work.
+4. **Media URL signing (v4)** — resolved: the **browser** signs URLs via `pcloud-kit` so signing-IP and consuming-IP match. The SSR loader returns `{ items, pcloudToken }`; `PcloudClientProvider` instantiates one client per session (`useState` lazy init); `useMemoryUrls(item)` calls `getthumblink` / `getfilelink` on mount. The earlier byte-stream proxy at `/api/media/:fileid` and the planned UUID-indirected variant are withdrawn — the proxy is being deleted in this slice.
+5. **Cron-warmed cache (v4)** — withdrawn. One `listfolder` per visit + the v3 capture-cache is acceptable for ~1000 files. Cron + folder snapshot + UUID-indirected cache shape are out of scope.
+6. **UUID indirection (v4)** — withdrawn. With the pCloud token already in the browser, hiding `fileid` behind a per-file UUID adds machinery without a security gain.
+7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path on the server: 1 `listfolder` + N capture-cache reads (zero extractor calls on warm cache). Hot path on the browser: N parallel `getthumblink` / `getfilelink` calls on mount (one per matched item). HTTP/2 multiplexing keeps the browser-side fan-out cheap.
 
 ## 9. v1 → v2 changes summary
 
@@ -168,46 +155,49 @@ For readers diffing this spec against v2:
 
 ## 11. v4 Acceptance Criteria
 
-Cumulative on top of §2. v4 is a correctness fix (410) plus an aggressive caching / pre-warming pass.
+Cumulative on top of §2. v4 fixes the IP-mismatch bug (the real cause of the v3-era "410") by moving pCloud URL signing to the browser.
 
 **Correctness**
 
-- No production 410s on `<img>` / `<video>` / poster requests, including: (a) lazy-scrolled items rendered minutes after page load, (b) re-renders driven by TanStack Router's loader cache, (c) browser back/forward into a previously-rendered home page.
-- Achieved by routing every media reference through `/api/media/:uuid?variant=...`, which fetches a freshly-signed pCloud URL server-side and **byte-streams the response** to the browser. pCloud signed URLs are IP-bound — having the function fetch the bytes (instead of redirecting the browser) keeps the signing-IP and requester-IP the same. The pCloud `fileid` never leaves the server (it lives only in the per-uuid Blobs entry). No pCloud signed URL is ever serialized into HTML, loader cache, or Blobs.
+- No production 410s / "another IP address" errors on `<img>` / `<video>` / poster requests, including: (a) lazy-scrolled items rendered minutes after page load, (b) re-renders driven by TanStack Router's loader cache, (c) browser back/forward into a previously-rendered home page.
+- Achieved by signing pCloud URLs in the **browser**, not on the server. The browser's IP matches the signing IP by construction. No pCloud signed URL is ever serialized in HTML, loader cache, JSON response, or Blobs.
 
-**Cache shape**
+**SSR loader payload**
 
-- Per-file Blobs entry stores `CachedFileMeta = { fileid: number, hash: string, kind: 'image' | 'video', contenttype: string, name: string, captureDate: string | null }`, keyed `media/${uuid}`. The `media/` prefix replaces v3's `v1/`; `fileid` joins the value (used by the API route to call pCloud after uuid → fileid resolution).
-- Sidecar Blobs entry keyed `fileid-index/${fileid}` stores `{ uuid: string }` so the cron can reuse uuids across runs (rename ≠ new uuid).
-- A single folder-snapshot Blobs entry keyed `folder/v1` stores `{ refreshedAt: string, uuids: readonly string[] }`.
-- Hash mismatch on a per-uuid lookup is treated as a miss and overwritten; the uuid itself is preserved so already-rendered HTML keeps working.
+- `getTodayMemories` (server function) returns `{ items: MemoryItem[], pcloudToken: string }`.
+- `MemoryItem` carries `fileid` + content-type + capture date — never URL strings:
+  - `{ kind: 'image'; fileid: number; name: string; captureDate: string }`
+  - `{ kind: 'video'; fileid: number; contenttype: string; name: string; captureDate: string }`
+- The handler hard-requires `loadServerUser()` — unauthenticated callers throw, so the token isn't leaked to anyone hitting the server-fn endpoint without the auth cookie.
 
-**Cron**
+**Browser-side signing**
 
-- A Netlify Scheduled Function runs at least daily and: (1) calls `listfolder` once, (2) fills any per-file entries missing or with stale hashes, (3) writes a fresh `folder/v1` snapshot.
-- The cron is idempotent and safe to run concurrently with user requests.
-- If the cron has not run yet (cold deploy / Blobs panel cleared), the home route renders the empty state and logs a warn. There is **no on-demand `listfolder` fallback** — cron is the sole writer. Pre-prod, the cron must be triggered manually so the snapshot exists before users hit the page.
+- `src/lib/pcloud-client.tsx` exposes `PcloudClientProvider` (one shared `pcloud-kit` `Client` per session, `useState` lazy init), `usePcloudClient`, and `useMemoryUrls(item)`.
+- `<MemoryView>` is effect-driven: shows a placeholder until `useMemoryUrls` resolves, then renders `<Image>` / `<video>` with the freshly-signed URLs.
+- The SSR HTML for `/` is `Cache-Control: private` (or `no-store`) — never publicly cacheable, because it embeds the pCloud token.
 
-**Hot path**
+**Caching**
 
-- A user visit to `/` performs: 1× snapshot read, N× per-uuid reads (where N = files in folder), filter to today's day, sort, render. **Zero pCloud API calls on the loader path** when the cache is warm. Media URLs are resolved by the browser hitting `/api/media/:uuid?variant=...`, one round-trip per element. `fileid` is never serialized into HTML.
-- The `/api/media/:uuid` handler itself is **not** zero-pCloud: per cache-miss request it (a) reads the per-uuid Blobs entry, (b) calls `getfilelink` / `getthumblink` for a fresh signed URL, (c) `fetch()`es the bytes from pCloud, and (d) pipes the response back to the browser. `Cache-Control` headers move repeat requests to Netlify's edge cache so the steady-state pCloud API + bandwidth load is bounded. Range requests are forwarded for video seek.
+- v3's per-fileid `{ hash, captureDate }` capture-cache is kept verbatim — it still saves EXIF / mvhd extractor cost on warm visits.
+- No additional Blobs stores, no cron, no UUID indirection, no folder snapshot. Each visit calls `client.listfolder` once on the server.
 
 **Layout / UX**
 
-- Unchanged from v2 (vertical feed, image vs. video distinguished by player UI, oldest year first, admin date override).
+- Unchanged from v2 (vertical feed, image vs. video distinguished by player UI, oldest year first, admin date override). One added bit: a brief placeholder appears per item while the browser signs its URL on mount.
 
 **Workflow**
 
-- v4 work happens on a `v4` branch with a PR into `main`; Netlify produces a deploy preview per PR. The 410 fix is verified on the preview before merge.
+- v4 work happens on a `v4` branch with a PR into `main`; Netlify produces a deploy preview per PR. The IP-mismatch fix is verified on the preview before merge — direct `*.pcloud.com` requests in the network tab, no `/api/media/*` requests, no "another IP address" errors after lazy scroll / 30-min idle.
 
 ## 12. v3 → v4 changes summary
 
 For readers diffing this spec against v3:
 
-- §1 / §2: unchanged. v4 fixes a prod bug and aggressively pre-warms caching; UI and product are the same.
-- §4 Project Structure: adds `src/components/` with PascalCase filenames (`Home.tsx`, `MemoryView.tsx`, `AdminDateOverride.tsx`); `lib/` stays kebab-case. Adds `src/routes/api/media/$uuid.ts`, `src/lib/media-cache(.server).ts` (replaces the v3 `capture-cache`), `src/lib/fileid-index(.server).ts` (sidecar), `src/lib/folder-cache(.server).ts`, `src/lib/media-proxy.server.ts`, `src/lib/date-utils.ts`, and `netlify/functions/refresh-cache.ts` (scheduled function lives outside `src/`, registered via `netlify.toml`). The home route file shrinks to wiring only.
-- §5 Code Style: adds an immutability + functional-style guideline (prefer `const`, expression-style returns, `readonly` types; `let` allowed only in narrow accumulator scopes).
-- §7 Boundaries: "always do" adds branch-per-version + resolve-URLs-at-request-time. "ask first" extends to `netlify.toml` (scheduled-function block lives there). "never do" adds caching pCloud signed URLs and direct pushes to `main`.
-- §8 Open Questions: replaces resolved v2/v3 entries with v4-relevant ones. Cache shape moves from v3's `v1/${fileid}` (capture date only) to `media/${uuid}` (full `CachedFileMeta` with `fileid` in the value) + `fileid-index/${fileid}` sidecar + `folder/v1` snapshot. The `?variant=` param is decided (explicit; default inferred from cached `kind`). The home loader has no on-demand `listfolder` fallback — cron is the sole writer; missing snapshot ⇒ empty state. The cron deletes stale per-uuid entries and their sidecars.
-- §11 (new): v4 acceptance criteria — IP-mismatch fix (the real cause of the v3-era "410"), UUID-indirected media URLs (`fileid` never leaves the server), expanded cache shape with sidecar, cron pre-warming, request-time URL resolution + byte-streaming through Netlify (302 redirects don't work because pCloud's signed URLs are bound to the caller's IP).
+- §1 / §2: same product. §2 gains a bullet stating that media URLs are signed in the browser, not at SSR time.
+- §4 Project Structure: adds `src/lib/pcloud-client.tsx` (browser-side pcloud-kit context + hooks). v3's `capture-cache(.server).ts` is unchanged. The byte-stream proxy at `src/routes/api/media/$fileid.ts` and the helper `src/lib/media-proxy.server.ts` — built and shipped earlier in v4 — are deleted in this slice. The `src/components/` PascalCase split is parked as a follow-up; the home route still hosts `<Home>`, `<MemoryView>`, `<AdminDateOverride>` for now.
+- §5 Code Style: unchanged from v3.
+- §7 Boundaries: "always do" replaces the byte-stream rule with browser-side signing, and adds the `Cache-Control: private` constraint on the home page HTML. "Never do" replaces the "serialize signed URLs" rule with "sign on the server and pass to the client" (same constraint, different framing) and softens the "no server-only imports" rule to be specific about `*.server.ts` modules (so client code can import `pcloud-kit` itself).
+- §8 Open Questions: §8.4 resolved as "browser signs"; §8.5 / §8.6 (cron, UUID indirection) are withdrawn from v4 scope.
+- §11: rewritten — IP-mismatch fix via browser-side signing; SSR loader returns `{ items, pcloudToken }`; v3 capture-cache stays; no cron, no UUID indirection.
+
+**Earlier v4 design (reverted in this slice):** the original v4 plan introduced `/api/media/:uuid` as a byte-stream proxy with a UUID-indirected `media/${uuid}` cache, a `fileid-index/${fileid}` sidecar, a `folder/v1` snapshot, and a daily Netlify Scheduled Function. It worked but was over-engineered for a single-user app. The proxy and sidecars are removed; the byte-stream learning lives on in this section as historical context.

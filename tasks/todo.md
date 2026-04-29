@@ -1,98 +1,61 @@
-# Recuerdea v4 — Task List
+# Recuerdea v4 — Task List (revised: pivot to client-side signing)
 
-See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
+See `tasks/plan.md` for full context. Phase 0 / Slice A / A.5 are already shipped (commits `8b13827` → `4e3c0fa`); the proxy they introduced is being torn out in this revision.
 
-## Phase 0 — SPEC + branch setup
+## Slice E — Pivot to client-side pCloud signing (single PR)
 
-- [x] **T0.1** — Apply 8 SPEC.md amendments + replace `tasks/plan.md` & `tasks/todo.md` with v4 versions. Single docs commit. Cite ack on amendments #4 (UUID indirection) and #5 (no-fallback loader).
-- [x] **T0.2** — `git checkout -b v4` from `main` (`8d775c5`); push to `origin/v4`.
+### E1 — SPEC + plan + todo amendments (docs commit)
 
-## Slice A — proxy /api/media (1st draft: 302; corrected to byte-stream in A.5)
+- [x] Update `SPEC.md` §2, §4, §7, §8, §11, §12 per `tasks/plan.md` E1.
+- [x] Replace `tasks/plan.md`.
+- [x] Replace `tasks/todo.md` (this file).
+- [ ] `pnpm format:check` clean.
+- [ ] `rg -n 'byte-?stream|uuid indirection|fileid-index|folder-cache|refresh-cache|cron' SPEC.md` shows matches only in §8 / §12 (withdrawn or historical).
+- [ ] Commit as a single docs commit.
 
-- [x] **A1** — Spike: add `src/routes/api/ping.ts` returning `Response.redirect('/login', 302)`. Verify under `pnpm netlify dev` with `curl -i http://localhost:8888/api/ping`.
-- [x] **A2** — `src/lib/media-proxy.server.ts` + test. Pure helper: `resolveMediaUrl(client, fileid, variant, contenttype)` calling the right pCloud endpoint per variant.
-- [x] **A3** — `src/routes/api/media/$fileid.ts`. GET handler: validate fileid + variant, call `client.stat` for kind detection (interim — slice B replaces with cache lookup), call `resolveMediaUrl`, 302. Manual curl smoke. **Replaced in A.5 with a byte-stream response** because pCloud signed URLs are IP-bound and 302 redirects don't work across IPs.
-- [x] **A4** — Modify `src/lib/pcloud.server.ts`: `MemoryItem` URL fields become `/api/media/${fileid}?variant=...`. Drop `fetchThumbnailUrl` / `fetchVideoStreamUrl`. Update `src/lib/pcloud.server.test.ts`. Delete the `ping` route from A1.
+### E2 — Server side: loader returns `{ items, pcloudToken }`
 
-## Slice A.5 — byte-stream the proxy (real IP-mismatch fix)
+- [ ] `src/lib/pcloud.server.ts`: drop URL fields from `MemoryItem`. New shape: `{ kind: 'image', fileid, name, captureDate }` and `{ kind: 'video', fileid, contenttype, name, captureDate }`. `buildMemoryItem` becomes synchronous, no URL string-building.
+- [ ] `src/lib/pcloud.server.test.ts`: drop `MemoryItem.url` / `posterUrl` assertions; assert `fileid`, `kind`, `name`, `captureDate`, plus `contenttype` for video.
+- [ ] `src/lib/pcloud.ts`: `getTodayMemories` handler hard-requires `loadServerUser()` (throw if unauth), reads `process.env.PCLOUD_TOKEN`, returns `{ items, pcloudToken }`.
+- [ ] `pnpm test src/lib/pcloud.server.test.ts` green.
+- [ ] `pnpm type-check` green.
+- [ ] Commit.
 
-- [ ] **A.5/P1** — Apply SPEC + plan amendments: §7 + §11 + §12 explain the IP-binding constraint and the byte-stream design. `tasks/plan.md` adds the A.5 entries; `tasks/todo.md` un-checks the original Checkpoint A. Pre-acked in plan-mode review (byte-streaming through Netlify is now the explicit design).
-- [ ] **A.5/P2** — Modify `src/routes/api/media/$fileid.ts`: replace `Response.redirect(url, 302)` with `fetch(url, { headers: { Range: request.headers.get('range') ?? '' } })` → `new Response(res.body, { status, headers })` where headers include `content-type`, `accept-ranges: bytes`, `cache-control` (per variant), and pass-through `content-length` / `content-range`. Add a streaming-response test that fakes `globalThis.fetch`.
+### E3 — Client side: `<MemoryView>` signs URLs in browser
 
-## Checkpoint A — IP-mismatch fix verified
+- [ ] NEW `src/lib/pcloud-client.tsx`: `PcloudClientProvider` (useState lazy init) + `usePcloudClient` + `useMemoryUrls(item)`. Lift `getThumbUrl` / `getStreamUrl` verbatim from `media-proxy.server.ts:resolveMediaUrl`.
+- [ ] MODIFY `src/routes/index.tsx`: `loader` returns the loader payload as-is (`{ items, pcloudToken }` instead of `{ memories }`).
+- [ ] `<Home>` threads the loader payload, wraps memory list in `<PcloudClientProvider token={pcloudToken}>`.
+- [ ] `<MemoryView>` becomes effect-driven — placeholder while URLs resolve, then `<Image>` / `<video>` with the signed URLs.
+- [ ] `memoryKey(item)` returns `String(item.fileid)`.
+- [ ] `pnpm test` (full suite) green.
+- [ ] `pnpm type-check`, `pnpm lint`, `pnpm format:check` clean.
+- [ ] `pnpm dev` smoke: home renders images + videos; network tab shows direct `*.pcloud.com` requests; no `/api/media/*` requests.
+- [ ] Commit.
 
-- [ ] `pnpm test` (full suite)
-- [ ] `pnpm type-check`
-- [ ] `pnpm lint`
-- [ ] `pnpm format:check`
-- [ ] `pnpm dev` (or `pnpm netlify dev`) — sign in, verify home + admin date picker + video playback + empty state.
-- [ ] Push A.5 commits to `v4`; PR #4 deploy preview rebuilds. On the deploy preview: hard reload home, scroll lazily after 5+ min, return after 30+ min — **no "another IP address" errors, no 410s**. Images render, videos play, video seek works (Range header).
+### E4 — Cleanup: delete the proxy
 
-## Slice B — UUID indirection + expanded cache shape
+- [ ] DELETE `src/routes/api/media/$fileid.ts`.
+- [ ] DELETE `src/lib/media-proxy.server.ts`.
+- [ ] DELETE `src/lib/media-proxy.server.test.ts`.
+- [ ] Remove `src/routes/api/media/` directory if empty (and `src/routes/api/` if empty after that).
+- [ ] `rg -n 'media-proxy|/api/media' src/ test/` returns 0 matches.
+- [ ] `pnpm build` clean; `pnpm test` green; route tree regenerates without the deleted route.
+- [ ] Commit.
 
-- [ ] **B1** — `src/lib/media-cache.ts` + test. Pure abstraction over `MediaCacheStore`. `CachedFileMeta` carries `{ fileid, hash, kind, contenttype, name, captureDate }`. API: `lookup`, `remember`, `forget`, `listUuids`.
-- [ ] **B2** — `src/lib/media-cache.server.ts` + test. Memoized `getMediaCacheStore()` with `media/` prefix; same try/catch + no-op fallback as v3.
-- [ ] **B3** — `src/lib/fileid-index.ts` + test. Pure abstraction. `lookup(fileid) → uuid`, `remember(fileid, uuid)`, `forget(fileid)`.
-- [ ] **B4** — `src/lib/fileid-index.server.ts` + test. Memoized factory; key prefix `fileid-index/`.
-- [ ] **B5** — Modify `src/lib/pcloud.server.ts` + tests: replace v3 capture-cache wiring with media-cache + fileid-index. Loader mints uuids on first sight, writes both stores, `MemoryItem` carries `uuid` (not `fileid`). New tests for hit / miss / hash-mismatch / existing-uuid-reuse.
-- [ ] **B6** — Rename `src/routes/api/media/$fileid.ts` → `$uuid.ts`. Reads `mediaCache.lookup(uuid)`, resolves variant default from cached `kind`, calls pCloud, 302. 404 if uuid not in cache. Drops the slice-A `client.stat` call.
-- [ ] **B7** — Modify `src/routes/index.tsx`: `memoryKey(item)` returns `item.uuid`.
-- [ ] **B8** — Delete `src/lib/capture-cache.ts`, `capture-cache.test.ts`, `capture-cache.server.ts`, `capture-cache.server.test.ts`. Verify `rg 'capture-cache' src/` returns nothing.
+## Checkpoint E — Deploy preview verification
 
-## Checkpoint B — UUID indirection verified
+- [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check`, `pnpm build` all clean.
+- [ ] Push `v4`. PR #4 (or new PR `[v4] Switch /api/media → client-side pcloud-kit signing`) → `main`. Deploy preview rebuilds.
+- [ ] On the deploy preview:
+  - [ ] Hard reload `/`. Network tab: direct `*.pcloud.com` requests; **no** `/api/media/*`; no 410s; no "another IP address" errors.
+  - [ ] Wait 30+ min, return — re-mount re-signs URLs, images render, video plays + seeks.
+  - [ ] View source on `/`: HTML embeds `pcloudToken`; HTML does **not** contain pCloud signed URLs (signing is post-hydration).
+  - [ ] `curl -I https://<deploy-preview>/` — `cache-control` is `private` / `no-store` / absent (never `public, s-maxage=...`).
+  - [ ] Hit `getTodayMemories` server-fn endpoint without the auth cookie — must throw, not return a token.
+- [ ] Merge `v4 → main`. Post-merge prod smoke.
 
-- [ ] `pnpm test`
-- [ ] `pnpm type-check`
-- [ ] `pnpm lint`
-- [ ] `pnpm format:check`
-- [ ] `pnpm netlify dev` — view-source on home, grep HTML for a known pCloud `fileid` → **must not appear**. Only uuids + `/api/media/<uuid>`.
-- [ ] PR `[v4-B] UUID indirection + expanded cache shape` → `v4`. Smoke deploy preview. Merge into `v4`.
+## Parked / follow-up
 
-## Slice C — Cron + folder snapshot + stale cleanup
-
-- [ ] **C1** — Add `@netlify/functions` to `dependencies`. (Ack: P1, pre-approved in plan-mode review.)
-- [ ] **C2** — Add `[functions."refresh-cache"]` block to `netlify.toml` with `schedule = "0 4 * * *"`. (Ack: P2, pre-approved.)
-- [ ] **C3** — `src/lib/folder-cache.ts` + test. Pure abstraction over `FolderCacheStore`. `FolderSnapshot = { refreshedAt, uuids }`.
-- [ ] **C4** — `src/lib/folder-cache.server.ts` + test. Memoized factory, single key `folder/v1`.
-- [ ] **C5** — `netlify/functions/refresh-cache.ts` + test. `schedule('0 4 * * *', handler)` from `@netlify/functions`. Lists folder, fills missing/stale media-cache entries, writes snapshot, deletes stale `media/<uuid>` + `fileid-index/<fileid>` for orphans. Test with in-memory fakes for all three stores + a fake pcloud-kit client.
-- [ ] **C6** — Modify `src/lib/pcloud.ts` (the `getTodayMemories` server function): reads `folder-cache.lookup()` + per-uuid `media-cache.lookup()` only. **No `client.listfolder` call.** If snapshot missing → return `[]` and `console.warn`. New unit test for the cached-loader path.
-- [ ] **C7** — Refactor `src/lib/pcloud.server.ts`: extract `populateMediaCacheForFile(client, file, mediaCache, fileidIndex)` (used by cron). Delete `fetchTodayMemories` (loader no longer calls it). Tests rewritten.
-
-## Checkpoint C — Cron-warmed hot path verified
-
-- [ ] `pnpm test`
-- [ ] `pnpm type-check`
-- [ ] `pnpm lint`
-- [ ] `pnpm format:check`
-- [ ] `pnpm build` — `@netlify/functions` does NOT appear in `dist/client/`.
-- [ ] PR `[v4-C] Cron-warmed cache + stale cleanup` → `v4`. On the deploy preview:
-  - [ ] Manually trigger the cron via Netlify dashboard ("Run now").
-  - [ ] Inspect Blobs panel: `folder/v1`, multiple `media/<uuid>`, multiple `fileid-index/<fileid>` entries.
-  - [ ] Visit `/` — network tab shows **zero** `*.pcloud.com` requests; only `/api/media/<uuid>`.
-  - [ ] Admin date override + empty state + video playback unchanged.
-- [ ] Merge into `v4`.
-
-## Slice D — Refactor `routes/index.tsx` (nice-to-have)
-
-- [ ] **D1** — `src/lib/date-utils.ts` + test. Lift `parseSearchDate`, `isoToOverride`, `todayIso`, `formatCaptureDate` from `routes/index.tsx`.
-- [ ] **D2** — `src/components/MemoryView.tsx`. Lift the existing `<MemoryView>` component.
-- [ ] **D3** — `src/components/AdminDateOverride.tsx`. Lift the existing component; pass navigate handler as prop if `Route.useNavigate` doesn't resolve outside the route file.
-- [ ] **D4** — `src/components/Home.tsx`. Pure presentational; receives `{ user, memories, activeDate, onLogout, onSelectDate? }`.
-- [ ] **D5** — Modify `src/routes/index.tsx`: route definition + thin wrapper that pulls loader data + identity context + forwards to `<Home>`. Target ≤ 40 lines.
-
-## Checkpoint D — Refactor verified
-
-- [ ] `pnpm test`
-- [ ] `pnpm type-check`
-- [ ] `pnpm lint`
-- [ ] `pnpm format:check`
-- [ ] `wc -l src/routes/index.tsx` — ≤ ~40 lines.
-- [ ] `pnpm netlify dev` — home renders identically to slice C.
-- [ ] PR `[v4-D] Refactor home route into components/` → `v4`. Smoke deploy preview. Merge into `v4`.
-
-## Final — `v4 → main`
-
-- [ ] Open PR `v4 → main` (no slice tag). Smoke deploy preview end-to-end.
-- [ ] Trigger the prod cron manually so the snapshot exists in prod Blobs at merge time.
-- [ ] Merge.
-- [ ] Post-merge prod smoke: visit `/`, network tab shows only `/api/media/<uuid>` requests, no 410s, video plays.
+- Slice D (refactor `src/routes/index.tsx` into `src/components/Home.tsx` + `MemoryView.tsx` + `AdminDateOverride.tsx`) — separate PR after E lands.
