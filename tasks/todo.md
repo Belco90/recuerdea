@@ -110,6 +110,9 @@ User noted on the deploy preview: the 302 leaks the public-link URL to the brows
 - [ ] Pre-prod: trigger the prod cron manually so the snapshot exists at merge time.
 - [ ] Merge `v4 → main`. Post-merge prod smoke (hard reload `/`, video seek, `curl -I /` cache-control private/no-store).
 
-## Parked / follow-up
+## Slice D — Component split (separate PR)
 
-- Slice D from earlier plans — refactor `src/routes/index.tsx` into `src/components/Home.tsx` + `MemoryView.tsx` + `AdminDateOverride.tsx`. Separate PR after this lands.
+- [x] Extract `src/routes/index.tsx` → `src/components/{Home,MemoryView,AdminDateOverride}.tsx`. Route file keeps only `validateSearch` / `beforeLoad` / `loaderDeps` / `loader` / `component`.
+- [x] Use `getRouteApi('/')` in `Home` + `AdminDateOverride` to consume loader data / navigate / search without the route-bound `Route.useX` hooks.
+- [x] SPEC §4 + §12 updated to reflect the new `src/components/` layout.
+- [x] All gates clean (`test` 91/91, `type-check`, `lint`, `format:check`, `build`).
