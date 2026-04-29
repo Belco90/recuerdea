@@ -98,7 +98,21 @@ Curl verifications are done (2026-04-29 — see `tasks/plan.md` "Curl-verified f
 - [ ] **Pre-prod**: trigger the prod cron manually so the snapshot exists at merge time.
 - [ ] Merge `v4 → main`. Post-merge prod smoke (same checks on prod URL).
 
+## G8 — Pivot `/api/memory/$uuid` from 302 to byte-stream
+
+User noted on the deploy preview: the 302 leaks the public-link URL to the browser's Network tab. Public links aren't IP-bound, so anyone with the URL can fetch the bytes outside the auth gate.
+
+- [x] `src/lib/memory-route.server.ts` — replace `Response.redirect(...)` with a `streamFromUpstream` helper that fetches the upstream URL (with Range forwarded for stream) and pipes the body. Add `FetchBytes` dep type.
+- [x] `src/routes/api/memory/$uuid.ts` — wire a default `fetchBytes` (global `fetch` + Range injection) into the deps.
+- [x] Tests: assert `Location` header is null and that bytes flow through; cover image, poster-on-video, stream-with-Range (206 + content-range), and 502 paths.
+- [x] Commit (3b714e3 — "Byte-stream /api/memory instead of 302-redirecting (G8)").
+- [ ] Push `v4`. On the deploy preview:
+  - [ ] Hard reload `/`. Network tab: requests go to `/api/memory/<uuid>` and stay there (no `eapi.pcloud.com` URL visible). Image/video/poster all render.
+  - [ ] Video seek works (byte range request returns `206`).
+  - [ ] No 7010 / 410 / "another IP address" errors.
+- [ ] Re-confirm `Cache-Control: private` (or `no-store` / absent) on `/`.
+- [ ] Merge `v4 → main`. Post-merge prod smoke.
+
 ## Parked / follow-up
 
 - Slice D from earlier plans — refactor `src/routes/index.tsx` into `src/components/Home.tsx` + `MemoryView.tsx` + `AdminDateOverride.tsx`. Separate PR after this lands.
-- Byte-stream variant of `/api/memory/$uuid` — only if multi-user becomes a goal or if G3 manual verifications #2/#3 fail.

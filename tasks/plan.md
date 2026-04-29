@@ -455,5 +455,18 @@ The uuid is the snapshot key, so we need to plumb it alongside the `CachedMedia`
 - Multi-user / shared-album support — see SPEC §1 non-goal.
 - Folder-scoped pCloud OAuth tokens — token stays server-only here, so the blast radius is already minimal.
 - Slice D from earlier plans (refactor `routes/index.tsx` into `src/components/`) — orthogonal nice-to-have.
-- Switching to byte-stream variant of `/api/memory/$uuid` — only if (a) we go multi-user, or (b) G3 verification step #2 or #3 fails. Architecture supports the swap without changing the route's external contract.
 - Any change to `oxlint.config.ts`, `oxfmt.config.ts`, `tsconfig.json`, `vite.config.ts`, `.github/workflows/ci.yml`.
+
+## G8 amendment — pivot from 302 to byte-stream (after Checkpoint G)
+
+After Checkpoint G's deploy-preview verification surfaced that the 302 leaks the public-link URL to the browser's Network tab, the "byte-stream variant" parked above was promoted from a contingency to the actual implementation. The route's external contract is unchanged (`/api/memory/<uuid>?variant=...` with the same status codes for auth/validation/miss); only the success path swapped from `Response.redirect(upstreamUrl, 302)` to `fetch(upstreamUrl, { headers: { range } })` piped into a new `Response(upstream.body, ...)`.
+
+Concrete changes (commit 3b714e3):
+
+- `src/lib/memory-route.server.ts` — added `FetchBytes` dep type and a `streamFromUpstream(upstreamUrl, range, variant, contenttype, fetchBytes)` helper. Forwards `content-length`, `content-range`, and the upstream status (so a Range request becomes `206 Partial Content` end-to-end). Cache-control is set per-variant (`max-age=86400, immutable` for image/poster; `max-age=60` for stream).
+- `src/routes/api/memory/$uuid.ts` — supplies a default `fetchBytes` impl that wires `globalThis.fetch` with the browser's `Range` header injected when present.
+- Tests in `src/lib/memory-route.server.test.ts` — rewrote the success-path assertions to verify the upstream URL is fetched, the body is piped, and crucially that `res.headers.get('location')` is `null` so no public-link URL leaks.
+
+Trade-off: every video Range request now goes through the function (Netlify bandwidth in the data path). Acceptable for a single-user app; the user has a premium pCloud plan and Netlify's free-tier bandwidth is not yet the bottleneck.
+
+Verification still pending: deploy-preview hard reload + video seek + Network-tab inspection per `tasks/todo.md` G8 section.

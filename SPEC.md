@@ -27,7 +27,7 @@ Recuerdea is a personal **"on this day" memory surfacer**. Each visit to the hom
 - If no item matches, render a friendly empty state ("No memories on this day"). **No random fallback button.**
 - Unauthenticated visits redirect to `/login` via `beforeLoad` (unchanged).
 - pCloud SDK access stays server-only via `createServerFn` and the cron Netlify function. The pCloud auth token never leaves the server.
-- Media is delivered through `/api/memory/<uuid>?variant=image|stream|poster` — an auth-gated 302 redirect to a stable, world-readable public-link URL. UUIDs are stable identifiers minted by the cron; `fileid` and the public-link `code` are server-only (see §11).
+- Media is delivered through `/api/memory/<uuid>?variant=image|stream|poster` — an auth-gated route that byte-streams the upstream pCloud public-link response. UUIDs are stable identifiers minted by the cron; `fileid` and the public-link `code` stay server-side and never reach the browser (see §11).
 - Admin date override (`?date=YYYY-MM-DD`) continues to work; it now drives the multi-item match instead of the single-item match.
 
 ## 3. Commands
@@ -54,7 +54,7 @@ src/
     login.tsx       # Netlify Identity login + invite/recovery callbacks
     api/
       memory/
-        $uuid.ts    # GET /api/memory/:uuid?variant=image|stream|poster — auth-gated 302 to a public-link URL — added in v4
+        $uuid.ts    # GET /api/memory/:uuid?variant=image|stream|poster — auth-gated, byte-streams the public-link response — added in v4
   lib/              # Pure logic + server functions; tests colocated as *.test.ts(x)
     auth.ts         # createServerFn wrapper for getServerUser
     auth.server.ts  # loadServerUser — server-only auth (isAdmin, JWT decode)
@@ -112,7 +112,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - Colocate tests with source under `src/lib/` for any new pure logic.
 - Use the existing path alias `#/*` for `src/` imports.
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
-- **Resolve media URLs through `/api/memory/<uuid>?variant=...`.** The route is auth-gated and 302-redirects to a pCloud public-link URL. Public links are not IP-bound and not Referer-gated, so 302 is safe (unlike `getfilelink` / `getthumblink`, which are IP-bound and would fail across the function-IP / browser-IP boundary). Image and poster variants 302 to `https://eapi.pcloud.com/getpubthumb?code=…&size=2048x1024` directly. Stream variant calls `getpublinkdownload({ code })` server-side, derives `https://${hosts[0]}${path}`, and 302s there (the API endpoint returns metadata, not bytes; the derived CDN URL is what serves bytes with Range support).
+- **Resolve media URLs through `/api/memory/<uuid>?variant=...`.** The route is auth-gated and byte-streams the upstream public-link response so the public-link `code` (and the eapi/CDN host) never reach the browser. Public links are not IP-bound and not Referer-gated, so the function-side `fetch` works (unlike `getfilelink` / `getthumblink`, which are IP-bound and would fail across the function-IP / browser-IP boundary). Image and poster variants fetch `https://eapi.pcloud.com/getpubthumb?code=…&size=2048x1024` and pipe its body. Stream variant calls `getpublinkdownload({ code })` server-side, derives `https://${hosts[0]}${path}`, fetches that with the browser's `Range` header forwarded, and pipes the response (preserving `206` + `content-range` for video seek).
 - **The cron is the only writer for `media/<uuid>`, `fileid-index/<fileid>`, and `folder/v1`.** Loader and route handlers are read-only. Pre-prod, the cron must be triggered manually via the Netlify dashboard so the snapshot exists before users hit the page.
 - **Public-link lifecycle is owned by the cron.** When the cron sees a fileid disappear from `listfolder`, it calls `deletepublink(linkid)` and clears `media/<uuid>` + `fileid-index/<fileid>`. No abandoned public links accumulate in pCloud's "Public Links" panel.
 - **The home page HTML is `Cache-Control: private` (or `no-store`).** Per-user content; never publicly cached. Verify with `curl -I` on the deploy preview after any change to the home loader.
@@ -146,10 +146,10 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 1. **MP4/MOV metadata parser library** — resolved in v2 (hand-rolled mvhd reader, no dep).
 2. **Range-fetch strategy for video EXIF** — resolved in v2 (two-step start/tail fetch).
 3. **Metadata store** — Netlify Blobs is shipped for the v4 cache: `media/<uuid>` (`{ fileid, hash, code, linkid, kind, contenttype, name, captureDate }`), `fileid-index/<fileid>` (`{ uuid }`), and `folder/v1` (`{ refreshedAt, uuids }`). `consistency: 'eventual'`, with a no-op fallback when the Blobs runtime isn't reachable (plain `pnpm dev`). Tagging/upload metadata stores remain future work. v3's per-fileid `capture-cache` is folded into `media/<uuid>` and removed.
-4. **Media URL signing (v4)** — resolved: pCloud **public links** + auth-gated 302 from `/api/memory/<uuid>?variant=...`. The cron creates one public link per file via `getfilepublink` and caches the `code`. Image/poster variants 302 directly to `getpubthumb`; stream variant 302s to a CDN URL derived from `getpublinkdownload`. Public links are not IP-bound or Referer-gated, so 302 works (unlike `getfilelink`).
+4. **Media URL signing (v4)** — resolved: pCloud **public links**, fetched server-side and byte-streamed through `/api/memory/<uuid>?variant=...`. The cron creates one public link per file via `getfilepublink` and caches the `code`. The route fetches `getpubthumb` (image/poster) or the `getpublinkdownload`-derived CDN URL (stream) and pipes the body so the public-link URL never appears in the browser. Public links are not IP-bound or Referer-gated, so the server-side fetch succeeds (unlike `getfilelink`).
 5. **Cron schedule (v4)** — daily at 04:00 UTC (`0 4 * * *`). **Cron is the only writer.** No on-demand fallback; missing snapshot ⇒ home renders empty + warn. Manual first-run trigger required pre-prod.
 6. **Cache invalidation (v4)** — pCloud's content-derived `hash` invalidates per-uuid entries on content change (rename ≠ content change; same fileid + same hash = noop). When a fileid disappears from `listfolder`, the cron deletes the public link via `deletepublink(linkid)` and clears both `media/<uuid>` and `fileid-index/<fileid>`.
-7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path on the server: 1 `folder/v1` snapshot read + N `media/<uuid>` reads (where N = files in folder). **Zero pCloud API calls on the loader path** when warm. Per matched-item route hit: 0 pCloud API calls for image/poster (302 to `getpubthumb`); 1 lightweight `getpublinkdownload` call for stream (browser then follows to CDN directly for subsequent Range requests). User's pCloud premium plan has plenty of public-link traffic quota.
+7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path on the server: 1 `folder/v1` snapshot read + N `media/<uuid>` reads (where N = files in folder). **Zero pCloud API calls on the loader path** when warm. Per matched-item route hit: 0 pCloud API calls for image/poster (function fetches `getpubthumb` and pipes bytes); 1 lightweight `getpublinkdownload` call for stream, then the function pipes bytes from the CDN (every Range request, including video seek, goes through the function). User's pCloud premium plan has plenty of public-link traffic quota; Netlify bandwidth is the constraint to watch.
 
 ## 9. v1 → v2 changes summary
 
@@ -172,12 +172,12 @@ For readers diffing this spec against v2:
 
 ## 11. v4 Acceptance Criteria
 
-Cumulative on top of §2. v4 fixes prod 410s and the v3-era IP-mismatch by routing all media delivery through an auth-gated 302 to pCloud public links.
+Cumulative on top of §2. v4 fixes prod 410s and the v3-era IP-mismatch by routing all media delivery through an auth-gated route that byte-streams pCloud public-link responses.
 
 **Correctness**
 
 - No production 410s / "another IP address" errors / 7010 "Invalid link referer" errors on `<img>` / `<video>` / poster requests, including: (a) lazy-scrolled items rendered minutes after page load, (b) re-renders driven by TanStack Router's loader cache, (c) browser back/forward into a previously-rendered home page.
-- Achieved by serving every media reference through `/api/memory/<uuid>?variant=...`, which 302-redirects to a pCloud **public link** URL. Public links are not IP-bound and not Referer-gated, so the 302 is universally followable.
+- Achieved by serving every media reference through `/api/memory/<uuid>?variant=...`, which fetches a pCloud **public-link** URL server-side and pipes the bytes back to the browser. Public links are not IP-bound and not Referer-gated, so the function-side fetch always succeeds; the public-link URL itself never leaves the function.
 
 **Cache shape**
 
@@ -195,7 +195,7 @@ Cumulative on top of §2. v4 fixes prod 410s and the v3-era IP-mismatch by routi
 **Hot path**
 
 - A user visit to `/` performs: 1× snapshot read, N× per-uuid reads (where N = files in folder), filter to today's day, sort, render. **Zero pCloud API calls on the loader path** when the cache is warm.
-- The `/api/memory/<uuid>` route handler is auth-gated. For image/poster: 1× cache read, then `Response.redirect('https://eapi.pcloud.com/getpubthumb?code=…&size=2048x1024', 302)` — zero pCloud API calls. For stream: 1× cache read + 1× `getpublinkdownload` call to derive the CDN URL, then 302. Subsequent Range requests on a video go directly browser↔CDN, not back through this route.
+- The `/api/memory/<uuid>` route handler is auth-gated and byte-streams the upstream response. For image/poster: 1× cache read, then `fetch('https://eapi.pcloud.com/getpubthumb?code=…&size=2048x1024')` and pipe the body — zero pCloud API calls. For stream: 1× cache read + 1× `getpublinkdownload` call to derive the CDN URL, then `fetch` with the browser's `Range` header forwarded and pipe the response (preserving `206` + `content-range` for video seek). Every Range request goes through the function, so Netlify bandwidth is the constraint to monitor.
 
 **Layout / UX**
 
@@ -209,11 +209,11 @@ Cumulative on top of §2. v4 fixes prod 410s and the v3-era IP-mismatch by routi
 
 For readers diffing this spec against v3:
 
-- §1 / §2: same product. §2 gains a bullet: media is delivered via `/api/memory/<uuid>?variant=...`, an auth-gated 302 to a pCloud public-link URL.
+- §1 / §2: same product. §2 gains a bullet: media is delivered via `/api/memory/<uuid>?variant=...`, an auth-gated route that byte-streams the pCloud public-link response.
 - §4 Project Structure: adds `src/routes/api/memory/$uuid.ts`, `src/lib/media-cache(.server).ts` (replaces v3's `capture-cache`), `src/lib/fileid-index(.server).ts`, `src/lib/folder-cache(.server).ts`, and `netlify/functions/refresh-memories.ts`. The home route remains a single file; the `src/components/` PascalCase split is parked.
 - §5 Code Style: unchanged from v3.
 - §7 Boundaries: "always do" now requires routing media through `/api/memory/<uuid>` with auth gate, the cron as sole writer, public-link lifecycle ownership, and `Cache-Control: private` on the home page HTML. "Ask first" adds `@netlify/functions` (pre-acked) and the `netlify.toml` schedule block (pre-acked). "Never do" adds: don't sign IP-bound URLs server-side and pass to the browser; don't sign anything from the browser (pCloud blocks browser-origin calls); don't embed `fileid` / `code` / `linkid` / token in HTML.
 - §8 Open Questions: replaces v2/v3 entries with v4-relevant ones. Cache shape moves from v3's `capture-cache/v1/${fileid}` (capture date only) to `media/${uuid}` (full `CachedMedia` including `code` + `linkid`) + `fileid-index/${fileid}` sidecar + `folder/v1` snapshot. The cron deletes stale per-uuid entries AND their associated pCloud public links.
-- §11 (new): v4 acceptance criteria — UUID-indirected media URLs, public-link 302, cron-warmed cache, public-link lifecycle managed by the cron.
+- §11 (new): v4 acceptance criteria — UUID-indirected media URLs, server-side byte-stream of public-link responses, cron-warmed cache, public-link lifecycle managed by the cron.
 
-**Earlier v4 attempts (history):** v4's first design ran the byte-stream proxy at `/api/media/:fileid` (worked, but Netlify-bandwidth-heavy). The second attempt moved URL signing to the browser to avoid the proxy entirely; it failed because pCloud's API gates `getfilelink` / `getthumblink` against browser origins (error 7010 "Invalid link referer"). The current public-link + 302 design takes the best of both: server-side signing keeps the token off the browser, public links bypass IP-binding so the browser's redirect target works, and the route handler is microscopic so Netlify is no longer in the data path.
+**Earlier v4 attempts (history):** v4's first design ran a byte-stream proxy at `/api/media/:fileid` keyed by `fileid` and resolved fresh signed URLs per request (worked, but the URLs and `fileid`s appeared in the browser). The second attempt moved URL signing to the browser to avoid the proxy entirely; it failed because pCloud's API gates `getfilelink` / `getthumblink` against browser origins (error 7010 "Invalid link referer"). A third iteration tried 302-redirecting from `/api/memory/<uuid>` to a public-link URL — simpler than the proxy, but it leaked the public-link `code` to the Network tab, and public links aren't IP-bound so anyone with the URL could fetch the bytes without going through the auth gate. The current design keeps the UUID indirection and cron-warmed cache from that iteration but byte-streams the bytes through the function so the public-link URL never reaches the browser.
