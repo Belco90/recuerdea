@@ -5,6 +5,7 @@ import { getFolderCacheStore } from '#/lib/folder-cache.server'
 import { createMediaCache } from '#/lib/media-cache'
 import { getMediaCacheStore } from '#/lib/media-cache.server'
 import { refreshMemories } from '#/lib/refresh-memories.server'
+import { connectLambda } from '@netlify/blobs'
 import { schedule } from '@netlify/functions'
 import { createClient } from 'pcloud-kit'
 
@@ -18,7 +19,17 @@ function getEnvConfig(): { token: string; folderId: number } {
 	return { token, folderId }
 }
 
-export const handler = schedule('0 4 * * *', async () => {
+export const handler = schedule('0 4 * * *', async (event) => {
+	// Scheduled functions don't get the automatic Blobs context that on-demand
+	// SSR functions get — we have to wire it up explicitly. Without this the
+	// `getStore` calls in the cache factories throw and fall back to no-op
+	// stores (which silently swallow writes).
+	//
+	// `HandlerEvent` from @netlify/functions doesn't declare the `blobs` field
+	// that Netlify's runtime injects into scheduled-function events, so we cast
+	// to the shape `connectLambda` expects.
+	connectLambda(event as unknown as Parameters<typeof connectLambda>[0])
+
 	const { token, folderId } = getEnvConfig()
 	const client = createClient({ token, type: 'pcloud' })
 	const mediaCache = createMediaCache(getMediaCacheStore())
