@@ -1,19 +1,7 @@
 import type { MemoryItem } from '#/lib/pcloud.server'
 
+import { formatCaptureDate } from '#/lib/date'
 import { Box, Image, Stack, Text } from '@chakra-ui/react'
-
-const captureDateFormatter = new Intl.DateTimeFormat(undefined, {
-	year: 'numeric',
-	month: 'long',
-	day: 'numeric',
-})
-
-export function formatCaptureDate(iso: string | null): string | null {
-	if (!iso) return null
-	const date = new Date(iso)
-	if (Number.isNaN(date.getTime())) return null
-	return captureDateFormatter.format(date)
-}
 
 export function MemoryView({ item }: { item: MemoryItem }) {
 	const formatted = formatCaptureDate(item.captureDate)

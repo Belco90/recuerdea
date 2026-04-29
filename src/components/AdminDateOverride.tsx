@@ -1,3 +1,4 @@
+import { todayIso } from '#/lib/date'
 import {
 	Button,
 	DatePicker,
@@ -13,14 +14,6 @@ import { getRouteApi } from '@tanstack/react-router'
 import { Calendar } from 'lucide-react'
 
 const route = getRouteApi('/')
-
-function todayIso(): string {
-	const now = new Date()
-	const yyyy = now.getFullYear()
-	const mm = String(now.getMonth() + 1).padStart(2, '0')
-	const dd = String(now.getDate()).padStart(2, '0')
-	return `${yyyy}-${mm}-${dd}`
-}
 
 export function AdminDateOverride({ activeDate }: { activeDate: string | undefined }) {
 	const navigate = route.useNavigate()

@@ -50,16 +50,16 @@ CI (`.github/workflows/ci.yml`) runs type-check, test, lint, and format-check in
 src/
   routes/           # TanStack Router file-based routes
     __root.tsx
-    index.tsx       # Home route — beforeLoad auth gate + loader; component is `<Home>` from src/components
+    index.tsx       # Home route — beforeLoad auth gate + loader + Home component (composes MemoryView and AdminDateOverride)
     login.tsx       # Netlify Identity login + invite/recovery callbacks
     api/
       memory/
         $uuid.ts    # GET /api/memory/:uuid?variant=image|stream|poster — auth-gated, byte-streams the public-link response — added in v4
-  components/       # Presentational React components (PascalCase per file)
-    Home.tsx              # Top-level home view — consumes loader data via getRouteApi('/')
-    MemoryView.tsx        # Single memory row (image or video + capture date); exports formatCaptureDate
+  components/       # Reusable presentational React components (PascalCase per file)
+    MemoryView.tsx        # Single memory row (image or video + capture date)
     AdminDateOverride.tsx # Admin-only date picker that drives the `?date=` search param
   lib/              # Pure logic + server functions; tests colocated as *.test.ts(x)
+    date.ts         # formatCaptureDate / todayIso — display + ISO helpers shared by route + components
     auth.ts         # createServerFn wrapper for getServerUser
     auth.server.ts  # loadServerUser — server-only auth (isAdmin, JWT decode)
     pcloud.ts       # createServerFn wrapper for getTodayMemories — returns MemoryItem[]
@@ -214,7 +214,7 @@ Cumulative on top of §2. v4 fixes prod 410s and the v3-era IP-mismatch by routi
 For readers diffing this spec against v3:
 
 - §1 / §2: same product. §2 gains a bullet: media is delivered via `/api/memory/<uuid>?variant=...`, an auth-gated route that byte-streams the pCloud public-link response.
-- §4 Project Structure: adds `src/routes/api/memory/$uuid.ts`, `src/lib/media-cache(.server).ts` (replaces v3's `capture-cache`), `src/lib/fileid-index(.server).ts`, `src/lib/folder-cache(.server).ts`, `netlify/functions/refresh-memories.ts`, and the `src/components/` PascalCase split (`Home`, `MemoryView`, `AdminDateOverride`); `src/routes/index.tsx` reduces to the route definition.
+- §4 Project Structure: adds `src/routes/api/memory/$uuid.ts`, `src/lib/media-cache(.server).ts` (replaces v3's `capture-cache`), `src/lib/fileid-index(.server).ts`, `src/lib/folder-cache(.server).ts`, `netlify/functions/refresh-memories.ts`, `src/lib/date.ts` (display/ISO helpers), and a `src/components/` split for reusable sub-components (`MemoryView`, `AdminDateOverride`). `Home` stays inside `src/routes/index.tsx` alongside the loader.
 - §5 Code Style: unchanged from v3.
 - §7 Boundaries: "always do" now requires routing media through `/api/memory/<uuid>` with auth gate, the cron as sole writer, public-link lifecycle ownership, and `Cache-Control: private` on the home page HTML. "Ask first" adds `@netlify/functions` (pre-acked) and the `netlify.toml` schedule block (pre-acked). "Never do" adds: don't sign IP-bound URLs server-side and pass to the browser; don't sign anything from the browser (pCloud blocks browser-origin calls); don't embed `fileid` / `code` / `linkid` / token in HTML.
 - §8 Open Questions: replaces v2/v3 entries with v4-relevant ones. Cache shape moves from v3's `capture-cache/v1/${fileid}` (capture date only) to `media/${uuid}` (full `CachedMedia` including `code` + `linkid`) + `fileid-index/${fileid}` sidecar + `folder/v1` snapshot. The cron deletes stale per-uuid entries AND their associated pCloud public links.
