@@ -128,22 +128,22 @@ describe('fetchTodayMemories', () => {
 		expect(result).toEqual([
 			{
 				kind: 'video',
-				url: 'https://download/300',
+				url: '/api/media/300?variant=stream',
 				mimeType: 'video/mp4',
-				posterUrl: 'https://thumb.pcloud.com/t/img.jpg',
+				posterUrl: '/api/media/300?variant=poster',
 				name: 'c.mp4',
 				captureDate: '2018-04-27T10:00:00.000Z',
 			},
 			{
 				kind: 'image',
-				url: 'https://thumb.pcloud.com/t/img.jpg',
+				url: '/api/media/100?variant=image',
 				name: 'a.jpg',
 				captureDate: '2024-04-27T14:30:00.000Z',
 			},
 		])
 	})
 
-	it('builds an image MemoryItem from getthumblink', async () => {
+	it('builds an image MemoryItem with a relative /api/media URL', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([jpegA])),
 		})
@@ -154,15 +154,17 @@ describe('fetchTodayMemories', () => {
 
 		expect(item).toEqual({
 			kind: 'image',
-			url: 'https://thumb.pcloud.com/t/img.jpg',
+			url: '/api/media/100?variant=image',
 			name: 'a.jpg',
 			captureDate: '2019-04-27T14:30:00.000Z',
 		})
-		expect(client.call).toHaveBeenCalledWith('getthumblink', { fileid: 100, size: '2048x1024' })
+		// pCloud signing endpoints are not invoked from buildMemoryItem in v4 — the
+		// route handler at /api/media/:fileid resolves URLs at request time.
+		expect(client.call).not.toHaveBeenCalledWith('getthumblink', expect.anything())
 		expect(mockedExtractVideoCaptureDate).not.toHaveBeenCalled()
 	})
 
-	it('builds a video MemoryItem from getfilelink + getthumblink poster', async () => {
+	it('builds a video MemoryItem with relative stream + poster URLs', async () => {
 		const client = fakeClient({
 			listfolder: vi.fn<Client['listfolder']>().mockResolvedValue(makeFolderResult([mp4C])),
 		})
@@ -173,14 +175,16 @@ describe('fetchTodayMemories', () => {
 
 		expect(item).toEqual({
 			kind: 'video',
-			url: 'https://download/300',
+			url: '/api/media/300?variant=stream',
 			mimeType: 'video/mp4',
-			posterUrl: 'https://thumb.pcloud.com/t/img.jpg',
+			posterUrl: '/api/media/300?variant=poster',
 			name: 'c.mp4',
 			captureDate: '2020-04-27T10:00:00.000Z',
 		})
-		expect(client.getfilelink).toHaveBeenCalledWith(300)
-		expect(client.call).toHaveBeenCalledWith('getthumblink', { fileid: 300, size: '2048x1024' })
+		// `client.getfilelink(300)` is still called by safeExtractCaptureDate to
+		// fetch the byte range for mvhd parsing, but no signing URL leaks into the
+		// MemoryItem — both `url` and `posterUrl` are relative.
+		expect(client.call).not.toHaveBeenCalledWith('getthumblink', expect.anything())
 		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
 	})
 

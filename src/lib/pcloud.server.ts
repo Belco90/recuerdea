@@ -21,8 +21,6 @@ export type MemoryItem =
 			captureDate: string
 	  }
 
-type GetThumbLinkResponse = { hosts: string[]; path: string }
-
 function getEnvConfig(): { token: string; folderId: number } {
 	const token = process.env.PCLOUD_TOKEN
 	const folderIdRaw = process.env.PCLOUD_MEMORIES_FOLDER_ID
@@ -51,18 +49,6 @@ async function listMediaFiles(client: Client, folderId: number): Promise<FileMet
 	return folder.contents?.filter(isMediaFile) ?? []
 }
 
-async function fetchThumbnailUrl(client: Client, fileid: number): Promise<string> {
-	const thumb = await client.call<GetThumbLinkResponse>('getthumblink', {
-		fileid,
-		size: '2048x1024',
-	})
-	return `https://${thumb.hosts[0]}${thumb.path}`
-}
-
-async function fetchVideoStreamUrl(client: Client, fileid: number): Promise<string> {
-	return client.getfilelink(fileid)
-}
-
 async function safeExtractCaptureDate(
 	client: Client,
 	file: FileMetadata,
@@ -85,28 +71,24 @@ async function safeExtractCaptureDate(
 	return result
 }
 
-async function buildMemoryItem(
-	client: Client,
-	file: FileMetadata,
-	capture: Date,
-): Promise<MemoryItem> {
+function buildMemoryItem(file: FileMetadata, capture: Date): MemoryItem {
 	const captureDate = capture.toISOString()
 	if (isVideo(file)) {
-		const [url, posterUrl] = await Promise.all([
-			fetchVideoStreamUrl(client, file.fileid),
-			fetchThumbnailUrl(client, file.fileid),
-		])
 		return {
 			kind: 'video',
-			url,
+			url: `/api/media/${file.fileid}?variant=stream`,
 			mimeType: file.contenttype,
-			posterUrl,
+			posterUrl: `/api/media/${file.fileid}?variant=poster`,
 			name: file.name,
 			captureDate,
 		}
 	}
-	const url = await fetchThumbnailUrl(client, file.fileid)
-	return { kind: 'image', url, name: file.name, captureDate }
+	return {
+		kind: 'image',
+		url: `/api/media/${file.fileid}?variant=image`,
+		name: file.name,
+		captureDate,
+	}
 }
 
 export async function fetchTodayMemories(today: {
@@ -134,5 +116,5 @@ export async function fetchTodayMemories(today: {
 		(a, b) => a.capture.getFullYear() - b.capture.getFullYear() || a.file.fileid - b.file.fileid,
 	)
 
-	return Promise.all(matches.map((m) => buildMemoryItem(client, m.file, m.capture)))
+	return matches.map((m) => buildMemoryItem(m.file, m.capture))
 }
