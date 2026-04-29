@@ -123,12 +123,17 @@ P0: SPEC amendments (T0.1)
 P0: Create v4 branch (T0.2)
     │
     ▼
-SLICE A — 410 fix
-  A1: spike — verify TanStack Start API route convention works
-  A2: media-proxy.server.ts (pure helper)
-  A3: api/media/$fileid.ts (302 redirect handler)
-  A4: pcloud.server.ts — MemoryItem URLs become /api/media/...; loader stops calling getfilelink/getthumblink for matched items
-  → CHECKPOINT A: green tests + e2e + PR [v4-A] → v4 + smoke 410 fix on deploy preview
+SLICE A — proxy /api/media (1st draft: 302; corrected to byte-stream in A.5)
+  A1: spike — verify TanStack Start API route convention works                  ✅ shipped
+  A2: media-proxy.server.ts (pure helper)                                       ✅ shipped
+  A3: api/media/$fileid.ts (302 redirect handler — v1 design, kept for now)     ✅ shipped
+  A4: pcloud.server.ts — MemoryItem URLs become /api/media/...; loader stops calling getfilelink/getthumblink for matched items   ✅ shipped
+  → DEPLOY-PREVIEW VERIFICATION: 302 redirects don't work — pCloud signed URLs are IP-bound. Need to switch to byte-streaming.
+
+SLICE A.5 — byte-stream the proxy (REAL 410 fix)
+  A.5/P1: SPEC + plan amendments (relax §7 "never byte-stream", note IP-binding constraint)
+  A.5/P2: convert api/media/$fileid.ts from 302 to streaming response (forward Range header, set Cache-Control)
+  → CHECKPOINT A: green tests + e2e + PR [v4-A] deploy preview verifies images and videos render across IPs (no "another IP address" errors after lazy scroll / 30-min revisit)
     │
     ▼
 SLICE B — UUID indirection + expanded cache
@@ -240,7 +245,7 @@ export async function resolveMediaUrl(
 - GET handler. Parses `fileid` from path (validate it's a positive integer; 400 otherwise).
 - Parses `?variant=` (default `image`; validate against the 3 allowed values; 400 otherwise).
 - For default variant: calls `client.stat(fileid)` to get `contenttype` (so we know if it's video → `stream` instead of `image`). One pCloud call. Acceptable in slice A; slice B replaces this with a cache lookup.
-- Calls `resolveMediaUrl(fileid, variant, contenttype)`, returns `Response.redirect(url, 302)`.
+- Calls `resolveMediaUrl(fileid, variant, contenttype)`, returns `Response.redirect(url, 302)`. **Note**: this 302 design is replaced in A.5 with a byte-stream proxy because pCloud signed URLs are IP-bound and the browser can't follow the redirect from a different IP. A3 ships as-is for atomicity; A.5 swaps the response body without touching `resolveMediaUrl`.
 - Errors (file not found, pCloud failure): 502 with a short body.
 
 **Acceptance**:
@@ -275,16 +280,64 @@ export async function resolveMediaUrl(
 
 **Verification**: `pnpm test src/lib/pcloud.server.test.ts` + full suite green.
 
-#### CHECKPOINT A — Green + PR + 410 verification
+#### A.5/P1 — SPEC + plan amendments for byte-stream pivot
+
+**Files**: `SPEC.md`, `tasks/plan.md`, `tasks/todo.md`. Single docs commit.
+
+**Acceptance**:
+
+- §7 "always do" updated to mention **byte-streaming** (not 302 redirects) for `/api/media/:uuid?variant=...`. The IP-binding rationale is in the bullet.
+- §7 "never do" "Cache pCloud signed URLs" rule reworded — never **serialize** signed URLs outside one request; in-handler usage by `fetch()` is allowed.
+- §11 "Hot path" gains a second bullet describing the route handler's per-request work (cache read → pCloud sign → fetch → pipe). `Cache-Control` strategy noted.
+- §12 v3→v4 summary updated to describe the IP-mismatch fix as the real cause of v3-era "410s".
+- This file (`tasks/plan.md`) gains the A.5 entries; `tasks/todo.md` un-checks the original Checkpoint A entries (the 410 verification didn't happen) and adds A.5/P1–P4.
+
+**Approvals**: byte-streaming through Netlify is now an explicit design choice — pre-acked by the user in plan-mode review. Cite at commit time.
+
+**Verification**: `pnpm format:check` clean. Spec read-through confirms every "302" reference now mentions byte-streaming or is gone.
+
+#### A.5/P2 — Convert `/api/media/:fileid` route to streaming proxy
+
+**Files**: MODIFY `src/routes/api/media/$fileid.ts`. NEW (or extend existing) test for the streaming path.
+
+**Behavior change**:
+
+- Validation (fileid + variant) and stat-based default-variant logic unchanged.
+- After resolving the signed pCloud URL via `resolveMediaUrl`, call `fetch(url, { headers: { Range: request.headers.get('range') ?? '' } })` to fetch the bytes. Forward the browser's `Range` header so video seek works.
+- Return `new Response(res.body, { status: res.status, headers })` where `headers` includes:
+  - `content-type` from the cached `contenttype` (or pass through from upstream)
+  - `accept-ranges: bytes`
+  - `content-length` and `content-range` passed through from the upstream response
+  - `cache-control`: `public, max-age=86400, immutable` for `image`/`poster`; `public, max-age=600` for `stream`
+- 5xx from pCloud surface as 502 with a short message (existing pattern); IP-bound URL failures shouldn't happen any more because we're consuming the URL from the same IP that signed it.
+
+**Test**:
+
+- Mock `globalThis.fetch` (vitest `vi.spyOn(globalThis, 'fetch')`) to return a fake `Response` with a known body and headers. Assert:
+  1. The route returns a streaming response with the upstream body.
+  2. Headers include the variant-appropriate `cache-control` and `accept-ranges: bytes`.
+  3. Browser `Range` header is forwarded to the upstream `fetch`.
+  4. Upstream 206 responses pass through `content-range` and status.
+- Existing validation tests (`abc` → 400, `?variant=bogus` → 400) stay green; manual curl smoke confirms locally.
+
+**Acceptance**:
+
+- All tests green, `type-check`, `lint`, `format:check`, `build` clean.
+- Manual: `curl -I http://localhost:3000/api/media/<good-fileid>?variant=image` returns `200 OK` with image bytes (`-D headers` shows `content-type: image/...`, `cache-control: ...`).
+- Manual on deploy preview (after push): same curl returns 200 + bytes, AND the home page renders images/video for a 30-min idle session without IP-mismatch errors.
+
+**Verification**: pnpm test passing + manual deploy-preview smoke (user-driven).
+
+#### CHECKPOINT A — Green + PR + IP-mismatch verification
 
 - `pnpm test` (full suite)
 - `pnpm type-check`
 - `pnpm lint`
 - `pnpm format:check`
 - `pnpm netlify dev` — sign in, verify home renders all media; admin date picker works; video plays; empty state works for an off-day.
-- Open PR `[v4-A] Route media through /api/media for fresh pCloud URLs` targeting `v4`.
-- On the deploy preview: hard reload home, scroll lazily after 5 min, leave the tab open and revisit after 30 min — **no 410s** in the network tab.
-- Merge PR into `v4`.
+- Open PR `[v4]` (or use the existing PR #4) → `main`. Push of A.5 commits updates the deploy preview.
+- On the deploy preview: hard reload home, scroll lazily after 5 min, leave the tab open and revisit after 30 min — **no "another IP address" errors, no 410s** in the network tab. Images render, videos play, video seek works (range request).
+- Mark Checkpoint A complete only after deploy-preview verification (the local-only checks pass even with the 302-redirect bug because they all originate from one IP).
 
 ---
 

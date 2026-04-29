@@ -7,21 +7,26 @@ See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 - [x] **T0.1** — Apply 8 SPEC.md amendments + replace `tasks/plan.md` & `tasks/todo.md` with v4 versions. Single docs commit. Cite ack on amendments #4 (UUID indirection) and #5 (no-fallback loader).
 - [x] **T0.2** — `git checkout -b v4` from `main` (`8d775c5`); push to `origin/v4`.
 
-## Slice A — 410 fix (smallest possible)
+## Slice A — proxy /api/media (1st draft: 302; corrected to byte-stream in A.5)
 
-- [ ] **A1** — Spike: add `src/routes/api/ping.ts` returning `Response.redirect('/login', 302)`. Verify under `pnpm netlify dev` with `curl -i http://localhost:8888/api/ping`. If TanStack Start API route convention doesn't work → STOP and re-plan with Netlify Functions fallback.
-- [ ] **A2** — `src/lib/media-proxy.server.ts` + test. Pure helper: `resolveMediaUrl(fileid, variant, contenttype)` calling the right pCloud endpoint per variant.
-- [ ] **A3** — `src/routes/api/media/$fileid.ts`. GET handler: validate fileid + variant, call `client.stat` for kind detection (interim — slice B replaces with cache lookup), call `resolveMediaUrl`, 302. Manual curl smoke.
-- [ ] **A4** — Modify `src/lib/pcloud.server.ts`: `MemoryItem` URL fields become `/api/media/${fileid}?variant=...`. Drop `fetchThumbnailUrl` / `fetchVideoStreamUrl`. Update `src/lib/pcloud.server.test.ts`. Delete the `ping` route from A1.
+- [x] **A1** — Spike: add `src/routes/api/ping.ts` returning `Response.redirect('/login', 302)`. Verify under `pnpm netlify dev` with `curl -i http://localhost:8888/api/ping`.
+- [x] **A2** — `src/lib/media-proxy.server.ts` + test. Pure helper: `resolveMediaUrl(client, fileid, variant, contenttype)` calling the right pCloud endpoint per variant.
+- [x] **A3** — `src/routes/api/media/$fileid.ts`. GET handler: validate fileid + variant, call `client.stat` for kind detection (interim — slice B replaces with cache lookup), call `resolveMediaUrl`, 302. Manual curl smoke. **Replaced in A.5 with a byte-stream response** because pCloud signed URLs are IP-bound and 302 redirects don't work across IPs.
+- [x] **A4** — Modify `src/lib/pcloud.server.ts`: `MemoryItem` URL fields become `/api/media/${fileid}?variant=...`. Drop `fetchThumbnailUrl` / `fetchVideoStreamUrl`. Update `src/lib/pcloud.server.test.ts`. Delete the `ping` route from A1.
 
-## Checkpoint A — 410 fix verified
+## Slice A.5 — byte-stream the proxy (real IP-mismatch fix)
+
+- [ ] **A.5/P1** — Apply SPEC + plan amendments: §7 + §11 + §12 explain the IP-binding constraint and the byte-stream design. `tasks/plan.md` adds the A.5 entries; `tasks/todo.md` un-checks the original Checkpoint A. Pre-acked in plan-mode review (byte-streaming through Netlify is now the explicit design).
+- [ ] **A.5/P2** — Modify `src/routes/api/media/$fileid.ts`: replace `Response.redirect(url, 302)` with `fetch(url, { headers: { Range: request.headers.get('range') ?? '' } })` → `new Response(res.body, { status, headers })` where headers include `content-type`, `accept-ranges: bytes`, `cache-control` (per variant), and pass-through `content-length` / `content-range`. Add a streaming-response test that fakes `globalThis.fetch`.
+
+## Checkpoint A — IP-mismatch fix verified
 
 - [ ] `pnpm test` (full suite)
 - [ ] `pnpm type-check`
 - [ ] `pnpm lint`
 - [ ] `pnpm format:check`
-- [ ] `pnpm netlify dev` — sign in, verify home + admin date picker + video playback + empty state.
-- [ ] PR `[v4-A] Route media through /api/media for fresh pCloud URLs` → `v4`. On the deploy preview: hard reload home, scroll lazily after 5+ min, return after 30+ min — **no 410s**. Merge into `v4`.
+- [ ] `pnpm dev` (or `pnpm netlify dev`) — sign in, verify home + admin date picker + video playback + empty state.
+- [ ] Push A.5 commits to `v4`; PR #4 deploy preview rebuilds. On the deploy preview: hard reload home, scroll lazily after 5+ min, return after 30+ min — **no "another IP address" errors, no 410s**. Images render, videos play, video seek works (Range header).
 
 ## Slice B — UUID indirection + expanded cache shape
 
