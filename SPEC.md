@@ -103,6 +103,8 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
 - **Resolve pCloud signed URLs in the browser, not on the server.** pCloud signs `getfilelink` / `getthumblink` / `getvideolink` URLs bound to the **caller's IP**, so a server-signed URL is unusable in the browser ("another IP address" error). The SSR loader returns `{ items, pcloudToken }`; the browser instantiates one shared `pcloud-kit` `Client` via `PcloudClientProvider` (React context, `useState` lazy init); each `<MemoryView>` calls `useMemoryUrls(item)` to sign URLs on mount via that client. Server code may still call `getfilelink` for a one-shot in-handler fetch (e.g. EXIF range read at SSR time) — the URL just must not be serialized out to the browser.
 - **The home page HTML must not be public-cached.** Because the SSR response embeds `pcloudToken`, the response must be `Cache-Control: private` (or `no-store`) — never `public, s-maxage=...`. Verify on the deploy preview with `curl -I` after any change to the home loader.
+- When using `gh` CLI, make sure that the active user is the one who owns the repo.
+- After running `pnpm build` for checking the build, delete the `dist` folder plus Netlify cache.
 
 ### Ask first
 
