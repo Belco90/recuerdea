@@ -1,7 +1,7 @@
 import type { MediaVariant } from '#/lib/media-proxy.server'
 import type { Client } from 'pcloud-kit'
 
-import { resolveMediaUrl } from '#/lib/media-proxy.server'
+import { streamMedia } from '#/lib/media-proxy.server'
 import { createFileRoute } from '@tanstack/react-router'
 import { createClient } from 'pcloud-kit'
 
@@ -40,8 +40,17 @@ export const Route = createFileRoute('/api/media/$fileid')({
 					const isVideo = contenttype.startsWith('video/')
 					const variant: MediaVariant = variantParam ?? (isVideo ? 'stream' : 'image')
 
-					const target = await resolveMediaUrl(client, fileid, variant, contenttype)
-					return new Response(null, { status: 302, headers: { Location: target } })
+					// Byte-stream the bytes through the function instead of 302-redirecting:
+					// pCloud signed URLs are bound to the caller's IP, so the browser following
+					// a redirect from a different IP would be rejected. Fetching here keeps the
+					// signing-IP and consuming-IP the same.
+					return await streamMedia(
+						client,
+						fileid,
+						variant,
+						contenttype,
+						request.headers.get('range'),
+					)
 				} catch (err) {
 					const message = err instanceof Error ? err.message : 'unknown error'
 					return new Response(`pCloud error: ${message}`, { status: 502 })
