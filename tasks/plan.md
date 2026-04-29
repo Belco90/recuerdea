@@ -469,4 +469,4 @@ Concrete changes (commit 3b714e3):
 
 Trade-off: every video Range request now goes through the function (Netlify bandwidth in the data path). Acceptable for a single-user app; the user has a premium pCloud plan and Netlify's free-tier bandwidth is not yet the bottleneck.
 
-Verification still pending: deploy-preview hard reload + video seek + Network-tab inspection per `tasks/todo.md` G8 section.
+Verified on the deploy preview: image, video, and poster all render through `/api/memory/<uuid>`; no upstream pCloud URL appears in the Network tab; no 7010 / 410 errors. Remaining steps are the pre-prod cron trigger and the `v4 → main` merge.

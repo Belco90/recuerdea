@@ -106,12 +106,9 @@ User noted on the deploy preview: the 302 leaks the public-link URL to the brows
 - [x] `src/routes/api/memory/$uuid.ts` — wire a default `fetchBytes` (global `fetch` + Range injection) into the deps.
 - [x] Tests: assert `Location` header is null and that bytes flow through; cover image, poster-on-video, stream-with-Range (206 + content-range), and 502 paths.
 - [x] Commit (3b714e3 — "Byte-stream /api/memory instead of 302-redirecting (G8)").
-- [ ] Push `v4`. On the deploy preview:
-  - [ ] Hard reload `/`. Network tab: requests go to `/api/memory/<uuid>` and stay there (no `eapi.pcloud.com` URL visible). Image/video/poster all render.
-  - [ ] Video seek works (byte range request returns `206`).
-  - [ ] No 7010 / 410 / "another IP address" errors.
-- [ ] Re-confirm `Cache-Control: private` (or `no-store` / absent) on `/`.
-- [ ] Merge `v4 → main`. Post-merge prod smoke.
+- [x] Push `v4` (8f14949). Deploy preview verified by user: image/video/poster render, no `eapi.pcloud.com` URL in Network tab, no 7010/410 errors.
+- [ ] Pre-prod: trigger the prod cron manually so the snapshot exists at merge time.
+- [ ] Merge `v4 → main`. Post-merge prod smoke (hard reload `/`, video seek, `curl -I /` cache-control private/no-store).
 
 ## Parked / follow-up
 
