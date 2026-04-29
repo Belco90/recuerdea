@@ -41,6 +41,7 @@ export async function fetchTodayMemories(today: {
 	month: number
 	day: number
 }): Promise<MemoryItem[]> {
+	// Cache-only: zero pCloud API calls when warm. The cron is the sole writer.
 	const folderCache = createFolderCache(getFolderCacheStore())
 	const mediaCache = createMediaCache(getMediaCacheStore())
 

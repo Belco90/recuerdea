@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiMediaFileidRouteImport } from './routes/api/media/$fileid'
+import { Route as ApiMemoryUuidRouteImport } from './routes/api/memory/$uuid'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -23,40 +23,40 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiMediaFileidRoute = ApiMediaFileidRouteImport.update({
-  id: '/api/media/$fileid',
-  path: '/api/media/$fileid',
+const ApiMemoryUuidRoute = ApiMemoryUuidRouteImport.update({
+  id: '/api/memory/$uuid',
+  path: '/api/memory/$uuid',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/api/media/$fileid': typeof ApiMediaFileidRoute
+  '/api/memory/$uuid': typeof ApiMemoryUuidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/api/media/$fileid': typeof ApiMediaFileidRoute
+  '/api/memory/$uuid': typeof ApiMemoryUuidRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/api/media/$fileid': typeof ApiMediaFileidRoute
+  '/api/memory/$uuid': typeof ApiMemoryUuidRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/api/media/$fileid'
+  fullPaths: '/' | '/login' | '/api/memory/$uuid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/api/media/$fileid'
-  id: '__root__' | '/' | '/login' | '/api/media/$fileid'
+  to: '/' | '/login' | '/api/memory/$uuid'
+  id: '__root__' | '/' | '/login' | '/api/memory/$uuid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
-  ApiMediaFileidRoute: typeof ApiMediaFileidRoute
+  ApiMemoryUuidRoute: typeof ApiMemoryUuidRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,11 +75,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/media/$fileid': {
-      id: '/api/media/$fileid'
-      path: '/api/media/$fileid'
-      fullPath: '/api/media/$fileid'
-      preLoaderRoute: typeof ApiMediaFileidRouteImport
+    '/api/memory/$uuid': {
+      id: '/api/memory/$uuid'
+      path: '/api/memory/$uuid'
+      fullPath: '/api/memory/$uuid'
+      preLoaderRoute: typeof ApiMemoryUuidRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -88,7 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
-  ApiMediaFileidRoute: ApiMediaFileidRoute,
+  ApiMemoryUuidRoute: ApiMemoryUuidRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
