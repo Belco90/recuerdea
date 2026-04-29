@@ -57,7 +57,12 @@ function memoryKey(item: MemoryItem): string {
 function Home() {
 	const { user, logout } = useIdentity()
 	const { memories, isAdmin } = Route.useLoaderData()
+	const { user: serverUser } = Route.useRouteContext()
 	const { date: activeDate } = Route.useSearch()
+
+	// Use `serverUser` as fallback while the client-side `user` is ready
+	// to avoid blank glitches on the browser.
+	const finalUser = user || serverUser
 
 	const emptyMessage = activeDate
 		? `No memories for ${formatCaptureDate(activeDate)}.`
@@ -67,7 +72,7 @@ function Home() {
 		<Box p={8}>
 			<Heading size="2xl">Welcome back</Heading>
 			<Text mt={4} fontSize="lg">
-				Signed in as {user?.email}
+				Signed in as {finalUser.email}
 			</Text>
 
 			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
