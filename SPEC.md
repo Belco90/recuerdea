@@ -52,11 +52,12 @@ src/
     index.tsx       # Home route — wiring only; UI lives in components/ (v4)
     login.tsx       # Netlify Identity login + invite/recovery callbacks
     api/
-      media.$fileid.ts # GET /api/media/:fileid → 302 to fresh pCloud URL — added in v4
-  components/       # Presentational React components (no server/IO)  — added in v4
-    home.tsx        # <Home> shell
-    memory-view.tsx # Renders one MemoryItem (image/video)
-    admin-date-override.tsx # Admin date picker
+      media/
+        $uuid.ts     # GET /api/media/:uuid?variant=image|stream|poster → 302 to fresh pCloud URL — added in v4. fileid never leaves the server.
+  components/       # Presentational React components (no server/IO)  — added in v4 (PascalCase filenames; lib/ stays kebab-case)
+    Home.tsx        # <Home> shell
+    MemoryView.tsx  # Renders one MemoryItem (image/video)
+    AdminDateOverride.tsx # Admin date picker
   lib/              # Pure logic + server functions; tests colocated as *.test.ts(x)
     auth.ts         # createServerFn wrapper for getServerUser
     auth.server.ts  # loadServerUser — server-only auth (isAdmin, JWT decode)
@@ -65,16 +66,16 @@ src/
     exif.ts         # EXIF capture-date extraction (images)
     video-meta.ts   # MP4/MOV creation_time extraction (videos) — added in v2
     filename-date.ts# Filename-based capture-date fallback
-    capture-cache.ts        # Pure (fileid, hash) → CachedFileMeta cache abstraction — v3, expanded in v4
-    capture-cache.server.ts # Netlify-Blobs-backed CaptureCacheStore + no-op fallback — added in v3
+    media-cache.ts          # Pure (uuid → CachedFileMeta) cache abstraction — v4 (replaces v3 capture-cache)
+    media-cache.server.ts   # Netlify-Blobs-backed MediaCacheStore + no-op fallback — v4
+    fileid-index.ts         # Pure (fileid → uuid) sidecar abstraction — v4 (cron writer)
+    fileid-index.server.ts  # Netlify-Blobs-backed FileidIndexStore + no-op fallback — v4
     folder-cache.ts         # Pure folder-listing cache abstraction — added in v4
     folder-cache.server.ts  # Netlify-Blobs-backed folder snapshot store — added in v4
     media-proxy.server.ts   # Resolves fresh pCloud URLs on demand (no caching) — added in v4
     date-utils.ts   # parseSearchDate, isoToOverride, todayIso, formatCaptureDate — added in v4
     identity-context.tsx
     navigation.ts   # hardNavigate (post-logout cookie refresh)
-  server/
-    refresh-cache.ts # Scheduled Netlify Function: pre-warms folder + per-file caches — added in v4
   router.tsx        # getRouter() factory
   routeTree.gen.ts  # auto-generated, never edit by hand
 test/
@@ -82,6 +83,9 @@ test/
   stubs/            # Stubs for @tanstack/react-start in browser mode
 __mocks__/
   @netlify/identity.ts
+netlify/
+  functions/
+    refresh-cache.ts # Scheduled Netlify Function: pre-warms folder + per-file caches — added in v4 (registered via netlify.toml [functions."refresh-cache"] schedule)
 ```
 
 Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
@@ -112,7 +116,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - Colocate tests with source under `src/lib/` for any new pure logic.
 - Use the existing path alias `#/*` for `src/` imports.
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
-- **Resolve pCloud signed URLs at request time, not at SSR time**: media URLs go through `/api/media/:fileid` (302 to a fresh `getfilelink` / `getthumblink` / `getvideolink`). Never persist a pCloud URL in SSR HTML, loader cache, or Blobs.
+- **Resolve pCloud signed URLs at request time, not at SSR time**: media URLs go through `/api/media/:uuid?variant=...` (302 to a fresh `getfilelink` / `getthumblink` / `getvideolink`). Never persist a pCloud URL in SSR HTML, loader cache, or Blobs.
 
 ### Ask first
 
@@ -137,11 +141,11 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 
 1. **MP4/MOV metadata parser library** — resolved in v2 (hand-rolled mvhd reader, no dep).
 2. **Range-fetch strategy for video EXIF** — resolved in v2 (two-step start/tail fetch).
-3. **Metadata store** — Netlify Blobs is shipped for the capture-date cache (v3) and expanded in v4 to hold the full `CachedFileMeta` ({ kind, contenttype, name, captureDate }) keyed under `v2/`, plus a `folder/v1` listing snapshot. `consistency: 'eventual'`, with a no-op fallback when the Blobs runtime isn't reachable (plain `pnpm dev`). Tagging/upload metadata stores remain future work.
-4. **Media proxy strategy (v4)** — the `/api/media/:fileid` endpoint resolves a fresh pCloud URL per request and returns a 302 redirect (image/poster) or 302 to the streaming URL (video). 302 keeps our function out of the byte path. Streaming bytes through Netlify is rejected (cost + bandwidth). Open: should `?kind=poster|stream` be an explicit query param, or inferred from the cached `contenttype`? Default plan: infer.
-5. **Cron schedule (v4)** — `@daily` at a low-traffic UTC hour. Open question is whether to also run it on-demand from the home loader when the snapshot is missing/expired (yes — fall back to a live `listfolder` so the page never breaks if the cron skipped a day).
-6. **Cache invalidation (v4)** — pCloud's `hash` invalidates per-file entries (rename ≠ content change). Folder snapshot is replaced wholesale by the cron. Removed files leave stale per-file entries; harmless and cheap.
-7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path must be ≤ 1 Blob read for the snapshot + N reads for matched files. No `listfolder` and no extractor calls on the hot path. Function timeout (10 s) is the operative ceiling on the cron.
+3. **Metadata store** — Netlify Blobs is shipped for the capture-date cache (v3) and expanded in v4 to hold the full `CachedFileMeta` ({ fileid, hash, kind, contenttype, name, captureDate }) keyed under `media/${uuid}`, with a `fileid-index/${fileid}` sidecar (`{ uuid }`) and a `folder/v1` listing snapshot. `consistency: 'eventual'`, with a no-op fallback when the Blobs runtime isn't reachable (plain `pnpm dev`). Tagging/upload metadata stores remain future work.
+4. **Media proxy strategy (v4)** — the `/api/media/:uuid?variant=image|stream|poster` endpoint resolves a fresh pCloud URL per request and returns a 302 redirect (image/poster) or 302 to the streaming URL (video). 302 keeps our function out of the byte path. Streaming bytes through Netlify is rejected (cost + bandwidth). The `?variant=` param is explicit; default is inferred from the cached `kind` (image → `image`, video → `stream`; poster requires explicit `?variant=poster`).
+5. **Cron schedule (v4)** — daily at 04:00 UTC (`0 4 * * *`). **Cron is the only writer.** No on-demand loader fallback: if the snapshot is missing the home route renders an empty state and the loader logs a warn. The cron must be triggered manually before the first prod release so the snapshot exists when users hit the page.
+6. **Cache invalidation (v4)** — pCloud's `hash` invalidates per-file entries (rename ≠ content change). Folder snapshot is replaced wholesale by the cron. The cron also deletes stale `media/${uuid}` entries (uuids no longer in the snapshot) and their `fileid-index/${fileid}` sidecars.
+7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path must be ≤ 1 Blob read for the snapshot + N per-uuid reads (where N = files in folder, not matched-day items — `captureDate` lives in the per-uuid value, so all entries must be read to filter by today's day). No `listfolder` and no extractor calls on the hot path. Function timeout (10 s) is the operative ceiling on the cron.
 
 ## 9. v1 → v2 changes summary
 
@@ -169,23 +173,24 @@ Cumulative on top of §2. v4 is a correctness fix (410) plus an aggressive cachi
 **Correctness**
 
 - No production 410s on `<img>` / `<video>` / poster requests, including: (a) lazy-scrolled items rendered minutes after page load, (b) re-renders driven by TanStack Router's loader cache, (c) browser back/forward into a previously-rendered home page.
-- Achieved by routing every media reference through `/api/media/:fileid`, which 302-redirects to a freshly-signed pCloud URL on each request. No pCloud signed URL is ever serialized into HTML, loader cache, or Blobs.
+- Achieved by routing every media reference through `/api/media/:uuid?variant=...`, which 302-redirects to a freshly-signed pCloud URL on each request. The pCloud `fileid` never leaves the server (it lives only in the per-uuid Blobs entry). No pCloud signed URL is ever serialized into HTML, loader cache, or Blobs.
 
 **Cache shape**
 
-- Per-file Blobs entry stores `CachedFileMeta = { hash, kind: 'image' | 'video', contenttype, name, captureDate: string | null }`, keyed `v2/${fileid}`. The `v2/` prefix is intentional (shape change vs. v3's `v1/`).
-- A single folder-snapshot Blobs entry keyed `folder/v1` stores `{ refreshedAt: string, fileids: number[] }`.
-- Hash mismatch on a per-file lookup is treated as a miss and overwritten.
+- Per-file Blobs entry stores `CachedFileMeta = { fileid: number, hash: string, kind: 'image' | 'video', contenttype: string, name: string, captureDate: string | null }`, keyed `media/${uuid}`. The `media/` prefix replaces v3's `v1/`; `fileid` joins the value (used by the API route to call pCloud after uuid → fileid resolution).
+- Sidecar Blobs entry keyed `fileid-index/${fileid}` stores `{ uuid: string }` so the cron can reuse uuids across runs (rename ≠ new uuid).
+- A single folder-snapshot Blobs entry keyed `folder/v1` stores `{ refreshedAt: string, uuids: readonly string[] }`.
+- Hash mismatch on a per-uuid lookup is treated as a miss and overwritten; the uuid itself is preserved so already-rendered HTML keeps working.
 
 **Cron**
 
 - A Netlify Scheduled Function runs at least daily and: (1) calls `listfolder` once, (2) fills any per-file entries missing or with stale hashes, (3) writes a fresh `folder/v1` snapshot.
 - The cron is idempotent and safe to run concurrently with user requests.
-- If the cron has not run yet (cold deploy), the home route falls back to a live `listfolder` + on-demand cache fill so the page still renders. This fallback path is logged.
+- If the cron has not run yet (cold deploy / Blobs panel cleared), the home route renders the empty state and logs a warn. There is **no on-demand `listfolder` fallback** — cron is the sole writer. Pre-prod, the cron must be triggered manually so the snapshot exists before users hit the page.
 
 **Hot path**
 
-- A user visit to `/` performs: 1× snapshot read, N× per-file reads (where N = files in folder), filter to today's day, sort, render. **Zero pCloud API calls** when the cache is warm. Media URLs are resolved by the browser hitting `/api/media/:fileid`, one round-trip per element.
+- A user visit to `/` performs: 1× snapshot read, N× per-uuid reads (where N = files in folder), filter to today's day, sort, render. **Zero pCloud API calls** when the cache is warm. Media URLs are resolved by the browser hitting `/api/media/:uuid?variant=...`, one round-trip per element. `fileid` is never serialized into HTML.
 
 **Layout / UX**
 
@@ -200,8 +205,8 @@ Cumulative on top of §2. v4 is a correctness fix (410) plus an aggressive cachi
 For readers diffing this spec against v3:
 
 - §1 / §2: unchanged. v4 fixes a prod bug and aggressively pre-warms caching; UI and product are the same.
-- §4 Project Structure: adds `src/components/`, `src/routes/api/media.$fileid.ts`, `src/lib/folder-cache(.server).ts`, `src/lib/media-proxy.server.ts`, `src/lib/date-utils.ts`, and `src/server/refresh-cache.ts` (the scheduled function). The home route file shrinks to wiring only.
+- §4 Project Structure: adds `src/components/` with PascalCase filenames (`Home.tsx`, `MemoryView.tsx`, `AdminDateOverride.tsx`); `lib/` stays kebab-case. Adds `src/routes/api/media/$uuid.ts`, `src/lib/media-cache(.server).ts` (replaces the v3 `capture-cache`), `src/lib/fileid-index(.server).ts` (sidecar), `src/lib/folder-cache(.server).ts`, `src/lib/media-proxy.server.ts`, `src/lib/date-utils.ts`, and `netlify/functions/refresh-cache.ts` (scheduled function lives outside `src/`, registered via `netlify.toml`). The home route file shrinks to wiring only.
 - §5 Code Style: adds an immutability + functional-style guideline (prefer `const`, expression-style returns, `readonly` types; `let` allowed only in narrow accumulator scopes).
 - §7 Boundaries: "always do" adds branch-per-version + resolve-URLs-at-request-time. "ask first" extends to `netlify.toml` (scheduled-function block lives there). "never do" adds caching pCloud signed URLs and direct pushes to `main`.
-- §8 Open Questions: replaces resolved v2/v3 entries with v4-relevant ones (media proxy strategy, cron schedule, invalidation, scalability budget). The capture-date cache shape moves from `v1/` (capture date only) to `v2/` (full `CachedFileMeta`).
-- §11 (new): v4 acceptance criteria — 410 fix, expanded cache, cron pre-warming, request-time URL resolution.
+- §8 Open Questions: replaces resolved v2/v3 entries with v4-relevant ones. Cache shape moves from v3's `v1/${fileid}` (capture date only) to `media/${uuid}` (full `CachedFileMeta` with `fileid` in the value) + `fileid-index/${fileid}` sidecar + `folder/v1` snapshot. The `?variant=` param is decided (explicit; default inferred from cached `kind`). The home loader has no on-demand `listfolder` fallback — cron is the sole writer; missing snapshot ⇒ empty state. The cron deletes stale per-uuid entries and their sidecars.
+- §11 (new): v4 acceptance criteria — 410 fix, UUID-indirected media URLs (`fileid` never leaves the server), expanded cache shape with sidecar, cron pre-warming, request-time URL resolution.

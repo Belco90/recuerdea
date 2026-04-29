@@ -4,8 +4,8 @@ See `tasks/plan.md` for full context, dependency graph, and acceptance criteria.
 
 ## Phase 0 — SPEC + branch setup
 
-- [ ] **T0.1** — Apply 8 SPEC.md amendments + replace `tasks/plan.md` & `tasks/todo.md` with v4 versions. Single docs commit. Cite ack on amendments #4 (UUID indirection) and #5 (no-fallback loader).
-- [ ] **T0.2** — `git checkout -b v4` from `main` (`8d775c5`); push to `origin/v4`.
+- [x] **T0.1** — Apply 8 SPEC.md amendments + replace `tasks/plan.md` & `tasks/todo.md` with v4 versions. Single docs commit. Cite ack on amendments #4 (UUID indirection) and #5 (no-fallback loader).
+- [x] **T0.2** — `git checkout -b v4` from `main` (`8d775c5`); push to `origin/v4`.
 
 ## Slice A — 410 fix (smallest possible)
 
