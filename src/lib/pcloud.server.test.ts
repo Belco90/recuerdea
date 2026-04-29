@@ -69,8 +69,6 @@ function makeFolderResult(
 	return makeFolder({ folderid: 0, name: 'root', contents })
 }
 
-const thumbResponse = { hosts: ['thumb.pcloud.com'], path: '/t/img.jpg' }
-
 function fakeClient(overrides: Partial<Client> = {}): Client {
 	return {
 		listfolder: vi.fn<Client['listfolder']>(),
@@ -78,7 +76,6 @@ function fakeClient(overrides: Partial<Client> = {}): Client {
 			.fn<Client['getfilelink']>()
 			.mockImplementation(async (id: number) => `https://download/${id}`),
 		call: vi.fn<Client['call']>().mockImplementation(async (method: string) => {
-			if (method === 'getthumblink') return thumbResponse
 			throw new Error(`unexpected pCloud method in tests: ${method}`)
 		}) as unknown as Client['call'],
 		...overrides,
