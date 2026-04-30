@@ -3,11 +3,11 @@ import type { MemoryItem } from '#/lib/pcloud.server'
 import { AdminDateOverride } from '#/components/AdminDateOverride'
 import { AppShell } from '#/components/AppShell'
 import { MemoryView } from '#/components/MemoryView'
+import { Topbar } from '#/components/Topbar'
 import { getServerUser } from '#/lib/auth'
 import { formatCaptureDate } from '#/lib/date'
-import { useIdentity } from '#/lib/identity-context'
 import { getTodayMemories } from '#/lib/pcloud'
-import { Box, Button, Heading, Stack, Text } from '@chakra-ui/react'
+import { Box, Container, Stack, Text } from '@chakra-ui/react'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -56,14 +56,8 @@ function memoryKey(item: MemoryItem): string {
 }
 
 function Home() {
-	const { user, logout } = useIdentity()
 	const { memories, isAdmin } = Route.useLoaderData()
-	const { user: serverUser } = Route.useRouteContext()
 	const { date: activeDate } = Route.useSearch()
-
-	// Use `serverUser` as fallback while the client-side `user` is ready
-	// to avoid blank glitches on the browser.
-	const finalUser = user || serverUser
 
 	const emptyMessage = activeDate
 		? `No memories for ${formatCaptureDate(activeDate)}.`
@@ -71,30 +65,23 @@ function Home() {
 
 	return (
 		<AppShell>
-			<Box p={8}>
-				<Heading size="2xl">Welcome back</Heading>
-				<Text mt={4} fontSize="lg">
-					Signed in as {finalUser.email}
-				</Text>
-
-				{isAdmin && <AdminDateOverride activeDate={activeDate} />}
-
+			<Topbar />
+			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
+			<Container as="main" maxW="1080px" px={{ base: 4, md: 4.5 }} pt={8} pb={20}>
 				{memories.length === 0 ? (
-					<Text mt={6} fontSize="md">
-						{emptyMessage}
-					</Text>
+					<Box pt={8}>
+						<Text fontSize="md" color="ink.muted">
+							{emptyMessage}
+						</Text>
+					</Box>
 				) : (
-					<Stack mt={6} gap={8}>
+					<Stack gap={8}>
 						{memories.map((item) => (
 							<MemoryView key={memoryKey(item)} item={item} />
 						))}
 					</Stack>
 				)}
-
-				<Button mt={6} onClick={() => void logout()}>
-					Sign out
-				</Button>
-			</Box>
+			</Container>
 		</AppShell>
 	)
 }

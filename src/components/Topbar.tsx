@@ -1,0 +1,76 @@
+import { Wordmark } from '#/components/Wordmark'
+import { useIdentity } from '#/lib/identity-context'
+import { Avatar, Box, Button, Container, HStack, Text } from '@chakra-ui/react'
+import { Link, getRouteApi } from '@tanstack/react-router'
+import { LogOut } from 'lucide-react'
+
+const route = getRouteApi('/')
+
+export function Topbar() {
+	const { user, logout } = useIdentity()
+	const { user: serverUser } = route.useRouteContext()
+	const email = user?.email ?? serverUser.email ?? ''
+
+	return (
+		<Box
+			as="header"
+			position="sticky"
+			top={0}
+			zIndex="docked"
+			bg="bg/80"
+			backdropFilter="blur(14px) saturate(160%)"
+			borderBottomWidth="1px"
+			borderColor="line"
+		>
+			<Container maxW="1080px" px={{ base: 4, md: 4.5 }}>
+				<HStack justify="space-between" align="center" gap={3} py={2.5}>
+					<Link to="/" aria-label="Recuerdea" style={{ color: 'inherit', textDecoration: 'none' }}>
+						<Wordmark />
+					</Link>
+					<HStack gap={2.5}>
+						<HStack
+							borderWidth="1px"
+							borderColor="line"
+							borderRadius="full"
+							pl="3px"
+							pr={{ base: '3px', sm: 3 }}
+							py="3px"
+							gap={2}
+							bg="paper/60"
+						>
+							<Avatar.Root size="xs" colorPalette="accent">
+								<Avatar.Fallback name={email} />
+							</Avatar.Root>
+							<Text
+								display={{ base: 'none', sm: 'inline' }}
+								fontSize="sm"
+								fontWeight={500}
+								color="ink"
+							>
+								{email}
+							</Text>
+						</HStack>
+						<Button
+							variant="outline"
+							size="sm"
+							borderRadius="full"
+							borderColor="line"
+							color="ink.muted"
+							bg="transparent"
+							px={{ base: 0, sm: 3 }}
+							w={{ base: 8, sm: 'auto' }}
+							_hover={{ color: 'ink', borderColor: 'ink.muted', bg: 'paper/70' }}
+							onClick={() => void logout()}
+							aria-label="Cerrar sesión"
+						>
+							<LogOut size={14} aria-hidden />
+							<Text as="span" display={{ base: 'none', sm: 'inline' }} ml={1.5}>
+								Cerrar sesión
+							</Text>
+						</Button>
+					</HStack>
+				</HStack>
+			</Container>
+		</Box>
+	)
+}
