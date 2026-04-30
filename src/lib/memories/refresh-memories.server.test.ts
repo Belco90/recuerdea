@@ -140,6 +140,7 @@ beforeEach(() => {
 		captureDate: new Date('2018-04-27T10:00:00Z'),
 		width: 1920,
 		height: 1080,
+		location: null,
 	})
 })
 
