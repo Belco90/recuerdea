@@ -532,3 +532,34 @@ Each slice ends in a state where `pnpm test`, `pnpm type-check`, `pnpm lint`, `p
 | `src/components/MemoryView.tsx`           | 6             | DELETE                                                                   |
 | `src/components/Lightbox.tsx`             | 7             | NEW                                                                      |
 | `src/components/AdminDateOverride.tsx`    | 8             | REPLACE                                                                  |
+
+---
+
+## Post-implementation manual adjustments (post-Slice 9)
+
+After Slice 9 landed (commit `3ce81b4`), the user pushed four follow-up commits trimming ornaments and adjusting components to taste. Branch `v5-ui-design` is now pushed to `origin` at `45b244c`.
+
+| Commit    | Title                      | What changed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `956229b` | Update todos               | Refreshed `tasks/todo.md` to record commit shas + manual smoke status. Documentation only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `7193a81` | Simplify AdminDateOverride | Big trim (-194 / +45). Removed paper-tape decoration, "Sobreescribir fecha de hoy" title, italic help text, hand-built `Restablecer` button, animated state pill. Replaced hand-built badge `HStack` with the Chakra `Badge` primitive (`<Star size={10} fill="currentColor" /> Solo admin`). Switched `<DatePicker>` from controlled `value` to uncontrolled `defaultValue`. Added `DatePicker.IndicatorGroup` with built-in `ClearTrigger` (replaces the manual reset). Renamed prop `activeDate` → `initialActiveDate`. `src/routes/index.tsx` updated to match the renamed prop. |
+| `45e48d0` | Use IconButton for logout  | Replaced the `Button` (icon + text label) with an icon-only `IconButton` in `Topbar`. Drops the "Cerrar sesión" text label entirely; icon + `aria-label` carry the affordance.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `45b244c` | Remove custom mono font    | Deleted `public/fonts/jetbrainsmono-latin.woff2` (~31 KB). Removed `mono` font token from `theme.ts` and JetBrains Mono `@font-face` from `src/fonts.css`. Mono now resolves through Chakra's default mono stack — design fidelity is acceptable.                                                                                                                                                                                                                                                                                                                                    |
+
+### What now diverges from the original Slice 8 spec
+
+The simplified `AdminDateOverride` no longer matches Slice 8's acceptance criteria. **Kept**: striped `bgImage` background, dashed accent border-bottom, `Badge` with `Star` icon, Chakra `DatePicker` with mono input + accent focus ring. **Removed (intentionally)**: paper-tape `_before` decoration, banner title, italic help, animated state pill, hand-built `Restablecer` button. The functional behavior is unchanged — admin can override and clear the date — just with less chrome. Slice 8 task list in `todo.md` reflects this.
+
+### Bug fixed during this update
+
+`src/components/AdminDateOverride.tsx` — `onValueChange` was missing a `return` after the empty-search navigate, so clearing the date would crash with `Cannot read property 'toString' of undefined`. Added the `return` (one-line fix). TypeScript didn't catch it because `noUncheckedIndexedAccess` is off, so `picked[0]` types as `DateValue` instead of `DateValue | undefined`.
+
+### Remaining work
+
+- [x] Manual smoke at `localhost:8888` — _user is responsible_
+- [x] Push branch — _done (`origin/v5-ui-design` at `45b244c`)_
+- [ ] Open PR `[v5] Analog-album UI port` → `main` — _awaiting user "go" (PR creation is a shared-state action)_
+- [ ] Deploy preview smoke — _after PR opens_
+- [ ] Pre-merge review on the deploy preview
+- [ ] Merge `v5-ui-design → main`
+- [ ] (Optional) Manually trigger cron / wipe Blobs cache so existing entries pick up `width`/`height`

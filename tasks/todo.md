@@ -6,7 +6,7 @@ See `tasks/plan.md` for full context. Branch: `v5-ui-design` (already checked ou
 
 - [x] Confirm assumptions in `tasks/plan.md` "Assumptions" with the human (especially the open question on lazy vs forced cache backfill in Slice 2).
 
-## Slice 1 — Chakra theme + self-hosted fonts + AppShell — `5ff622d`
+## Slice 1 — Chakra theme + self-hosted fonts + AppShell — `5ff622d`, mono font dropped in `45b244c`
 
 - [x] Self-host fonts:
   - [x] Fetch Google Fonts CSS for Fraunces / Inter / Caveat / JetBrains Mono with a Chrome User-Agent (variable woff2). Save URLs in `public/fonts/README.md`.
@@ -15,7 +15,7 @@ See `tasks/plan.md` for full context. Branch: `v5-ui-design` (already checked ou
 - [x] NEW `src/theme.ts`:
   - [x] Import `createSystem`, `defaultConfig`, `defineConfig` from `@chakra-ui/react`.
   - [x] `tokens.colors.accent.{50…950}` — values from plan §5.
-  - [x] `tokens.fonts.{body, heading, mono, handwriting}` — Inter / Fraunces / JetBrains Mono / Caveat with system fallbacks.
+  - [x] `tokens.fonts.{body, heading, handwriting}` — Inter / Fraunces / Caveat with system fallbacks. _(Originally also `mono` (JetBrains Mono); dropped in `45b244c` — uses Chakra default mono stack.)_
   - [x] `tokens.shadows.{polaroid, polaroidLift}` — values from `styles-v5.css:13–14`.
   - [x] `semanticTokens.colors.{bg, bg.muted, paper, ink, ink.muted, line}` with `_light` / `_dark` variants from `styles-v5.css` `:root` + `[data-theme="dark"]`.
   - [x] `keyframes.{shimmer, pulse, fade, zoom}` with the prototype's steps + durations.
@@ -61,7 +61,7 @@ See `tasks/plan.md` for full context. Branch: `v5-ui-design` (already checked ou
 - [ ] Manual smoke: trigger the cron locally (or via `pnpm invoke:refresh-memories`) and inspect a fresh `media/<uuid>` Blobs entry — confirm `width` and `height` are integers. _(you said you'll wipe the cache manually to force regen — verifies as part of your smoke)_
 - [x] Commit: `v5(slice2): width/height metadata extraction + cache schema bump`.
 
-## Slice 3 — Wordmark + Topbar (Chakra-native) — `b9e0052`
+## Slice 3 — Wordmark + Topbar (Chakra-native) — `b9e0052`, simplified in `45e48d0`
 
 - [x] NEW `src/components/Wordmark.tsx`:
   - [x] Props: `size?: 'sm' | 'md' | 'lg'` (default `'md'`); maps to `fontSize` `20px` / `22px` / `28px`.
@@ -73,7 +73,7 @@ See `tasks/plan.md` for full context. Branch: `v5-ui-design` (already checked ou
   - [x] Left: TanStack Router `<Link to="/" style={{ color: 'inherit', textDecoration: 'none' }}><Wordmark /></Link>` (Chakra `<Box as="a">` typing rejected `href`; Link is the natural SPA-aware swap).
   - [x] Right: `<HStack gap={2.5}>` with the user pill + logout button.
   - [x] User pill: `<HStack borderWidth="1px" borderColor="line" borderRadius="full" pl="3px" pr={{ base: '3px', sm: 3 }} py="3px" gap={2}><Avatar.Root size="xs"><Avatar.Fallback name={user.email} /></Avatar.Root><Text display={{ base: 'none', sm: 'inline' }} fontSize="sm" fontWeight={500}>{user.email}</Text></HStack>`.
-  - [x] Logout: outline `Button` with `LogOut` lucide icon + text label (text hidden on `<sm`).
+  - [x] Logout: icon-only `IconButton` with `LogOut` lucide icon + `aria-label="Cerrar sesión"`. _(Originally a `Button` with text; trimmed to `IconButton` in `45e48d0`.)_
   - [x] Source the user via `useIdentity()` plus `Route.useRouteContext().user` fallback.
 - [x] MODIFY `src/routes/index.tsx`: render `<Topbar />` at the top of the home component (above any existing content). Old "Welcome back" Chakra heading and "Sign out" button stay temporarily (replaced in Slice 5).
 - [ ] Smoke at port 8888: avatar pill compresses on narrow viewports; logout works; no CSS classes used. _(awaiting your manual smoke)_
@@ -174,19 +174,19 @@ See `tasks/plan.md` for full context. Branch: `v5-ui-design` (already checked ou
 - [x] All gates green.
 - [x] Commit: `v5(slice7): per-year swipe lightbox via chakra dialog`.
 
-## Slice 8 — Admin date-override banner restyle — `9a13221`
+## Slice 8 — Admin date-override banner restyle — `9a13221`, simplified in `7193a81`
 
 - [x] REPLACE `src/components/AdminDateOverride.tsx`:
-  - [x] Outer `<Box position="relative" bgImage="repeating-linear-gradient(-45deg, color-mix(in srgb, var(--chakra-colors-accent-500) 10%, var(--chakra-colors-bg)) 0 14px, color-mix(in srgb, var(--chakra-colors-accent-500) 4%, var(--chakra-colors-bg)) 14px 28px)" borderBottomWidth="1px" borderBottomStyle="dashed" borderBottomColor="accent.300">`.
-  - [x] Tape: absolute `<Box>` with dashed left/right borders, `bg="accent.100"`, rotated `-1deg`.
-  - [x] Inner `<HStack maxW="1080px" mx="auto" px={4.5} py={3.5} justify="space-between" gap={4.5} flexWrap="wrap">`.
-  - [x] Label region: badge (HStack with `Star` lucide + "Solo admin"), title ("Sobreescribir fecha de hoy", italic Fraunces), help (italic, hidden on `<md`).
-  - [x] Controls region: Chakra `<DatePicker>` (existing component, restyled with compact mono input + accent focus ring). `Restablecer` outline button when overridden. State pill HStack with the dot animated via `rdPulse` keyframe when overridden.
-  - [x] Wire the date `onValueChange` to `navigate({ search: { date } })`; reset to `navigate({ search: {} })`.
-  - [x] Use `spanishMonth` from `#/lib/spanish-months` for the state pill label.
-- [ ] Smoke: as admin, change date → URL param updates, loader re-runs. "Restablecer" returns to today. Pulse anim plays only when overridden. Banner not rendered when `isAdmin === false`. _(awaiting your manual smoke)_
+  - [x] Outer striped `<Box>` background + dashed accent border-bottom.
+  - [x] Inner `<HStack maxW="1080px" mx="auto">` with Chakra `Badge` (`<Star /> Solo admin`) on the left and Chakra `<DatePicker>` with `IndicatorGroup` (Clear + Calendar trigger) on the right.
+  - [x] Mono compact input with accent focus ring (`accent.300` border, `accent.200` glow).
+  - [x] Wire `onValueChange` → `navigate({ search: { date } })`; clear via `DatePicker.ClearTrigger` → `navigate({ search: {} })`.
+  - [x] **Manually trimmed in `7193a81`**: removed paper-tape decoration, banner title, italic help text, hand-built `Restablecer` button, animated state pill — see `tasks/plan.md` "Post-implementation manual adjustments". The simpler version now uses the Chakra `Badge` primitive directly and the built-in `DatePicker.ClearTrigger`.
+  - [x] Prop renamed `activeDate` → `initialActiveDate` (uncontrolled `defaultValue`). `src/routes/index.tsx` updated.
+  - [x] **Bug fix**: `onValueChange` missing `return` after empty-search navigate caused crash on date clear. Fixed.
+- [ ] Smoke: as admin, change date → URL param updates, loader re-runs. Calendar `ClearTrigger` returns to today (URL param dropped). Banner not rendered when `isAdmin === false`. _(awaiting your manual smoke)_
 - [x] All gates green.
-- [x] Commit: `v5(slice8): admin date-override banner restyle`.
+- [x] Commits: `v5(slice8): admin date-override banner restyle`, `Simplify AdminDateOverride` (`7193a81`).
 
 ## Slice 9 — Spanish copy sweep, cleanup, deploy preview — `3ce81b4`
 
@@ -206,6 +206,31 @@ See `tasks/plan.md` for full context. Branch: `v5-ui-design` (already checked ou
 - [ ] (Optional) Trigger the cron once on the deploy preview (or wipe the Blobs cache) so existing entries refresh and pick up `width`/`height` proactively.
 - [ ] Pre-merge: human review on the deploy preview.
 - [ ] Merge `v5-ui-design → main`. Post-merge prod smoke (same checks on prod URL).
+
+## Post-implementation manual adjustments
+
+User pushed four follow-up commits trimming ornaments to taste. Branch is now at `origin/v5-ui-design 45b244c` (pushed). See `tasks/plan.md` "Post-implementation manual adjustments" for full diff context.
+
+- [x] `956229b` — `Update todos` (refresh task list with commit shas)
+- [x] `7193a81` — `Simplify AdminDateOverride` (-194 / +45; lost paper-tape, title, help, Restablecer button, state pill; gained Chakra `Badge` primitive + `DatePicker.IndicatorGroup` + `ClearTrigger`)
+- [x] `45e48d0` — `Use IconButton for logout` (Topbar logout becomes icon-only)
+- [x] `45b244c` — `Remove custom mono font` (drops JetBrains Mono; mono token removed; system mono fallback)
+- [x] **Bug fix** — `AdminDateOverride.onValueChange` missing `return` after empty-search navigate caused crash on date clear (TypeScript missed it because `noUncheckedIndexedAccess` is off). Fixed in this turn.
+
+## Remaining to merge `v5-ui-design → main`
+
+- [x] All gates green (`pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check`, `pnpm build`).
+- [x] Branch pushed (`origin/v5-ui-design`).
+- [ ] Manual smoke at `localhost:8888` for each prototype state — _user's responsibility_.
+- [ ] Open PR `[v5] Analog-album UI port` → `main` — _awaiting your "go" before opening (PR creation is shared-state)_.
+- [ ] Deploy preview smoke (after PR opens):
+  - [ ] Each prototype state matches the design.
+  - [ ] Network tab: media still flows through `/api/memory/<uuid>` only.
+  - [ ] `curl -I https://<deploy-preview>/` → `cache-control: private` (or `no-store` / absent).
+  - [ ] No console errors / 401s.
+- [ ] (Optional) Trigger the cron once on the deploy preview (or wipe Blobs `media/*`) so existing entries refresh and pick up `width`/`height` proactively.
+- [ ] Pre-merge review on the deploy preview.
+- [ ] Merge `v5-ui-design → main`. Post-merge prod smoke.
 
 ## Deferred / out of scope
 
