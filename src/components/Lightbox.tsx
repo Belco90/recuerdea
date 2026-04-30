@@ -42,21 +42,6 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 	const items = group.items
 	const item = items[idx]
 
-	useEffect(() => {
-		if (!open) return
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'ArrowRight') {
-				e.preventDefault()
-				setIdx((i) => Math.min(items.length - 1, i + 1))
-			} else if (e.key === 'ArrowLeft') {
-				e.preventDefault()
-				setIdx((i) => Math.max(0, i - 1))
-			}
-		}
-		document.addEventListener('keydown', onKey)
-		return () => document.removeEventListener('keydown', onKey)
-	}, [open, items.length])
-
 	if (!item) return null
 
 	const caption = captionFromName(item.name)
@@ -132,70 +117,73 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 							allowMouseDrag
 							snapType="mandatory"
 							flex={1}
-							display="flex"
-							flexDirection="column"
+							gap={0}
 							minH={0}
+							position="relative"
 						>
-							<Box flex={1} position="relative" minH={0}>
-								<Carousel.ItemGroup h="full">
-									{items.map((it, i) => (
-										<Carousel.Item
-											key={it.uuid}
-											index={i}
-											display="flex"
-											alignItems="center"
-											justifyContent="center"
-											px={3}
-											h="full"
-										>
-											{it.kind === 'video' ? (
-												<video
-													src={`/api/memory/${it.uuid}?variant=stream`}
-													poster={`/api/memory/${it.uuid}?variant=poster`}
-													controls
-													autoPlay={i === idx}
-													preload={i === idx ? 'metadata' : 'none'}
-													style={{
-														maxWidth: '100%',
-														maxHeight: '100%',
-														objectFit: 'contain',
-														borderRadius: '2px',
-														background: '#000',
-													}}
-												>
-													<track kind="captions" />
-												</video>
-											) : (
-												<Image
-													src={`/api/memory/${it.uuid}?variant=image`}
-													alt={captionFromName(it.name) || 'Recuerdo'}
-													maxW="full"
-													maxH="full"
-													objectFit="contain"
-													borderRadius="2px"
-													bg="black"
-													draggable={false}
-												/>
-											)}
-										</Carousel.Item>
-									))}
-								</Carousel.ItemGroup>
+							<Carousel.ItemGroup flex={1} minH={0}>
+								{items.map((it, i) => (
+									<Carousel.Item
+										key={it.uuid}
+										index={i}
+										display="flex"
+										alignItems="center"
+										justifyContent="center"
+										px={3}
+										h="full"
+									>
+										{it.kind === 'video' ? (
+											<video
+												src={`/api/memory/${it.uuid}?variant=stream`}
+												poster={`/api/memory/${it.uuid}?variant=poster`}
+												controls
+												autoPlay={i === idx}
+												preload={i === idx ? 'metadata' : 'none'}
+												style={{
+													maxWidth: '100%',
+													maxHeight: '100%',
+													objectFit: 'contain',
+													borderRadius: '2px',
+													background: '#000',
+												}}
+											>
+												<track kind="captions" />
+											</video>
+										) : (
+											<Image
+												src={`/api/memory/${it.uuid}?variant=image`}
+												alt={captionFromName(it.name) || 'Recuerdo'}
+												maxW="full"
+												maxH="full"
+												objectFit="contain"
+												borderRadius="2px"
+												bg="black"
+												draggable={false}
+											/>
+										)}
+									</Carousel.Item>
+								))}
+							</Carousel.ItemGroup>
 
+							<Carousel.Control
+								position="absolute"
+								inset={0}
+								pointerEvents="none"
+								justifyContent="space-between"
+								px={3.5}
+								display={{ base: 'none', md: 'flex' }}
+							>
 								<Carousel.PrevTrigger asChild>
 									<IconButton
-										position="absolute"
-										left={3.5}
-										top="50%"
-										transform="translateY(-50%)"
 										w="44px"
 										h="44px"
 										minW="44px"
 										borderRadius="full"
 										bg="whiteAlpha.100"
 										color="white"
+										pointerEvents="auto"
 										_hover={{ bg: 'whiteAlpha.300' }}
 										_disabled={{ opacity: 0, pointerEvents: 'none' }}
-										display={{ base: 'none', md: 'inline-flex' }}
 										aria-label="Anterior"
 									>
 										<ChevronLeft size={20} aria-hidden />
@@ -203,25 +191,21 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 								</Carousel.PrevTrigger>
 								<Carousel.NextTrigger asChild>
 									<IconButton
-										position="absolute"
-										right={3.5}
-										top="50%"
-										transform="translateY(-50%)"
 										w="44px"
 										h="44px"
 										minW="44px"
 										borderRadius="full"
 										bg="whiteAlpha.100"
 										color="white"
+										pointerEvents="auto"
 										_hover={{ bg: 'whiteAlpha.300' }}
 										_disabled={{ opacity: 0, pointerEvents: 'none' }}
-										display={{ base: 'none', md: 'inline-flex' }}
 										aria-label="Siguiente"
 									>
 										<ChevronRight size={20} aria-hidden />
 									</IconButton>
 								</Carousel.NextTrigger>
-							</Box>
+							</Carousel.Control>
 
 							<VStack gap={2.5} px={4.5} py={5} color="whiteAlpha.85" textAlign="center">
 								{caption && (
@@ -235,20 +219,16 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 											key={it.uuid}
 											index={i}
 											aria-label={`Ir al recuerdo ${i + 1}`}
-											css={{
-												width: '6px',
-												height: '6px',
-												borderRadius: '9999px',
-												background: 'var(--chakra-colors-whiteAlpha-300)',
-												border: 0,
-												padding: 0,
-												cursor: 'pointer',
-												transition: 'background 0.15s, transform 0.15s',
-												'&[data-current]': {
-													background: 'var(--chakra-colors-accent-500)',
-													transform: 'scale(1.3)',
-												},
-											}}
+											w="6px"
+											h="6px"
+											minW="6px"
+											borderRadius="full"
+											bg="whiteAlpha.400"
+											border={0}
+											p={0}
+											cursor="pointer"
+											transition="background 0.15s, transform 0.15s"
+											_current={{ bg: 'accent.500', transform: 'scale(1.3)' }}
 										/>
 									))}
 								</Carousel.IndicatorGroup>
