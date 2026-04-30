@@ -39,10 +39,9 @@ const PASSWORD_LABELS: Record<Mode, string> = {
 	recovery: 'Elige una contraseña',
 }
 
-const HEADINGS: Record<Mode, { title: string; sub: (day: number, month: string) => string }> = {
+const HEADINGS: Record<Mode, { title: string; sub?: (day: number, month: string) => string }> = {
 	login: {
 		title: 'Hoy te espera\nalgo del pasado.',
-		sub: (day, month) => `Entra para ver lo que pasó un ${day} de ${month} en años anteriores.`,
 	},
 	invite: {
 		title: 'Bienvenido a\nRecuerdea.',
@@ -151,12 +150,12 @@ function LoginPage() {
 					>
 						{heading.title}
 					</Heading>
-					<Text mt={2.5} mb={5.5} color="ink.muted" fontSize="14px" lineHeight="1.55">
-						{heading.sub(day, month)}
+					<Text mt={2.5} mb="6" color="ink.muted" fontSize="14px" lineHeight="1.55">
+						{heading.sub != null && heading.sub(day, month)}
 					</Text>
 
 					<form onSubmit={handleSubmit} noValidate>
-						<Stack gap={3.5}>
+						<Stack gap="4">
 							{mode === 'login' && (
 								<Field.Root>
 									<Field.Label
@@ -260,18 +259,6 @@ function LoginPage() {
 						</Stack>
 					</form>
 				</Box>
-
-				<Text
-					position="relative"
-					zIndex={1}
-					fontFamily="heading"
-					fontStyle="italic"
-					fontSize="14px"
-					color="ink.muted"
-					textAlign="center"
-				>
-					Un pequeño ritual diario para tu familia.
-				</Text>
 			</VStack>
 		</AppShell>
 	)
