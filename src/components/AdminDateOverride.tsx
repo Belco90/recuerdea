@@ -52,6 +52,7 @@ export function AdminDateOverride({
 							const next = picked[0]
 							if (!next) {
 								void navigate({ search: {} })
+								return
 							}
 							void navigate({ search: { date: next.toString() } })
 						}}
