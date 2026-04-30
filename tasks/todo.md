@@ -8,7 +8,7 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 - [ ] Add `OPENCAGE_API_KEY` to Netlify env (deploy-preview scope first; production on merge).
 - [x] Create branch `v6-location` from `main`.
 
-## Slice 1 — Image GPS via `exifr` — `9fd1fca`
+## Slice 1 — Image GPS via `exifr` — `62c468c`
 
 - [x] In `src/lib/media-meta/exif.ts`:
   - [x] Extend `ImageMeta` with `location: { lat: number; lng: number } | null`.
@@ -24,22 +24,24 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 
 **Verified:** `pnpm test` (130/130), `pnpm type-check`, `pnpm format:check`, `pnpm build` all green. Lint on the three changed files: 0/0.
 
-## Slice 2 — Video GPS via `udta.©xyz`
+## Slice 2 — Video GPS via `udta.©xyz` — `18dd94b`
 
-- [ ] In `src/lib/media-meta/video-meta.ts`:
-  - [ ] Extend `VideoMeta` with `location: { lat: number; lng: number } | null`.
-  - [ ] In `parseMoov`, after `findTkhdDimensions`, call new `findUdtaXyz` walker.
-  - [ ] `findUdtaXyz`: walk `moov` children for `udta`, then `udta` children for `©xyz` (`0xa9 'x' 'y' 'z'`).
-  - [ ] `parseIso6709(string)`: regex per plan; reject non-finite or out-of-range.
-  - [ ] Update `EMPTY`, `parseMoov` return value, `scanForMoov`.
-- [ ] Tests in `video-meta.test.ts`:
-  - [ ] synthetic mp4 with `moov.udta.©xyz` of `+40.4378-003.7036+660.000/` → ~Madrid.
-  - [ ] mp4 without `udta` → location null.
-  - [ ] mp4 with `udta` but no `©xyz` → location null.
-  - [ ] malformed payload → location null.
-  - [ ] moov-at-end fallback also reaches `udta`.
+- [x] In `src/lib/media-meta/video-meta.ts`:
+  - [x] Extend `VideoMeta` with `location: { lat: number; lng: number } | null`.
+  - [x] In `parseMoov`, call new `findUdtaXyz` walker.
+  - [x] `findUdtaXyz`: walks `moov` children for `udta`, then `udta` children for `©xyz` via a new `walkForCopyrightBox` (the existing `walkForBox` uses ASCII type matching, which can't represent `0xA9`).
+  - [x] `parseIso6709(string)`: regex per plan; reject non-finite or out-of-range.
+  - [x] Update `EMPTY` and `parseMoov` return value (`scanForMoov` reuses `parseMoov`).
+- [x] Tests in `video-meta.test.ts`:
+  - [x] synthetic mp4 with `moov.udta.©xyz` of `+40.4378-003.7036+660.000/` → ~Madrid.
+  - [x] without altitude (`+40.4378-003.7036/`) — also accepted.
+  - [x] mp4 without `udta` → location null.
+  - [x] mp4 with `udta` but no `©xyz` (other `©cmt` atom) → location null.
+  - [x] malformed payload → location null.
+  - [x] out-of-range latitude (`+91`) → location null.
+  - [x] moov-at-end fallback also reaches `udta`.
 
-**Verify:** `pnpm test src/lib/media-meta/video-meta.test.ts` green.
+**Verified:** `pnpm test` (137/137), `pnpm type-check`, `pnpm build` all green. Lint on changed files: 0/0.
 
 ## Checkpoint A — Extractors
 
