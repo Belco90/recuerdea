@@ -134,6 +134,7 @@ beforeEach(() => {
 		captureDate: new Date('2020-01-15T10:00:00Z'),
 		width: 4032,
 		height: 3024,
+		location: null,
 	})
 	mockedExtractVideoMeta.mockResolvedValue({
 		captureDate: new Date('2018-04-27T10:00:00Z'),
@@ -238,6 +239,7 @@ describe('refreshMemories', () => {
 			captureDate: new Date('2021-04-27T10:00:00Z'),
 			width: 6000,
 			height: 4000,
+			location: null,
 		})
 
 		await refreshMemories(
@@ -271,6 +273,7 @@ describe('refreshMemories', () => {
 			captureDate: new Date('2020-01-15T10:00:00Z'),
 			width: null,
 			height: null,
+			location: null,
 		})
 
 		await refreshMemories(

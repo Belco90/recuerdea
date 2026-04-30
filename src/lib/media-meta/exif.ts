@@ -18,6 +18,8 @@ type ExifTags = {
 	PixelYDimension?: unknown
 	ImageWidth?: unknown
 	ImageHeight?: unknown
+	latitude?: unknown
+	longitude?: unknown
 }
 
 const TAG_NAMES = [
@@ -30,15 +32,23 @@ const TAG_NAMES = [
 	'PixelYDimension',
 	'ImageWidth',
 	'ImageHeight',
+	'latitude',
+	'longitude',
 ] as const
+
+export type GeoLocation = {
+	lat: number
+	lng: number
+}
 
 export type ImageMeta = {
 	captureDate: Date | null
 	width: number | null
 	height: number | null
+	location: GeoLocation | null
 }
 
-const EMPTY: ImageMeta = { captureDate: null, width: null, height: null }
+const EMPTY: ImageMeta = { captureDate: null, width: null, height: null, location: null }
 
 export async function extractImageMeta(downloadUrl: string): Promise<ImageMeta> {
 	const res = await fetch(downloadUrl, { headers: { Range: RANGE_HEADER } })
@@ -56,6 +66,7 @@ export async function extractImageMeta(downloadUrl: string): Promise<ImageMeta> 
 		captureDate: pickCaptureDate(tags),
 		width: pickDimension(tags?.ExifImageWidth, tags?.PixelXDimension, tags?.ImageWidth),
 		height: pickDimension(tags?.ExifImageHeight, tags?.PixelYDimension, tags?.ImageHeight),
+		location: pickLocation(tags),
 	}
 }
 
@@ -70,4 +81,12 @@ function pickDimension(...candidates: readonly unknown[]): number | null {
 		if (typeof c === 'number' && Number.isFinite(c) && c > 0) return Math.round(c)
 	}
 	return null
+}
+
+function pickLocation(tags: ExifTags | undefined): GeoLocation | null {
+	const lat = tags?.latitude
+	const lng = tags?.longitude
+	if (typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90) return null
+	if (typeof lng !== 'number' || !Number.isFinite(lng) || lng < -180 || lng > 180) return null
+	return { lat, lng }
 }

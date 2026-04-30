@@ -8,13 +8,13 @@ Branch: `v6-location` (to create from `main`). PR target: `main`. Cron remains t
 
 ## Resolved decisions (locked in)
 
-| # | Decision | Outcome |
-|---|---|---|
-| Q1 | Reverse geocoding provider | **OpenCage Data API** (`https://api.opencagedata.com/geocode/v1/json`). Free tier: 2,500 req/day, 1 req/sec. Reads API key from `OPENCAGE_API_KEY` Netlify env var. Spanish output via `language=es`. |
-| Q2 | Cache migration | **Clear Blobs manually before deploy.** No `schemaVersion` field. The cron rebuilds every entry on its first post-deploy run. (Slice 4 dropped vs the prior draft.) |
-| Q3 | UI fallback when no place | Hide the caption entirely. No filename fallback, no "Sin ubicación" label. |
-| Q4 | Lightbox header | Append place after the years-ago line (e.g. `2019 · hace 6 años · Madrid`). Hidden when null. |
-| Q5 | Logging | **Never log any geo-derived data** — neither lat/lng, the OpenCage response, nor the resolved `place` string. Counts only (`[refresh] geocoded N/M`). |
+| #   | Decision                   | Outcome                                                                                                                                                                                               |
+| --- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | Reverse geocoding provider | **OpenCage Data API** (`https://api.opencagedata.com/geocode/v1/json`). Free tier: 2,500 req/day, 1 req/sec. Reads API key from `OPENCAGE_API_KEY` Netlify env var. Spanish output via `language=es`. |
+| Q2  | Cache migration            | **Clear Blobs manually before deploy.** No `schemaVersion` field. The cron rebuilds every entry on its first post-deploy run. (Slice 4 dropped vs the prior draft.)                                   |
+| Q3  | UI fallback when no place  | Hide the caption entirely. No filename fallback, no "Sin ubicación" label.                                                                                                                            |
+| Q4  | Lightbox header            | Append place after the years-ago line (e.g. `2019 · hace 6 años · Madrid`). Hidden when null.                                                                                                         |
+| Q5  | Logging                    | **Never log any geo-derived data** — neither lat/lng, the OpenCage response, nor the resolved `place` string. Counts only (`[refresh] geocoded N/M`).                                                 |
 
 ## Confirmed assumptions
 
@@ -22,17 +22,17 @@ Branch: `v6-location` (to create from `main`). PR target: `main`. Cron remains t
 2. Locale is Spanish (`language=es` to OpenCage).
 3. Geocoding runs at cron time, not page time.
 4. No-GPS / no-place items render with no caption.
-5. `Lightbox` keeps `alt={item.name}` for a11y; only the *visible* header line uses `place`.
+5. `Lightbox` keeps `alt={item.name}` for a11y; only the _visible_ header line uses `place`.
 6. Existing cache cleared manually before deploy; no schema-version migration needed.
 
 ## Feasibility recap
 
-| Source | Status | Notes |
-|---|---|---|
-| **JPEG / HEIC / TIFF (EXIF)** | ✅ `exifr` already in deps | Add `latitude` / `longitude` to requested tags. |
-| **MP4 / MOV (Apple)** | ✅ extends existing `moov` walker | iPhone records GPS as ISO 6709 in `moov.udta.©xyz`. |
+| Source                        | Status                             | Notes                                                          |
+| ----------------------------- | ---------------------------------- | -------------------------------------------------------------- |
+| **JPEG / HEIC / TIFF (EXIF)** | ✅ `exifr` already in deps         | Add `latitude` / `longitude` to requested tags.                |
+| **MP4 / MOV (Apple)**         | ✅ extends existing `moov` walker  | iPhone records GPS as ISO 6709 in `moov.udta.©xyz`.            |
 | **MP4 / MOV (other cameras)** | ⚠️ best-effort, degrades to `null` | Only `udta.©xyz` supported in v6; revisit if hit-rate is poor. |
-| **Older / scanned photos** | ❌ no GPS → no caption | Per Q3. |
+| **Older / scanned photos**    | ❌ no GPS → no caption             | Per Q3.                                                        |
 
 ## Architecture
 
@@ -84,6 +84,7 @@ Bottom-up build order: extractors → cache shape → geocoder → cron orchestr
   - Acceptance: `video-meta.test.ts` covers synthetic mp4 with/without `udta`, malformed payload, moov-at-end fallback also reaches `udta`.
 
 #### Checkpoint A — Extractors
+
 - [ ] `pnpm test src/lib/media-meta` green.
 - [ ] `pnpm type-check` clean.
 - [ ] Both extractors return `location: null` for inputs without GPS, never throw.
@@ -98,6 +99,7 @@ Bottom-up build order: extractors → cache shape → geocoder → cron orchestr
   - Acceptance: `pnpm test src/lib/memories src/lib/cache` green.
 
 #### Checkpoint B — Cache shape
+
 - [ ] Tests green.
 - [ ] Type errors point only at intended call sites (no accidental shape leaks).
 
@@ -135,6 +137,7 @@ Bottom-up build order: extractors → cache shape → geocoder → cron orchestr
     - geocode failure categorized but no console output containing geo data.
 
 #### Checkpoint C — Geocoding live
+
 - [ ] Tests green.
 - [ ] `OPENCAGE_API_KEY` set in Netlify (deploy-preview + production scopes).
 - [ ] **Manually clear Blobs** (`media/*`, `fileid-index/*`, `folder/v1`) on the deploy preview before triggering the cron.
@@ -157,6 +160,7 @@ Bottom-up build order: extractors → cache shape → geocoder → cron orchestr
   - Manual: open lightbox on a GPS'd photo and a non-GPS'd photo; layout doesn't break either way.
 
 #### Checkpoint D — End-to-end
+
 - [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check` all green.
 - [ ] Local: `pnpm dev:netlify` + `pnpm invoke:refresh-memories`. Visit `/`. Polaroids show place captions where GPS was extracted; no captions otherwise.
 - [ ] Deploy preview: same on real pCloud data.
@@ -172,14 +176,14 @@ Bottom-up build order: extractors → cache shape → geocoder → cron orchestr
 
 ## Risks and mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| OpenCage 2,500/day free quota exceeded during one-time backfill | Low | ~1000 files; one cron pass fits inside one day's quota with 1.5× headroom. Per-cron cap (default 200) means even an unexpectedly large folder spreads across multiple days rather than burning the daily quota in one shot. |
-| OpenCage outage during cron | Low | Failures categorized + counted, entries left with `place: null`, retried next run. Cron remains idempotent. |
-| MP4 GPS atom variants outside `udta.©xyz` (some Android cameras) | Low | Documented gap; iPhone covers the user's case. Revisit if hit-rate disappoints. |
-| Spanish locale gaps in OpenCage results for some places | Low | Acceptable for v1; we can post-process if needed without changing the schema. |
-| Accidental log of `place` or coords | Med | Lint-by-eye in PR review; tests assert no `console.*` calls receive geo data; doc the rule in `SPEC.md` boundaries. |
-| Blobs clear forgotten in production after merge | Med | Listed twice in Pre-flight (preview + prod). Fail-loud: stale entries lack `location`/`place`, so users see the v5 (filename) caption — visible regression that triggers cleanup. |
+| Risk                                                             | Impact | Mitigation                                                                                                                                                                                                                  |
+| ---------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenCage 2,500/day free quota exceeded during one-time backfill  | Low    | ~1000 files; one cron pass fits inside one day's quota with 1.5× headroom. Per-cron cap (default 200) means even an unexpectedly large folder spreads across multiple days rather than burning the daily quota in one shot. |
+| OpenCage outage during cron                                      | Low    | Failures categorized + counted, entries left with `place: null`, retried next run. Cron remains idempotent.                                                                                                                 |
+| MP4 GPS atom variants outside `udta.©xyz` (some Android cameras) | Low    | Documented gap; iPhone covers the user's case. Revisit if hit-rate disappoints.                                                                                                                                             |
+| Spanish locale gaps in OpenCage results for some places          | Low    | Acceptable for v1; we can post-process if needed without changing the schema.                                                                                                                                               |
+| Accidental log of `place` or coords                              | Med    | Lint-by-eye in PR review; tests assert no `console.*` calls receive geo data; doc the rule in `SPEC.md` boundaries.                                                                                                         |
+| Blobs clear forgotten in production after merge                  | Med    | Listed twice in Pre-flight (preview + prod). Fail-loud: stale entries lack `location`/`place`, so users see the v5 (filename) caption — visible regression that triggers cleanup.                                           |
 
 ## Out of scope
 

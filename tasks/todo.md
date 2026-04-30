@@ -6,23 +6,23 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 
 - [ ] Sign up for OpenCage Data, generate an API key on the free tier.
 - [ ] Add `OPENCAGE_API_KEY` to Netlify env (deploy-preview scope first; production on merge).
-- [ ] Create branch `v6-location` from `main`.
+- [x] Create branch `v6-location` from `main`.
 
-## Slice 1 — Image GPS via `exifr`
+## Slice 1 — Image GPS via `exifr` — `9fd1fca`
 
-- [ ] In `src/lib/media-meta/exif.ts`:
-  - [ ] Extend `ImageMeta` with `location: { lat: number; lng: number } | null`.
-  - [ ] Add `latitude`, `longitude` to `TAG_NAMES` and the `ExifTags` type.
-  - [ ] Add `pickLocation(tags)` helper: both finite, lat ∈ [-90, 90], lng ∈ [-180, 180]; otherwise null.
-  - [ ] Update `EMPTY` constant.
-- [ ] Tests in `exif.test.ts`:
-  - [ ] present → returns `{ lat, lng }`.
-  - [ ] missing → null.
-  - [ ] one of lat/lng missing → null.
-  - [ ] NaN / out-of-range → null.
-  - [ ] exifr throws → `location: null`, no exception.
+- [x] In `src/lib/media-meta/exif.ts`:
+  - [x] Extend `ImageMeta` with `location: { lat: number; lng: number } | null`.
+  - [x] Add `latitude`, `longitude` to `TAG_NAMES` and the `ExifTags` type.
+  - [x] Add `pickLocation(tags)` helper: both finite, lat ∈ [-90, 90], lng ∈ [-180, 180]; otherwise null.
+  - [x] Update `EMPTY` constant.
+- [x] Tests in `exif.test.ts`:
+  - [x] present → returns `{ lat, lng }`.
+  - [x] missing → null.
+  - [x] one of lat/lng missing → null.
+  - [x] NaN / out-of-range → null.
+  - [x] exifr throws → `location: null`, no exception.
 
-**Verify:** `pnpm test src/lib/media-meta/exif.test.ts` green; `pnpm type-check` clean.
+**Verified:** `pnpm test` (130/130), `pnpm type-check`, `pnpm format:check`, `pnpm build` all green. Lint on the three changed files: 0/0.
 
 ## Slice 2 — Video GPS via `udta.©xyz`
 

@@ -157,6 +157,115 @@ describe('extractImageMeta', () => {
 		})
 	})
 
+	describe('location', () => {
+		it('returns { lat, lng } when both GPS tags are present', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: 40.4168, longitude: -3.7038 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toEqual({ lat: 40.4168, lng: -3.7038 })
+		})
+
+		it('returns null when both GPS tags are absent', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ DateTimeOriginal: new Date('2020-01-01') })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when only latitude is present', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: 40.4168 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when only longitude is present', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ longitude: -3.7038 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when latitude is NaN', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: Number.NaN, longitude: -3.7038 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when longitude is Infinity', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: 40.4, longitude: Number.POSITIVE_INFINITY })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when latitude is out of range (>90)', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: 91, longitude: 0 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when latitude is out of range (<-90)', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: -91, longitude: 0 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when longitude is out of range (>180)', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: 0, longitude: 181 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('returns null when longitude is out of range (<-180)', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: 0, longitude: -181 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('accepts boundary values (lat=±90, lng=±180)', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({ latitude: 90, longitude: -180 })
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toEqual({ lat: 90, lng: -180 })
+		})
+
+		it('returns null when exifr throws', async () => {
+			mockOkResponse()
+			mockedParse.mockRejectedValue(new Error('bad jpeg'))
+
+			const meta = await extractImageMeta('https://x.test/a.jpg')
+			expect(meta.location).toBeNull()
+		})
+
+		it('requests latitude and longitude from exifr', async () => {
+			mockOkResponse()
+			mockedParse.mockResolvedValue({})
+
+			await extractImageMeta('https://x.test/a.jpg')
+
+			const tags = mockedParse.mock.calls[0]![1] as readonly string[]
+			expect(tags).toContain('latitude')
+			expect(tags).toContain('longitude')
+		})
+	})
+
 	describe('error handling', () => {
 		it('sends a Range header for the EXIF segment', async () => {
 			mockOkResponse()
@@ -174,7 +283,7 @@ describe('extractImageMeta', () => {
 			mockedParse.mockResolvedValue(undefined)
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null })
+			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
 		})
 
 		it('returns all-null when exifr returns no tags', async () => {
@@ -182,7 +291,7 @@ describe('extractImageMeta', () => {
 			mockedParse.mockResolvedValue({})
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null })
+			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
 		})
 
 		it('returns all-null when exifr throws (corrupt header)', async () => {
@@ -190,14 +299,14 @@ describe('extractImageMeta', () => {
 			mockedParse.mockRejectedValue(new Error('bad jpeg'))
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null })
+			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
 		})
 
 		it('returns all-null when the response is not ok (4xx/5xx)', async () => {
 			fetchSpy.mockResolvedValue(new Response(null, { status: 404 }))
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null })
+			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
 			expect(mockedParse).not.toHaveBeenCalled()
 		})
 
