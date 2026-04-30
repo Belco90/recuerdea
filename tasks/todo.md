@@ -134,7 +134,7 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
   - [ ] §8 open question on geocoder marked resolved (Geoapify, after a brief OpenCage detour).
 - [ ] Open PR `v6-location → main`.
 
-## Slice 8 — Switch geocoder from OpenCage to Geoapify — pending hash
+## Slice 8 — Switch geocoder from OpenCage to Geoapify — `4e7de97`
 
 Mid-build pivot. OpenCage client + cron wiring (Slices 4–5) was already merged on `v6-location`; Slice 8 swapped the implementation under the same `reverseGeocode` shape. No UI / schema changes.
 
