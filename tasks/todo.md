@@ -104,16 +104,14 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 - [ ] Inspect cron function logs: only summary counts. No coords, no place strings, no OpenCage URLs.
 - [ ] Re-trigger cron: `geocoded` count should be 0 (everything already has `place` or no `location`).
 
-## Slice 6 — `MemoryItem.place` + Polaroid render
+## Slice 6 — `MemoryItem.place` + Polaroid render — `a515013`
 
-- [ ] In `src/lib/memories/pcloud.server.ts`: add `place: string | null` to both `MemoryItem` variants; `buildMemoryItem` passes `meta.place` through.
-- [ ] Update `pcloud.server.test.ts` to assert `place` flows through.
-- [ ] In `src/components/Polaroid.tsx`:
-  - [ ] Replace `const caption = captionFromName(item.name)` with `const caption = item.place`.
-  - [ ] Update `aria-label` to `item.place ?? 'Recuerdo'`.
-  - [ ] Delete the `captionFromName` function.
+- [x] `MemoryItem` gains `place: string | null` on both variants; `buildMemoryItem` passes `meta.place`.
+- [x] `pcloud.server.test.ts`: existing fixtures updated; new test asserts place flow.
+- [x] `Polaroid.tsx`: caption = `item.place`; aria-label = `item.place ?? 'Recuerdo'`; `captionFromName` deleted.
+- [x] `memory-grouping.test.ts`: MemoryItem literals updated.
 
-**Verify:** `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check` all green.
+**Verified:** 176/176 pnpm test, type-check, format:check, build all green; lint on 4 changed files: 0/0.
 
 ## Slice 7 — Lightbox header
 

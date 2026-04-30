@@ -68,6 +68,16 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 								<Box as="span" opacity={0.65}>
 									{yearsAgoLowercase(group.yearsAgo)}
 								</Box>
+								{item.place && (
+									<>
+										<Box as="span" opacity={0.4}>
+											·
+										</Box>
+										<Box as="span" opacity={0.65}>
+											{item.place}
+										</Box>
+									</>
+								)}
 								<IconButton
 									asChild
 									variant="ghost"
