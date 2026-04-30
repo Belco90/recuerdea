@@ -1,16 +1,6 @@
 import type { YearGroup } from '#/lib/memory-grouping'
 
-import {
-	Box,
-	Carousel,
-	Dialog,
-	HStack,
-	IconButton,
-	Image,
-	Portal,
-	Text,
-	VStack,
-} from '@chakra-ui/react'
+import { Box, Carousel, Dialog, HStack, IconButton, Image, Portal, VStack } from '@chakra-ui/react'
 import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
@@ -27,9 +17,8 @@ function yearsAgoLowercase(n: number): string {
 	return `hace ${n} años`
 }
 
-function captionFromName(name: string): string {
-	const stem = name.replace(/\.[^.]+$/, '')
-	return stem.replace(/[_-]+/g, ' ').trim()
+function getDownloadHref(itemId: string): string {
+	return `/api/memory/${itemId}?variant=image`
 }
 
 export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
@@ -41,11 +30,6 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 
 	const items = group.items
 	const item = items[idx]
-
-	if (!item) return null
-
-	const caption = captionFromName(item.name)
-	const downloadHref = `/api/memory/${item.uuid}?variant=image`
 
 	return (
 		<Dialog.Root
@@ -84,8 +68,25 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 								<Box as="span" opacity={0.65}>
 									{yearsAgoLowercase(group.yearsAgo)}
 								</Box>
+								<IconButton
+									asChild
+									variant="ghost"
+									size="2xs"
+									aria-label="Descargar"
+									color="white"
+									shadow="md"
+								>
+									<a
+										href={getDownloadHref(item.uuid)}
+										download
+										target="_blank"
+										rel="noopener noreferrer"
+									>
+										<Download size={18} aria-hidden />
+									</a>
+								</IconButton>
 							</HStack>
-							<HStack gap={2.5}>
+							<HStack gap="2" flex="1" justify="center">
 								<Box
 									as="span"
 									fontFamily="mono"
@@ -95,12 +96,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 								>
 									{idx + 1} / {items.length}
 								</Box>
-								<IconButton asChild variant="ghost" size="sm" aria-label="Descargar">
-									<a href={downloadHref} download target="_blank" rel="noopener noreferrer">
-										<Download size={18} aria-hidden />
-									</a>
-								</IconButton>
-								<Dialog.CloseTrigger asChild>
+								<Dialog.CloseTrigger asChild display="flex">
 									<IconButton variant="ghost" size="sm" aria-label="Cerrar">
 										<X size={18} aria-hidden />
 									</IconButton>
@@ -152,7 +148,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 										) : (
 											<Image
 												src={`/api/memory/${it.uuid}?variant=image`}
-												alt={captionFromName(it.name) || 'Recuerdo'}
+												alt={it.name || 'Recuerdo'}
 												maxW="full"
 												maxH="full"
 												objectFit="contain"
@@ -207,12 +203,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 								</Carousel.NextTrigger>
 							</Carousel.Control>
 
-							<VStack gap={2.5} px={4.5} py={5} color="whiteAlpha.85" textAlign="center">
-								{caption && (
-									<Text fontFamily="handwriting" fontSize="22px" fontWeight={500} m={0}>
-										{caption}
-									</Text>
-								)}
+							<VStack gap={2.5} px={4.5} py={5} textAlign="center">
 								<Carousel.IndicatorGroup gap={1.5}>
 									{items.map((it, i) => (
 										<Carousel.Indicator
