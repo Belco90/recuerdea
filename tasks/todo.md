@@ -134,68 +134,35 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
   - [ ] §8 open question on geocoder marked resolved (Geoapify, after a brief OpenCage detour).
 - [ ] Open PR `v6-location → main`.
 
-## Slice 8 — Switch geocoder from OpenCage to Geoapify (mid-build provider swap)
+## Slice 8 — Switch geocoder from OpenCage to Geoapify — pending hash
 
-Mid-build pivot. OpenCage client + cron wiring (Slices 4–5) is already merged on `v6-location`; Slice 8 swaps the implementation under the same `reverseGeocode` shape. Failure: only the test suite must stay green and the Netlify env var name must change. No UI / schema changes.
+Mid-build pivot. OpenCage client + cron wiring (Slices 4–5) was already merged on `v6-location`; Slice 8 swapped the implementation under the same `reverseGeocode` shape. No UI / schema changes.
 
-### 8a — Rename + rewrite the geocoder module
+### 8a — Renamed + rewrote the geocoder module
 
-- [ ] `git mv src/lib/media-meta/opencage.server.ts src/lib/media-meta/geoapify.server.ts`.
-- [ ] `git mv src/lib/media-meta/opencage.server.test.ts src/lib/media-meta/geoapify.server.test.ts`.
-- [ ] Rewrite `geoapify.server.ts`:
-  - [ ] Endpoint: `https://api.geoapify.com/v1/geocode/reverse`.
-  - [ ] Build URL via `URLSearchParams`: `lat`, `lon`, `lang=es`, `apiKey=${apiKey}`.
-  - [ ] Header: `Accept: application/json`. Forward `signal` if provided.
-  - [ ] HTTP-status authoritative (no body `status.code`):
-    - 401 → `auth`
-    - 403 → `suspended`
-    - 429 → `ratelimit`
-    - 5xx + unexpected → `server`
-    - fetch reject → `network`
-    - JSON parse throw → `parse`
-  - [ ] Drop `quota` from `ReverseGeocodeResult`'s reason union.
-  - [ ] Place picker over `data.features[0].properties`:
-    - `head = properties.city ?? properties.state ?? null`
-    - if non-null + `properties.country` and head doesn't already end with country → `${head}, ${country}`
-    - else if head non-null → head
-    - else fall back to `properties.formatted ?? null`
-    - empty `features` array → `{ ok: true, place: null }`
-  - [ ] No `console.*` on any path.
-- [ ] Rewrite `geoapify.server.test.ts` (mock `globalThis.fetch`):
-  - [ ] URL contains `lat=`, `lon=`, `lang=es`, `apiKey=${KEY}`.
-  - [ ] `Accept: application/json` header.
-  - [ ] Forwards `signal`.
-  - [ ] Component preference: city, state, formatted, null.
-  - [ ] Country dedup: `{ city: 'España', country: 'España' }` → `'España'`.
-  - [ ] Empty `features` → `{ ok: true, place: null }`.
-  - [ ] HTTP 401/403/429/503/418 → auth/suspended/ratelimit/server/server.
-  - [ ] fetch reject → network. Non-JSON body → parse.
-  - [ ] Console hygiene assertion on every path.
+- [x] `git mv` `opencage.server.{ts,test.ts}` → `geoapify.server.{ts,test.ts}` (history preserved).
+- [x] Endpoint: `https://api.geoapify.com/v1/geocode/reverse`. Params: `lat`, `lon`, `lang=es`, `apiKey`.
+- [x] HTTP-status authoritative (no body `status.code`): 401 → auth, 403 → suspended, 429 → ratelimit, 5xx + unexpected → server. Network reject → network. JSON parse throw → parse.
+- [x] `quota` dropped from the `ReverseGeocodeResult` reason union.
+- [x] Place picker: `properties.city ?? properties.state`, append `, country` (deduped), fall back to `properties.formatted`, then null. Empty `features` → null.
+- [x] Zero `console.*` on any path.
+- [x] 19 tests in `geoapify.server.test.ts` (down from 25 because the body-status-vs-HTTP-status duality + 402-quota path collapsed into one).
 
-### 8b — Propagate the failure-reason union shrink
+### 8b — Propagated the failure-reason union shrink
 
-- [ ] In `src/lib/memories/refresh-memories.server.ts`:
-  - [ ] Update import: `from '../media-meta/opencage.server'` → `from '../media-meta/geoapify.server'`.
-  - [ ] Drop `quota` from `FailureReason`, `STOP_REASONS`, and `ZERO_FAILURES`.
-  - [ ] No other logic change — the cron stays sequential, capped, with the same stop/continue semantics.
-- [ ] In `src/lib/memories/refresh-memories.server.test.ts`:
-  - [ ] Update the `ReverseGeocodeResult` import path.
-  - [ ] Remove the `quota` reason from any test that asserts on it (replace with `ratelimit` since Geoapify uses 429 for both).
-  - [ ] All other tests should keep working unchanged.
+- [x] `refresh-memories.server.ts` imports `from '../media-meta/geoapify.server'`. `FailureReason`, `STOP_REASONS`, `ZERO_FAILURES` no longer include `quota`. Sequential-by-design comment updated to mention Geoapify's 5 req/s cap.
+- [x] `refresh-memories.server.test.ts` import path updated; the `quota` test renamed to `ratelimit` (single mock + assertions).
 
 ### 8c — Netlify entrypoint env var swap
 
-- [ ] In `netlify/functions/refresh-memories.ts`:
-  - [ ] `process.env.OPENCAGE_API_KEY` → `process.env.GEOAPIFY_API_KEY`.
-  - [ ] Remove `quota=` from the failures summary log line.
-  - [ ] Warn message for missing key reads `[refresh] geocode skipped: no api key` (unchanged content; just env name in the lookup).
+- [x] `process.env.OPENCAGE_API_KEY` → `process.env.GEOAPIFY_API_KEY`.
+- [x] `quota=` dropped from the failures summary log line + the conditional that decides whether to print it.
 
 ### 8d — Verification
 
-- [ ] `pnpm test`, `pnpm type-check`, `pnpm format:check`, `pnpm build` all green.
-- [ ] `pnpm exec oxlint src/lib/media-meta/geoapify.server.ts src/lib/media-meta/geoapify.server.test.ts src/lib/memories/refresh-memories.server.ts src/lib/memories/refresh-memories.server.test.ts netlify/functions/refresh-memories.ts` → 0 warnings, 0 errors.
-- [ ] No remaining references to `opencage` in the repo: `grep -ri opencage src tasks netlify` returns nothing.
-- [ ] Commit message ties the migration to the rationale (provider swap mid-build) and references Slice 8.
+- [x] `pnpm test` (170/170), `pnpm type-check`, `pnpm format:check`, `pnpm build` all green.
+- [x] Lint on the 5 changed files: 0 warnings, 0 errors.
+- [x] `grep -ri opencage src netlify` returns nothing under code paths (only deliberate historical references in `tasks/`).
 
 ## Production cutover (post-PR-merge)
 

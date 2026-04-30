@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileidIndexStore } from '../cache/fileid-index'
 import type { FolderCacheStore, FolderSnapshot } from '../cache/folder-cache'
 import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
-import type { ReverseGeocodeResult } from '../media-meta/opencage.server'
+import type { ReverseGeocodeResult } from '../media-meta/geoapify.server'
 
 import { createFileidIndex } from '../cache/fileid-index'
 import { createFolderCache } from '../cache/folder-cache'
@@ -658,7 +658,7 @@ describe('refreshMemories', () => {
 			expect(result.geocodeCapped).toBe(1)
 		})
 
-		it('stops the pass on quota and counts remaining work as not-attempted', async () => {
+		it('stops the pass on ratelimit and counts remaining work as not-attempted', async () => {
 			const mediaStore = makeMediaStore()
 			const fileidStore = makeFileidStore()
 			const folderStore = makeFolderStore()
@@ -677,7 +677,7 @@ describe('refreshMemories', () => {
 			const client = fakeClient({ files: [jpegA, jpegB] })
 			const geocoder = vi.fn<Geocoder>()
 			geocoder.mockResolvedValueOnce({ ok: true, place: 'X' })
-			geocoder.mockResolvedValueOnce({ ok: false, reason: 'quota' })
+			geocoder.mockResolvedValueOnce({ ok: false, reason: 'ratelimit' })
 			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
 
 			const result = await refreshMemories(
@@ -691,8 +691,8 @@ describe('refreshMemories', () => {
 
 			expect(geocoder).toHaveBeenCalledTimes(2)
 			expect(result.geocoded).toBe(1)
-			expect(result.geocodeFailures.quota).toBe(1)
-			expect(result.geocodeStoppedReason).toBe('quota')
+			expect(result.geocodeFailures.ratelimit).toBe(1)
+			expect(result.geocodeStoppedReason).toBe('ratelimit')
 		})
 
 		it('stops the pass on auth and warns once', async () => {

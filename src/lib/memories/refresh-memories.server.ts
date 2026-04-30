@@ -3,11 +3,11 @@ import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 import type { FileidIndex } from '../cache/fileid-index'
 import type { FolderCache } from '../cache/folder-cache'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
-import type { ReverseGeocodeResult } from '../media-meta/opencage.server'
+import type { ReverseGeocodeResult } from '../media-meta/geoapify.server'
 
 import { extractImageMeta } from '../media-meta/exif'
 import { parseFilenameCaptureDate } from '../media-meta/filename-date'
-import { reverseGeocode as defaultReverseGeocode } from '../media-meta/opencage.server'
+import { reverseGeocode as defaultReverseGeocode } from '../media-meta/geoapify.server'
 import { extractVideoMeta } from '../media-meta/video-meta'
 
 type Geocoder = (
@@ -15,9 +15,9 @@ type Geocoder = (
 	opts: { apiKey: string },
 ) => Promise<ReverseGeocodeResult>
 
-type FailureReason = 'auth' | 'suspended' | 'quota' | 'ratelimit' | 'server' | 'network' | 'parse'
+type FailureReason = 'auth' | 'suspended' | 'ratelimit' | 'server' | 'network' | 'parse'
 
-const STOP_REASONS = new Set<FailureReason>(['auth', 'suspended', 'quota', 'ratelimit'])
+const STOP_REASONS = new Set<FailureReason>(['auth', 'suspended', 'ratelimit'])
 const WARN_REASONS = new Set<FailureReason>(['auth', 'suspended'])
 
 const DEFAULT_GEOCODE_CAP = 200
@@ -34,7 +34,6 @@ export type GeocodeOpts = {
 const ZERO_FAILURES: Record<FailureReason, number> = {
 	auth: 0,
 	suspended: 0,
-	quota: 0,
 	ratelimit: 0,
 	server: 0,
 	network: 0,
@@ -217,9 +216,9 @@ async function runGeocodePass(
 	let attempts = 0
 	let stopped: FailureReason | null = null
 
-	// Sequential by design: OpenCage's free tier is 1 req/s and we throttle in
-	// software via `sleep` between calls. Parallelizing would burn the daily
-	// quota in seconds and trip 429s.
+	// Sequential by design: Geoapify's free tier caps at 5 req/s but we keep a
+	// 1-req/s budget in software via `sleep`. Parallelizing would burn the
+	// daily quota in seconds and trip 429s.
 	/* eslint-disable no-await-in-loop */
 	for (const uuid of aliveUuids) {
 		const cached = await mediaCache.lookup(uuid)

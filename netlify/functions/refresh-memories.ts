@@ -36,7 +36,7 @@ export const handler = schedule('0 4 * * *', async (event) => {
 	const fileidIndex = createFileidIndex(getFileidIndexStore())
 	const folderCache = createFolderCache(getFolderCacheStore())
 
-	const apiKey = process.env.OPENCAGE_API_KEY
+	const apiKey = process.env.GEOAPIFY_API_KEY
 	const capRaw = process.env.RECUERDEA_GEOCODE_MAX_PER_RUN
 	const cap = capRaw && Number.isInteger(Number(capRaw)) ? Number(capRaw) : undefined
 	if (!apiKey) {
@@ -58,10 +58,10 @@ export const handler = schedule('0 4 * * *', async (event) => {
 		`[refresh-memories] scanned=${result.scanned} alive=${result.alive} removed=${result.removed} geocoded=${result.geocoded} capped=${result.geocodeCapped} stopped=${result.geocodeStoppedReason ?? 'no'}`,
 	)
 	const f = result.geocodeFailures
-	if (f.auth || f.suspended || f.quota || f.ratelimit || f.server || f.network || f.parse) {
+	if (f.auth || f.suspended || f.ratelimit || f.server || f.network || f.parse) {
 		// eslint-disable-next-line no-console
 		console.log(
-			`[refresh-memories] geocode failures: auth=${f.auth} suspended=${f.suspended} quota=${f.quota} ratelimit=${f.ratelimit} server=${f.server} network=${f.network} parse=${f.parse}`,
+			`[refresh-memories] geocode failures: auth=${f.auth} suspended=${f.suspended} ratelimit=${f.ratelimit} server=${f.server} network=${f.network} parse=${f.parse}`,
 		)
 	}
 	return { statusCode: 200 }
