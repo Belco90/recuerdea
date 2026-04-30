@@ -49,21 +49,21 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 - [ ] `pnpm type-check` clean.
 - [ ] No extractor throws on any input shape.
 
-## Slice 3 — Extend `CachedMedia` + cron writer
+## Slice 3 — Extend `CachedMedia` + cron writer — `6b75ea4`
 
-- [ ] In `src/lib/cache/media-cache.ts`: add `location: { lat: number; lng: number } | null` and `place: string | null` to `CachedMedia`.
-- [ ] In `src/lib/memories/refresh-memories.server.ts`:
-  - [ ] Extend `FileMeta` and `extractFileMeta` with `location`.
-  - [ ] `fileToCachedMedia` writes `location` from extractor and `place: null`.
-- [ ] Update existing `CachedMedia` literals in tests (especially `refresh-memories.server.test.ts`, `media-cache.server.test.ts`, `media-cache.test.ts`, `pcloud.server.test.ts` if any).
-- [ ] Add a happy-path test: file with GPS → resulting `CachedMedia` has the expected `location`.
+- [x] In `src/lib/cache/media-cache.ts`: add `location: { lat: number; lng: number } | null` and `place: string | null` to `CachedMedia`.
+- [x] In `src/lib/memories/refresh-memories.server.ts`:
+  - [x] Extend `FileMeta` and `extractFileMeta` with `location`.
+  - [x] `fileToCachedMedia` writes `location` from extractor and `place: null`.
+- [x] Update existing `CachedMedia` literals in 5 test files: `media-cache.test.ts`, `media-cache.server.test.ts`, `pcloud.server.test.ts`, `memory-route.server.test.ts`, `refresh-memories.server.test.ts` (6 fixture sites).
+- [x] Add happy-path tests: file with GPS via image extractor → location persisted; same via video extractor.
 
-**Verify:** `pnpm test src/lib/memories src/lib/cache` green.
+**Verified:** `pnpm test` (139/139), `pnpm type-check`, `pnpm format:check`, `pnpm build` all green. Lint on 7 changed files: 0/0.
 
-## Checkpoint B — Cache shape
+## Checkpoint B — Cache shape ✅
 
-- [ ] All previously-green tests still green after literal updates.
-- [ ] Type errors are localized to intentional call sites only.
+- [x] All previously-green tests still green after literal updates.
+- [x] Type errors are localized to intentional call sites only.
 
 ## Slice 4 — OpenCage client
 
