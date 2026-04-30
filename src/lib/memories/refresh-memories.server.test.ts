@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileidIndexStore } from '../cache/fileid-index'
 import type { FolderCacheStore, FolderSnapshot } from '../cache/folder-cache'
 import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
+import type { ReverseGeocodeResult } from '../media-meta/opencage.server'
 
 import { createFileidIndex } from '../cache/fileid-index'
 import { createFolderCache } from '../cache/folder-cache'
@@ -12,6 +13,12 @@ import { createMediaCache } from '../cache/media-cache'
 import { extractImageMeta } from '../media-meta/exif'
 import { extractVideoMeta } from '../media-meta/video-meta'
 import { refreshMemories } from './refresh-memories.server'
+
+type Geocoder = (
+	input: { lat: number; lng: number },
+	opts: { apiKey: string },
+) => Promise<ReverseGeocodeResult>
+type Sleeper = (ms: number) => Promise<void>
 
 vi.mock('../media-meta/exif')
 vi.mock('../media-meta/video-meta')
@@ -163,7 +170,7 @@ describe('refreshMemories', () => {
 			createFolderCache(folderStore),
 		)
 
-		expect(result).toEqual({ scanned: 1, alive: 1, removed: 0 })
+		expect(result).toMatchObject({ scanned: 1, alive: 1, removed: 0 })
 		expect(mediaStore.set).toHaveBeenCalledTimes(1)
 		const [uuid, meta] = mediaStore.set.mock.calls[0]!
 		expect(meta).toEqual({
@@ -331,7 +338,7 @@ describe('refreshMemories', () => {
 			createFolderCache(folderStore),
 		)
 
-		expect(result).toEqual({ scanned: 1, alive: 1, removed: 1 })
+		expect(result).toMatchObject({ scanned: 1, alive: 1, removed: 1 })
 		expect(deleted).toEqual([9990])
 		expect(mediaStore.delete).toHaveBeenCalledWith('stale-uuid')
 		expect(fileidStore.delete).toHaveBeenCalledWith(999)
@@ -449,5 +456,382 @@ describe('refreshMemories', () => {
 		expect(meta.contenttype).toBe('video/mp4')
 		expect(meta.width).toBe(1920)
 		expect(meta.height).toBe(1080)
+	})
+
+	describe('geocode pass', () => {
+		const APIKEY = 'test-key'
+		const MADRID = { lat: 40.4168, lng: -3.7038 }
+		const LISBON = { lat: 38.7169, lng: -9.1399 }
+
+		function setupGpsImage(): void {
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 4032,
+				height: 3024,
+				location: MADRID,
+			})
+		}
+
+		it('skips the geocode pass when no geocodeOpts are provided', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			setupGpsImage()
+			const client = fakeClient({ files: [jpegA] })
+			const geocoder = vi.fn<Geocoder>()
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(geocoder).not.toHaveBeenCalled()
+		})
+
+		it('geocodes a fresh GPS entry and re-writes the cache with place set', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			setupGpsImage()
+			const client = fakeClient({ files: [jpegA] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'Madrid, España' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(geocoder).toHaveBeenCalledTimes(1)
+			expect(geocoder).toHaveBeenCalledWith(MADRID, { apiKey: APIKEY })
+			expect(result.geocoded).toBe(1)
+			// First write is the file pass (place: null), second is the geocode pass
+			// (place set). The cache ends with place set.
+			expect(mediaStore.set).toHaveBeenCalledTimes(2)
+			const finalMeta = Array.from(mediaStore.data.values())[0]!
+			expect(finalMeta.place).toBe('Madrid, España')
+			expect(finalMeta.location).toEqual(MADRID)
+		})
+
+		it('does not call the geocoder for entries with no location', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 4032,
+				height: 3024,
+				location: null,
+			})
+			const client = fakeClient({ files: [jpegA] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'X' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(geocoder).not.toHaveBeenCalled()
+		})
+
+		it('does not call the geocoder for entries that already have place from a prior run', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			fileidStore.data.set(100, { uuid: 'stable-uuid' })
+			mediaStore.data.set('stable-uuid', {
+				fileid: 100,
+				hash: 'h-a',
+				code: 'code-100',
+				linkid: 1000,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'a.jpg',
+				captureDate: '2020-01-15T10:00:00.000Z',
+				width: 4032,
+				height: 3024,
+				location: MADRID,
+				place: 'Madrid, España',
+			})
+			const client = fakeClient({ files: [jpegA] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'X' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(geocoder).not.toHaveBeenCalled()
+		})
+
+		it('sleeps between consecutive geocode calls', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			mockedExtractImageMeta
+				.mockResolvedValueOnce({
+					captureDate: new Date('2020-01-15T10:00:00Z'),
+					width: 100,
+					height: 100,
+					location: MADRID,
+				})
+				.mockResolvedValueOnce({
+					captureDate: new Date('2020-01-15T10:00:00Z'),
+					width: 100,
+					height: 100,
+					location: LISBON,
+				})
+			const client = fakeClient({ files: [jpegA, jpegB] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'X' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep, sleepMs: 1100 },
+			)
+
+			expect(geocoder).toHaveBeenCalledTimes(2)
+			// Sleep is called once between the two calls, not before the first
+			// or after the last.
+			expect(sleep).toHaveBeenCalledTimes(1)
+			expect(sleep).toHaveBeenCalledWith(1100)
+		})
+
+		it('respects the cap and leaves remaining items with place: null', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 100,
+				height: 100,
+				location: MADRID,
+			})
+			const client = fakeClient({ files: [jpegA, jpegB] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'X' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep, cap: 1 },
+			)
+
+			expect(geocoder).toHaveBeenCalledTimes(1)
+			expect(result.geocoded).toBe(1)
+			expect(result.geocodeCapped).toBe(1)
+		})
+
+		it('stops the pass on quota and counts remaining work as not-attempted', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 100,
+				height: 100,
+				location: MADRID,
+			})
+			const client = fakeClient({ files: [jpegA, jpegB] })
+			const geocoder = vi.fn<Geocoder>()
+			geocoder.mockResolvedValueOnce({ ok: true, place: 'X' })
+			geocoder.mockResolvedValueOnce({ ok: false, reason: 'quota' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(geocoder).toHaveBeenCalledTimes(2)
+			expect(result.geocoded).toBe(1)
+			expect(result.geocodeFailures.quota).toBe(1)
+			expect(result.geocodeStoppedReason).toBe('quota')
+		})
+
+		it('stops the pass on auth and warns once', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 100,
+				height: 100,
+				location: MADRID,
+			})
+			const client = fakeClient({ files: [jpegA, jpegB] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: false, reason: 'auth' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(geocoder).toHaveBeenCalledTimes(1)
+			expect(result.geocodeFailures.auth).toBe(1)
+			expect(result.geocodeStoppedReason).toBe('auth')
+			expect(warn).toHaveBeenCalledTimes(1)
+			// Warn line must not contain coords or messages.
+			const warnArg = String(warn.mock.calls[0]![0])
+			expect(warnArg).not.toContain('40.4')
+			expect(warnArg).not.toContain('-3.7')
+			warn.mockRestore()
+		})
+
+		it('counts transient server failures and continues with the next item', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 100,
+				height: 100,
+				location: MADRID,
+			})
+			const client = fakeClient({ files: [jpegA, jpegB] })
+			const geocoder = vi.fn<Geocoder>()
+			geocoder.mockResolvedValueOnce({ ok: false, reason: 'server' })
+			geocoder.mockResolvedValueOnce({ ok: true, place: 'Madrid, España' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(geocoder).toHaveBeenCalledTimes(2)
+			expect(result.geocoded).toBe(1)
+			expect(result.geocodeFailures.server).toBe(1)
+			expect(result.geocodeStoppedReason).toBeNull()
+		})
+
+		it('does not write the cache when the geocoder returns ok with null place', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			setupGpsImage()
+			const client = fakeClient({ files: [jpegA] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: null })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			// Only the initial file-pass write — no second write from the geocode pass.
+			expect(mediaStore.set).toHaveBeenCalledTimes(1)
+			const finalMeta = Array.from(mediaStore.data.values())[0]!
+			expect(finalMeta.place).toBeNull()
+		})
+
+		it('never logs coords, place, or response data on any path', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			setupGpsImage()
+			const client = fakeClient({ files: [jpegA] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'Madrid, España' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+			const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+			const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			const sensitive = ['40.4', '-3.7', 'Madrid', 'España']
+			for (const spy of [log, info, warn, error]) {
+				for (const call of spy.mock.calls) {
+					const flat = call.map((a: unknown) => String(a)).join(' ')
+					for (const needle of sensitive) {
+						expect(flat).not.toContain(needle)
+					}
+				}
+			}
+			log.mockRestore()
+			info.mockRestore()
+			warn.mockRestore()
+			error.mockRestore()
+		})
 	})
 })

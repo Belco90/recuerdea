@@ -3,10 +3,43 @@ import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 import type { FileidIndex } from '../cache/fileid-index'
 import type { FolderCache } from '../cache/folder-cache'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
+import type { ReverseGeocodeResult } from '../media-meta/opencage.server'
 
 import { extractImageMeta } from '../media-meta/exif'
 import { parseFilenameCaptureDate } from '../media-meta/filename-date'
+import { reverseGeocode as defaultReverseGeocode } from '../media-meta/opencage.server'
 import { extractVideoMeta } from '../media-meta/video-meta'
+
+type Geocoder = (
+	input: { lat: number; lng: number },
+	opts: { apiKey: string },
+) => Promise<ReverseGeocodeResult>
+
+type FailureReason = 'auth' | 'suspended' | 'quota' | 'ratelimit' | 'server' | 'network' | 'parse'
+
+const STOP_REASONS = new Set<FailureReason>(['auth', 'suspended', 'quota', 'ratelimit'])
+const WARN_REASONS = new Set<FailureReason>(['auth', 'suspended'])
+
+const DEFAULT_GEOCODE_CAP = 200
+const DEFAULT_GEOCODE_SLEEP_MS = 1100
+
+export type GeocodeOpts = {
+	apiKey: string
+	cap?: number
+	sleepMs?: number
+	sleep?: (ms: number) => Promise<void>
+	geocoder?: Geocoder
+}
+
+const ZERO_FAILURES: Record<FailureReason, number> = {
+	auth: 0,
+	suspended: 0,
+	quota: 0,
+	ratelimit: 0,
+	server: 0,
+	network: 0,
+	parse: 0,
+}
 
 type Publink = { code: string; linkid: number }
 
@@ -115,13 +148,24 @@ async function sweepUuid(
 	await mediaCache.forget(uuid)
 }
 
+export type RefreshResult = {
+	scanned: number
+	alive: number
+	removed: number
+	geocoded: number
+	geocodeCapped: number
+	geocodeFailures: Record<FailureReason, number>
+	geocodeStoppedReason: FailureReason | null
+}
+
 export async function refreshMemories(
 	client: Client,
 	folderId: number,
 	mediaCache: MediaCache,
 	fileidIndex: FileidIndex,
 	folderCache: FolderCache,
-): Promise<{ scanned: number; alive: number; removed: number }> {
+	geocodeOpts?: GeocodeOpts,
+): Promise<RefreshResult> {
 	const files = await listMediaFiles(client, folderId)
 	const aliveUuids = await Promise.all(
 		files.map((file) => processFile(client, file, mediaCache, fileidIndex)),
@@ -137,5 +181,82 @@ export async function refreshMemories(
 		uuids: aliveUuids,
 	})
 
-	return { scanned: files.length, alive: aliveUuids.length, removed: staleUuids.length }
+	const geocodeResult = geocodeOpts
+		? await runGeocodePass(aliveUuids, mediaCache, geocodeOpts)
+		: { geocoded: 0, capped: 0, failures: { ...ZERO_FAILURES }, stoppedReason: null }
+
+	return {
+		scanned: files.length,
+		alive: aliveUuids.length,
+		removed: staleUuids.length,
+		geocoded: geocodeResult.geocoded,
+		geocodeCapped: geocodeResult.capped,
+		geocodeFailures: geocodeResult.failures,
+		geocodeStoppedReason: geocodeResult.stoppedReason,
+	}
+}
+
+async function runGeocodePass(
+	aliveUuids: readonly string[],
+	mediaCache: MediaCache,
+	opts: GeocodeOpts,
+): Promise<{
+	geocoded: number
+	capped: number
+	failures: Record<FailureReason, number>
+	stoppedReason: FailureReason | null
+}> {
+	const cap = opts.cap ?? DEFAULT_GEOCODE_CAP
+	const sleepMs = opts.sleepMs ?? DEFAULT_GEOCODE_SLEEP_MS
+	const sleep = opts.sleep ?? defaultSleep
+	const geocoder = opts.geocoder ?? defaultReverseGeocode
+
+	const failures: Record<FailureReason, number> = { ...ZERO_FAILURES }
+	let geocoded = 0
+	let capped = 0
+	let attempts = 0
+	let stopped: FailureReason | null = null
+
+	// Sequential by design: OpenCage's free tier is 1 req/s and we throttle in
+	// software via `sleep` between calls. Parallelizing would burn the daily
+	// quota in seconds and trip 429s.
+	/* eslint-disable no-await-in-loop */
+	for (const uuid of aliveUuids) {
+		const cached = await mediaCache.lookup(uuid)
+		if (!cached || cached.location === null || cached.place !== null) continue
+
+		if (stopped !== null) continue
+		if (attempts >= cap) {
+			capped += 1
+			continue
+		}
+		if (attempts > 0) await sleep(sleepMs)
+		attempts += 1
+
+		const result = await geocoder(cached.location, { apiKey: opts.apiKey })
+
+		if (result.ok) {
+			if (result.place !== null) {
+				await mediaCache.remember(uuid, { ...cached, place: result.place })
+				geocoded += 1
+			}
+			continue
+		}
+
+		failures[result.reason] += 1
+		if (STOP_REASONS.has(result.reason)) {
+			stopped = result.reason
+			if (WARN_REASONS.has(result.reason)) {
+				// eslint-disable-next-line no-console
+				console.warn(`[refresh] geocode disabled: ${result.reason}`)
+			}
+		}
+	}
+	/* eslint-enable no-await-in-loop */
+
+	return { geocoded, capped, failures, stoppedReason: stopped }
+}
+
+function defaultSleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms))
 }
