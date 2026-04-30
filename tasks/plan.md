@@ -8,18 +8,18 @@ Branch: `v6-location` (to create from `main`). PR target: `main`. Cron remains t
 
 ## Resolved decisions (locked in)
 
-| #   | Decision                   | Outcome                                                                                                                                                                                                                                                                                                                                                                                              |
-| --- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Q1  | Reverse geocoding provider | **OpenCage Data API** (`https://api.opencagedata.com/geocode/v1/json`). Free tier: 2,500 req/day, 1 req/sec. Reads API key from `OPENCAGE_API_KEY` Netlify env var. Spanish output via `language=es`. **Implementation refined per the official `opencage-skills` guidance** (raw fetch, status.code in body authoritative, comma-separated reverse query, distinct error categories — see Slice 4). |
-| Q2  | Cache migration            | **Clear Blobs manually before deploy.** No `schemaVersion` field. The cron rebuilds every entry on its first post-deploy run. (Slice 4 dropped vs the prior draft.)                                                                                                                                                                                                                                  |
-| Q3  | UI fallback when no place  | Hide the caption entirely. No filename fallback, no "Sin ubicación" label.                                                                                                                                                                                                                                                                                                                           |
-| Q4  | Lightbox header            | Append place after the years-ago line (e.g. `2019 · hace 6 años · Madrid`). Hidden when null.                                                                                                                                                                                                                                                                                                        |
-| Q5  | Logging                    | **Never log any geo-derived data** — neither lat/lng, the OpenCage response, nor the resolved `place` string. Counts only (`[refresh] geocoded N/M`).                                                                                                                                                                                                                                                |
+| #   | Decision                   | Outcome                                                                                                                                                                                                                                                                                       |
+| --- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | Reverse geocoding provider | **Geoapify Reverse Geocoding API** (`https://api.geoapify.com/v1/geocode/reverse`). Free tier: 3,000 req/day, 5 req/sec. Reads API key from `GEOAPIFY_API_KEY` Netlify env var. Spanish output via `lang=es`. _History: started with OpenCage (Slices 4–7), switched to Geoapify in Slice 8._ |
+| Q2  | Cache migration            | **Clear Blobs manually before deploy.** No `schemaVersion` field. The cron rebuilds every entry on its first post-deploy run. (Slice 4 dropped vs the prior draft.)                                                                                                                           |
+| Q3  | UI fallback when no place  | Hide the caption entirely. No filename fallback, no "Sin ubicación" label.                                                                                                                                                                                                                    |
+| Q4  | Lightbox header            | Append place after the years-ago line (e.g. `2019 · hace 6 años · Madrid`). Hidden when null.                                                                                                                                                                                                 |
+| Q5  | Logging                    | **Never log any geo-derived data** — neither lat/lng, the Geoapify response, nor the resolved `place` string. Counts only (`[refresh] geocoded N/M`).                                                                                                                                         |
 
 ## Confirmed assumptions
 
 1. Caption is a short human-readable place string (e.g. "Madrid, España"); not raw coords; not a full street address.
-2. Locale is Spanish (`language=es` to OpenCage).
+2. Locale is Spanish (`lang=es` to Geoapify).
 3. Geocoding runs at cron time, not page time.
 4. No-GPS / no-place items render with no caption.
 5. `Lightbox` keeps `alt={item.name}` for a11y; only the _visible_ header line uses `place`.
@@ -38,10 +38,10 @@ Branch: `v6-location` (to create from `main`). PR target: `main`. Cron remains t
 
 - **Two-stage extraction at cron time, both cached on `CachedMedia`:**
   1. Raw `location: { lat, lng } | null` from EXIF / `©xyz`.
-  2. Display `place: string | null` from OpenCage. Stage 2 only runs when stage 1 succeeds **and** there's no cached `place` yet, so a flaky geocode call retries on the next cron run without re-doing the rest of the work.
+  2. Display `place: string | null` from Geoapify. Stage 2 only runs when stage 1 succeeds **and** there's no cached `place` yet, so a flaky geocode call retries on the next cron run without re-doing the rest of the work.
 - `place` is a denormalized display string. Structured data is not exposed to the browser; if we ever need city/country separately we still have `lat`/`lng` to re-derive.
-- Reverse-geocoding is server-only (cron only). Loader and `/api/memory/...` route never call OpenCage.
-- No new top-level dep: OpenCage is a plain HTTPS GET. Net new env var: `OPENCAGE_API_KEY`.
+- Reverse-geocoding is server-only (cron only). Loader and `/api/memory/...` route never call Geoapify.
+- No new top-level dep: Geoapify is a plain HTTPS GET. Net new env var: `GEOAPIFY_API_KEY`.
 - Loader hot path unchanged: `MemoryItem` gains a `place: string | null` field; everything else is identical.
 
 ## Dependency graph
@@ -51,7 +51,7 @@ exif.ts (image GPS)        video-meta.ts (mp4 GPS)
         \                        /
          \                      /
           v                    v
-     opencage.server.ts (reverse geocode, sequential, capped)
+     geoapify.server.ts (reverse geocode, sequential, capped)
           |
           v
      refresh-memories.server.ts (extract + geocode + cache)
@@ -176,31 +176,82 @@ Bottom-up build order: extractors → cache shape → geocoder → cron orchestr
   - `alt={item.name}` unchanged.
   - Manual: open lightbox on a GPS'd photo and a non-GPS'd photo; layout doesn't break either way.
 
+### Phase 5 — Provider migration (Slice 8)
+
+OpenCage was the implementation through Slices 4–7. Mid-build the team switched providers to **Geoapify** (better fit for the project's account / pricing). This phase swaps the geocoder module under the existing cron interface — no UI or schema changes.
+
+- **Slice 8: Switch geocoder from OpenCage to Geoapify**
+  - **API surface (Geoapify):**
+    - Endpoint: `https://api.geoapify.com/v1/geocode/reverse`
+    - Params: `lat`, `lon` (separate, not `q=lat,lng`), `lang=es`, `apiKey=${env}`. Optional `limit=1` (default), no explicit `format` (default JSON / GeoJSON FeatureCollection), no `type` (let Geoapify pick the most precise feature; we filter properties).
+    - No headers required besides `Accept: application/json`.
+  - **Response shape:**
+    ```jsonc
+    {
+    	"features": [
+    		{
+    			"properties": {
+    				"country": "España",
+    				"country_code": "es",
+    				"state": "Comunidad de Madrid",
+    				"city": "Madrid",
+    				"postcode": "...",
+    				"formatted": "Madrid, España",
+    				"result_type": "city" /* or country/state/postcode/street/amenity */,
+    			},
+    		},
+    	],
+    }
+    ```
+  - **Place picker:** prefer `properties.city ?? properties.state ?? null`; if non-null and `properties.country` is present and the head doesn't already end with the country, return `${head}, ${country}`. Fall back to `properties.formatted ?? null`. Empty `features` → `{ ok: true, place: null }`.
+  - **Status mapping:** Geoapify uses HTTP status only (no `status.code` body). 401 → `auth`, 403 → `suspended`, 429 → `ratelimit` (covers both per-second rate limit and daily quota), 5xx + unexpected → `server`. Network reject → `network`. JSON parse throw → `parse`.
+  - **Drop `quota` from the `FailureReason` union.** Geoapify doesn't distinguish quota from rate limit; merging keeps the union honest. `refresh-memories.server.ts`'s stop set + the cron's failures log shrink accordingly.
+  - **Module rename:** `src/lib/media-meta/opencage.server.ts` → `geoapify.server.ts` (and its test). `ReverseGeocodeResult` + `reverseGeocode` keep the same names — only the implementation changes.
+  - **Env var rename:** `OPENCAGE_API_KEY` → `GEOAPIFY_API_KEY` in `netlify/functions/refresh-memories.ts` + Netlify dashboard.
+  - **Logging hygiene unchanged:** zero `console.*` with coords, place, response body, or HTTP message. Tests assert this on every path.
+  - **Tests** (rewrite of `opencage.server.test.ts` → `geoapify.server.test.ts`):
+    - Request URL contains `lat=`, `lon=`, `lang=es`, `apiKey=`.
+    - `Accept: application/json` header.
+    - Forwards `signal`.
+    - Component preference: city → state → formatted → null.
+    - Country dedup (`{ city: 'España', country: 'España' }` → `'España'`, not `'España, España'`).
+    - Empty `features` → `{ ok: true, place: null }`.
+    - HTTP 401 → auth. 403 → suspended. 429 → ratelimit. 503 → server. Unexpected (418) → server.
+    - fetch reject → network. Non-JSON body → parse.
+    - Console hygiene assertions on success + every failure path.
+
+#### Checkpoint E — Migration done
+
+- [ ] `pnpm test`, `pnpm type-check`, `pnpm format:check`, `pnpm build`, lint on changed files all green.
+- [ ] `opencage.server.{ts,test.ts}` removed; `geoapify.server.{ts,test.ts}` in their place.
+- [ ] `quota` no longer appears in any `FailureReason` union or summary log.
+- [ ] `netlify/functions/refresh-memories.ts` reads `GEOAPIFY_API_KEY` and the `[refresh-memories]` summary log line drops the `quota=` field.
+
 #### Checkpoint D — End-to-end
 
 - [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check` all green.
 - [ ] Local: `pnpm dev:netlify` + `pnpm invoke:refresh-memories`. Visit `/`. Polaroids show place captions where GPS was extracted; no captions otherwise.
 - [ ] Deploy preview: same on real pCloud data.
 - [ ] `curl -I https://<preview>/` confirms `Cache-Control: private` (or `no-store`) on home HTML.
-- [ ] `SPEC.md` updated with §13 v6 acceptance criteria + v5 → v6 changes summary, including: OpenCage as dependency-free third-party, the manual Blobs-clear pre-flight, and the no-geo-logging rule.
+- [ ] `SPEC.md` updated with §13 v6 acceptance criteria + v5 → v6 changes summary, including: Geoapify as dependency-free third-party, the manual Blobs-clear pre-flight, and the no-geo-logging rule.
 - [ ] Open PR `v6-location → main`.
 
 ## Pre-flight (before merge)
 
-- [ ] `OPENCAGE_API_KEY` provisioned in Netlify env (deploy-preview scope first, then production on merge).
+- [ ] `GEOAPIFY_API_KEY` provisioned in Netlify env (deploy-preview scope first, then production on merge).
 - [ ] Manually clear Blobs (`media/*`, `fileid-index/*`, `folder/v1`) on the deploy preview, then trigger cron once. Smoke `/` afterwards.
 - [ ] On merge to `main`: clear Blobs in production, then trigger production cron once.
 
 ## Risks and mitigations
 
-| Risk                                                             | Impact | Mitigation                                                                                                                                                                                                                  |
-| ---------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenCage 2,500/day free quota exceeded during one-time backfill  | Low    | ~1000 files; one cron pass fits inside one day's quota with 1.5× headroom. Per-cron cap (default 200) means even an unexpectedly large folder spreads across multiple days rather than burning the daily quota in one shot. |
-| OpenCage outage during cron                                      | Low    | Failures categorized + counted, entries left with `place: null`, retried next run. Cron remains idempotent.                                                                                                                 |
-| MP4 GPS atom variants outside `udta.©xyz` (some Android cameras) | Low    | Documented gap; iPhone covers the user's case. Revisit if hit-rate disappoints.                                                                                                                                             |
-| Spanish locale gaps in OpenCage results for some places          | Low    | Acceptable for v1; we can post-process if needed without changing the schema.                                                                                                                                               |
-| Accidental log of `place` or coords                              | Med    | Lint-by-eye in PR review; tests assert no `console.*` calls receive geo data; doc the rule in `SPEC.md` boundaries.                                                                                                         |
-| Blobs clear forgotten in production after merge                  | Med    | Listed twice in Pre-flight (preview + prod). Fail-loud: stale entries lack `location`/`place`, so users see the v5 (filename) caption — visible regression that triggers cleanup.                                           |
+| Risk                                                             | Impact | Mitigation                                                                                                                                                                                                                |
+| ---------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Geoapify 3,000/day free quota exceeded during one-time backfill  | Low    | ~1000 files; one cron pass fits inside one day's quota with 3× headroom. Per-cron cap (default 200) means even an unexpectedly large folder spreads across multiple days rather than burning the daily quota in one shot. |
+| Geoapify outage during cron                                      | Low    | Failures categorized + counted, entries left with `place: null`, retried next run. Cron remains idempotent.                                                                                                               |
+| MP4 GPS atom variants outside `udta.©xyz` (some Android cameras) | Low    | Documented gap; iPhone covers the user's case. Revisit if hit-rate disappoints.                                                                                                                                           |
+| Spanish locale gaps in Geoapify results for some places          | Low    | Acceptable for v1; we can post-process if needed without changing the schema.                                                                                                                                             |
+| Accidental log of `place` or coords                              | Med    | Lint-by-eye in PR review; tests assert no `console.*` calls receive geo data; doc the rule in `SPEC.md` boundaries.                                                                                                       |
+| Blobs clear forgotten in production after merge                  | Med    | Listed twice in Pre-flight (preview + prod). Fail-loud: stale entries lack `location`/`place`, so users see the v5 (filename) caption — visible regression that triggers cleanup.                                         |
 
 ## Out of scope
 
