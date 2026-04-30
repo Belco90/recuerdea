@@ -2,6 +2,7 @@ import { AdminDateOverride } from '#/components/AdminDateOverride'
 import { AppShell } from '#/components/AppShell'
 import { EmptyState } from '#/components/EmptyState'
 import { Hero } from '#/components/Hero'
+import { Lightbox } from '#/components/Lightbox'
 import { Timeline } from '#/components/Timeline'
 import { Topbar } from '#/components/Topbar'
 import { YearSection } from '#/components/YearSection'
@@ -11,6 +12,7 @@ import { getTodayMemories } from '#/lib/pcloud'
 import { spanishMonth } from '#/lib/spanish-months'
 import { Container } from '@chakra-ui/react'
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { useState } from 'react'
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -62,16 +64,23 @@ export const Route = createFileRoute('/')({
 	component: Home,
 })
 
-// Slice 7 replaces this with a stateful callback wired to the lightbox.
-const noopOpen = (_year: number, _idx: number) => undefined
+type LightboxState = { yearIndex: number; idx: number }
 
 function Home() {
 	const { memories, isAdmin } = Route.useLoaderData()
 	const { date: activeDate } = Route.useSearch()
+	const [lightbox, setLightbox] = useState<LightboxState | null>(null)
 
 	const today = todayParts(activeDate)
 	const todayDisplay = { day: today.day, month: spanishMonth(today.month - 1), year: today.year }
 	const groups = groupMemoriesByYear(memories, today)
+
+	const handleOpen = (year: number, idx: number) => {
+		const yearIndex = groups.findIndex((g) => g.year === year)
+		if (yearIndex >= 0) setLightbox({ yearIndex, idx })
+	}
+
+	const activeGroup = lightbox ? groups[lightbox.yearIndex] : null
 
 	return (
 		<AppShell>
@@ -84,11 +93,19 @@ function Home() {
 				) : (
 					<Timeline>
 						{groups.map((group) => (
-							<YearSection key={group.year} group={group} onOpen={noopOpen} />
+							<YearSection key={group.year} group={group} onOpen={handleOpen} />
 						))}
 					</Timeline>
 				)}
 			</Container>
+			{activeGroup && lightbox && (
+				<Lightbox
+					group={activeGroup}
+					startIndex={lightbox.idx}
+					open={true}
+					onClose={() => setLightbox(null)}
+				/>
+			)}
 		</AppShell>
 	)
 }
