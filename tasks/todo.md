@@ -80,31 +80,20 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 
 **Verified:** 164/164 pnpm test, type-check, format:check, build all green; lint on the two new files: 0/0.
 
-## Slice 5 — Wire OpenCage into the cron
+## Slice 5 — Wire OpenCage into the cron — `36fc4d2`
 
-- [ ] In `refresh-memories.server.ts`:
-  - [ ] After per-file processing pass, run a sequential geocode pass over uuids whose freshly-written entry has `location !== null && place === null`.
-  - [ ] Spacing: ≥1100ms between consecutive geocode calls.
-  - [ ] Cap: env-configurable (`RECUERDEA_GEOCODE_MAX_PER_RUN`), default 200. Items beyond cap stay `place: null`.
-  - [ ] On success with non-null place: update the cache entry by re-writing with `place` set. Success with null place: leave entry unchanged.
-  - [ ] On `quota` or `ratelimit`: stop the geocode pass for the rest of this run.
-  - [ ] On `auth` or `suspended`: stop the geocode pass and warn once (`[refresh] geocode disabled: auth` / `suspended` — no key/coord data in the warn).
-  - [ ] On `server`, `network`, `parse`: count, continue (transient).
-  - [ ] Final summary log: `[refresh] geocoded N (capped at K)` and `[refresh] geocode failures: { auth, suspended, quota, ratelimit, server, network, parse }`.
-  - [ ] Read `OPENCAGE_API_KEY` from `process.env`. If missing, skip the entire geocode pass and log `[refresh] geocode skipped: no api key`.
-- [ ] Tests in `refresh-memories.server.test.ts`:
-  - [ ] Happy path: file with GPS → geocode called once → entry rewritten with `place`.
-  - [ ] GPS missing → geocode not called.
-  - [ ] Cached entry already has `place` from earlier run → geocode not called this run.
-  - [ ] Rate-limit spacing enforced (use `vi.useFakeTimers` + `vi.advanceTimersByTime`).
-  - [ ] Cap respected: items beyond cap remain `place: null`.
-  - [ ] Quota hit mid-run → remaining items are not geocoded; counts reflect the partial pass.
-  - [ ] Auth failure on first call → no further calls; warn logged once.
-  - [ ] Server failure (transient) → counted, next item still attempted.
-  - [ ] Missing `OPENCAGE_API_KEY` → no geocode calls; entries left with `place: null`; warn logged once.
-  - [ ] Across all failure modes: no `console.*` invocation receives lat, lng, place, or response body.
+- [x] `refreshMemories` accepts an optional `geocodeOpts: { apiKey, cap?, sleepMs?, sleep?, geocoder? }`. Defaults: cap 200, sleepMs 1100, real `setTimeout`, real `reverseGeocode`.
+- [x] Geocode pass runs sequentially after the folder snapshot is written.
+- [x] Spacing: `await sleep(sleepMs)` between consecutive calls (not before first, not after last).
+- [x] Cap respected; items beyond cap counted as `geocodeCapped`.
+- [x] On success + non-null place: re-write cache entry. On success + null place: no-op (no second write).
+- [x] `quota` / `ratelimit` → stop pass. `auth` / `suspended` → stop + warn once (no coords/message).
+- [x] `server` / `network` / `parse` → counted, pass continues.
+- [x] Disabled `no-await-in-loop` for the sequential loop with a why-comment.
+- [x] Netlify entrypoint reads `OPENCAGE_API_KEY` and `RECUERDEA_GEOCODE_MAX_PER_RUN`; warns once when key is missing; logs counts + failures summary.
+- [x] 10 new tests; full suite 175/175 green.
 
-**Verify:** `pnpm test src/lib/memories` green.
+**Verified:** `pnpm test`, `pnpm type-check`, `pnpm format:check`, `pnpm build`, lint on 3 changed files all green.
 
 ## Checkpoint C — Geocoding live (deploy preview)
 
