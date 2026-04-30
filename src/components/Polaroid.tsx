@@ -10,14 +10,9 @@ type PolaroidProps = {
 	onClick: () => void
 }
 
-function captionFromName(name: string): string {
-	const stem = name.replace(/\.[^.]+$/, '')
-	return stem.replace(/[_-]+/g, ' ').trim()
-}
-
 export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 	const rot = rotForKey(keyId)
-	const caption = captionFromName(item.name)
+	const caption = item.place
 	const aspectRatio = item.width && item.height ? item.width / item.height : undefined
 	const photoSrc =
 		item.kind === 'video'
@@ -42,7 +37,7 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 			_active={{ transform: 'rotate(0deg) translateY(-1px) scale(0.99)' }}
 			css={{ breakInside: 'avoid' }}
 			onClick={onClick}
-			aria-label={caption || 'Recuerdo'}
+			aria-label={caption ?? 'Recuerdo'}
 		>
 			<Box
 				bg="paper"

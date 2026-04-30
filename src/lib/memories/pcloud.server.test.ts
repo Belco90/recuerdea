@@ -146,6 +146,7 @@ describe('fetchTodayMemories', () => {
 				captureDate: '2018-04-27T10:00:00.000Z',
 				width: 1920,
 				height: 1080,
+				place: null,
 			},
 			{
 				kind: 'image',
@@ -154,6 +155,7 @@ describe('fetchTodayMemories', () => {
 				captureDate: '2024-04-27T14:30:00.000Z',
 				width: 4032,
 				height: 3024,
+				place: null,
 			},
 		])
 	})
@@ -177,8 +179,25 @@ describe('fetchTodayMemories', () => {
 				captureDate: '2024-06-15T09:00:00.000Z',
 				width: null,
 				height: null,
+				place: null,
 			},
 		])
+	})
+
+	it('passes through place from CachedMedia to MemoryItem', async () => {
+		const imageWithPlace: CachedMedia = { ...imageA, place: 'Madrid, España' }
+		mockedGetFolderCacheStore.mockReturnValue(
+			makeFolderStore({
+				refreshedAt: '2026-04-29T04:00:00.000Z',
+				uuids: ['uuid-a'],
+			}),
+		)
+		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageWithPlace }))
+
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+
+		expect(result).toHaveLength(1)
+		expect(result[0]!.place).toBe('Madrid, España')
 	})
 
 	it('breaks ties by fileid ascending when years match', async () => {

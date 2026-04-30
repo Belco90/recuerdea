@@ -13,6 +13,7 @@ export type MemoryItem =
 			captureDate: string
 			width: number | null
 			height: number | null
+			place: string | null
 	  }
 	| {
 			kind: 'video'
@@ -22,6 +23,7 @@ export type MemoryItem =
 			captureDate: string
 			width: number | null
 			height: number | null
+			place: string | null
 	  }
 
 type Match = { uuid: string; meta: CachedMedia; capture: Date }
@@ -43,6 +45,7 @@ function buildMemoryItem({ uuid, meta, capture }: Match): MemoryItem {
 			captureDate,
 			width: meta.width,
 			height: meta.height,
+			place: meta.place,
 		}
 	}
 	return {
@@ -52,6 +55,7 @@ function buildMemoryItem({ uuid, meta, capture }: Match): MemoryItem {
 		captureDate,
 		width: meta.width,
 		height: meta.height,
+		place: meta.place,
 	}
 }
 
