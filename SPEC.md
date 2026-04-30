@@ -66,26 +66,32 @@ src/
     Timeline.tsx          # Vertical timeline line + end dot + Spanish footer
     Lightbox.tsx          # Per-year fullscreen Chakra Dialog (image or video controls autoPlay, swipe, arrow keys, dots)
     AdminDateOverride.tsx # Admin-only banner: striped diagonal bg + paper tape + Chakra DatePicker + state pill
-  lib/              # Pure logic + server functions; tests colocated as *.test.ts(x)
-    date.ts         # formatCaptureDate / todayIso — display + ISO helpers shared by route + components
-    spanish-months.ts # SPANISH_MONTHS const + spanishMonth(idx) — used by Hero, login, AdminDateOverride — v5
-    memory-grouping.ts # groupMemoriesByYear pure helper — v5
-    rotation.ts     # Stable per-key rotation for polaroid scatter — v5
-    auth.ts         # createServerFn wrapper for getServerUser
-    auth.server.ts  # loadServerUser — server-only auth (isAdmin, JWT decode)
-    pcloud.ts       # createServerFn wrapper for getTodayMemories — returns MemoryItem[]
-    pcloud.server.ts# Loader — reads from folder-cache + media-cache only; no listfolder, no pCloud client. MemoryItem now carries width/height — v5.
-    exif.ts         # EXIF image capture date + dimensions extraction (extractImageMeta) — extended in v5
-    video-meta.ts   # MP4/MOV moov walker — capture date (mvhd) + dimensions (tkhd) (extractVideoMeta) — extended in v5
-    filename-date.ts# Filename-based capture-date fallback
-    media-cache.ts          # Pure (uuid → CachedMedia) cache abstraction — v4. CachedMedia gains width/height — v5.
-    media-cache.server.ts   # Netlify-Blobs-backed MediaCacheStore + no-op fallback — v4
-    fileid-index.ts         # Pure (fileid → uuid) sidecar abstraction — v4
-    fileid-index.server.ts  # Netlify-Blobs-backed FileidIndexStore + no-op fallback — v4
-    folder-cache.ts         # Pure folder-listing snapshot abstraction — v4
-    folder-cache.server.ts  # Netlify-Blobs-backed snapshot store + no-op fallback — v4
-    identity-context.tsx
-    navigation.ts   # hardNavigate (post-logout cookie refresh)
+  lib/                # Pure logic + server functions; split by domain. Tests colocated as *.test.ts(x).
+    auth/                       # User identity end-to-end
+      auth.ts                   # createServerFn wrapper for getServerUser
+      auth.server.ts            # loadServerUser — server-only auth (isAdmin, JWT decode)
+      identity-context.tsx      # IdentityProvider + useIdentity hook
+    memories/                   # pCloud-backed memory pipeline
+      pcloud.ts                 # createServerFn wrapper for getTodayMemories — returns MemoryItem[]
+      pcloud.server.ts          # Loader — reads from folder-cache + media-cache only; no listfolder, no pCloud client. MemoryItem now carries width/height — v5.
+      refresh-memories.server.ts# Cron orchestrator: lists folder, ensures public links, writes caches, sweeps deleted files — v4
+      memory-route.server.ts    # /api/memory/$uuid handler (auth gate + byte-streaming) — v4
+      memory-grouping.ts        # groupMemoriesByYear pure helper — v5
+    cache/                      # Netlify-Blobs-backed stores; each pair = pure abstraction + server store-getter with no-op fallback — v4
+      media-cache.ts            # Pure (uuid → CachedMedia) cache abstraction. CachedMedia gains width/height — v5.
+      media-cache.server.ts
+      fileid-index.ts           # Pure (fileid → uuid) sidecar abstraction
+      fileid-index.server.ts
+      folder-cache.ts           # Pure folder-listing snapshot abstraction
+      folder-cache.server.ts
+    media-meta/                 # Capture-date + dimensions extraction from bytes; called from refresh-memories.server
+      exif.ts                   # EXIF extraction (extractImageMeta) — extended in v5
+      video-meta.ts             # MP4/MOV moov walker — capture date (mvhd) + dimensions (tkhd) (extractVideoMeta) — extended in v5
+      filename-date.ts          # Filename-based capture-date fallback
+    utils/                      # Small leaf helpers
+      spanish-months.ts         # SPANISH_MONTHS const + spanishMonth(idx) — used by Hero, login, AdminDateOverride — v5
+      rotation.ts               # Stable per-key rotation for polaroid scatter — v5
+      navigation.ts             # hardNavigate (post-logout cookie refresh)
   theme.ts          # Chakra v3 createSystem — accent.50…950 palette, semantic light/dark tokens, fonts, shadows, keyframes, breakpoints.md=720px, paper-noise body bg via globalCss — v5
   fonts.css         # @font-face declarations for the four self-hosted variable woff2 in public/fonts/ — v5
   router.tsx        # getRouter() factory
@@ -126,7 +132,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 ### Always do
 
 - Use TanStack Router `beforeLoad` + router context for route auth guards (existing pattern: `src/routes/index.tsx`, `src/routes/login.tsx`).
-- Keep server-only secrets (pCloud credentials, future tokens) behind `createServerFn` and Netlify functions (`src/lib/pcloud.ts`, `src/lib/pcloud.server.ts`, `src/lib/auth.server.ts`, `netlify/functions/*.ts`). Read `process.env` only inside server-only modules.
+- Keep server-only secrets (pCloud credentials, future tokens) behind `createServerFn` and Netlify functions (`src/lib/memories/pcloud.ts`, `src/lib/memories/pcloud.server.ts`, `src/lib/auth/auth.server.ts`, `netlify/functions/*.ts`). Read `process.env` only inside server-only modules.
 - **Auth-gate every API endpoint** in `src/routes/api/`. Each handler must call `loadServerUser()` and 401 unauthenticated callers — defense-in-depth on top of `beforeLoad`.
 - Colocate tests with source under `src/lib/` for any new pure logic.
 - Use the existing path alias `#/*` for `src/` imports.
