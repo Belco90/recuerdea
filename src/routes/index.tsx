@@ -43,13 +43,10 @@ function todayParts(activeDate: string | undefined): { year: number; month: numb
 
 export const Route = createFileRoute('/')({
 	validateSearch: (raw): HomeSearch => ({ date: parseSearchDate(raw.date) }),
-	beforeLoad: async ({ location }) => {
+	beforeLoad: async () => {
 		const user = await getServerUser()
 		if (!user) {
-			throw redirect({
-				to: '/login',
-				search: { redirect: location.href },
-			})
+			throw redirect({ to: '/login' })
 		}
 		return { user }
 	},

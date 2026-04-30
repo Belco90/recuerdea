@@ -25,6 +25,7 @@ function captionFromName(name: string): string {
 export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 	const [idx, setIdx] = useState(startIndex)
 	const touchStartX = useRef<number | null>(null)
+	const touchStartYRef = useRef<number | null>(null)
 
 	useEffect(() => {
 		if (open) setIdx(startIndex)
@@ -39,8 +40,13 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 	useEffect(() => {
 		if (!open) return
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'ArrowRight') next()
-			else if (e.key === 'ArrowLeft') prev()
+			if (e.key === 'ArrowRight') {
+				e.preventDefault()
+				next()
+			} else if (e.key === 'ArrowLeft') {
+				e.preventDefault()
+				prev()
+			}
 		}
 		document.addEventListener('keydown', onKey)
 		return () => document.removeEventListener('keydown', onKey)
@@ -49,14 +55,28 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 	if (!item) return null
 
 	const onTouchStart = (e: React.TouchEvent) => {
-		touchStartX.current = e.touches[0]!.clientX
+		const t = e.touches[0]
+		if (!t) return
+		touchStartX.current = t.clientX
+		touchStartYRef.current = t.clientY
 	}
 	const onTouchEnd = (e: React.TouchEvent) => {
-		if (touchStartX.current == null) return
-		const dx = e.changedTouches[0]!.clientX - touchStartX.current
+		const startX = touchStartX.current
+		const startY = touchStartYRef.current
+		touchStartX.current = null
+		touchStartYRef.current = null
+		if (startX == null || startY == null) return
+		const t = e.changedTouches[0]
+		if (!t) return
+		const dx = t.clientX - startX
+		const dy = t.clientY - startY
+		if (Math.abs(dy) >= 30) return
 		if (dx > 50) prev()
 		else if (dx < -50) next()
+	}
+	const onTouchCancel = () => {
 		touchStartX.current = null
+		touchStartYRef.current = null
 	}
 
 	const caption = captionFromName(item.name)
@@ -133,6 +153,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 							overflow="hidden"
 							onTouchStart={onTouchStart}
 							onTouchEnd={onTouchEnd}
+							onTouchCancel={onTouchCancel}
 						>
 							{item.kind === 'video' ? (
 								<video

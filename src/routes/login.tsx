@@ -4,7 +4,7 @@ import { AppShell } from '#/components/AppShell'
 import { Wordmark } from '#/components/Wordmark'
 import { getServerUser } from '#/lib/auth'
 import { spanishMonth } from '#/lib/spanish-months'
-import { Box, Button, Field, Heading, Input, Link, Stack, Text, VStack } from '@chakra-ui/react'
+import { Box, Button, Field, Heading, Input, Stack, Text, VStack } from '@chakra-ui/react'
 import { acceptInvite, handleAuthCallback, login, updateUser } from '@netlify/identity'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
@@ -243,19 +243,6 @@ function LoginPage() {
 							>
 								{TITLES[mode]}
 							</Button>
-
-							{mode === 'login' && (
-								<Link
-									href="#"
-									textAlign="center"
-									mt={1}
-									color="ink.muted"
-									fontSize="13px"
-									_hover={{ color: 'accent.500', textDecoration: 'none' }}
-								>
-									¿Olvidaste tu contraseña?
-								</Link>
-							)}
 						</Stack>
 					</form>
 				</Box>

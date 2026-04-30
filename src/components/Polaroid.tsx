@@ -35,7 +35,10 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 			mb={4.5}
 			transform={`rotate(${rot}deg)`}
 			transition="transform 0.25s cubic-bezier(.2,.7,.3,1)"
-			_hover={{ transform: 'rotate(0deg) translateY(-3px)' }}
+			_hover={{
+				transform: 'rotate(0deg) translateY(-3px)',
+				'& > div': { boxShadow: 'rdShadowLift' },
+			}}
 			_active={{ transform: 'rotate(0deg) translateY(-1px) scale(0.99)' }}
 			css={{ breakInside: 'avoid' }}
 			onClick={onClick}
@@ -50,7 +53,7 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 				borderRadius="2px"
 				boxShadow="rdShadow"
 				position="relative"
-				_groupHover={{ boxShadow: 'rdShadowLift' }}
+				transition="box-shadow 0.25s cubic-bezier(.2,.7,.3,1)"
 			>
 				<Box position="relative" bg="bg.muted" overflow="hidden" w="full" aspectRatio={aspectRatio}>
 					<Image

@@ -105,28 +105,6 @@ const config = defineConfig({
 				},
 			},
 		},
-		keyframes: {
-			rdShimmer: {
-				'0%': { backgroundPosition: '100% 0' },
-				'100%': { backgroundPosition: '-100% 0' },
-			},
-			rdPulse: {
-				'0%, 100%': {
-					boxShadow: '0 0 0 3px color-mix(in srgb, {colors.accent.500} 25%, transparent)',
-				},
-				'50%': {
-					boxShadow: '0 0 0 5px color-mix(in srgb, {colors.accent.500} 10%, transparent)',
-				},
-			},
-			rdFade: {
-				from: { opacity: '0' },
-				to: { opacity: '1' },
-			},
-			rdZoom: {
-				from: { opacity: '0', transform: 'scale(.97)' },
-				to: { opacity: '1', transform: 'none' },
-			},
-		},
 	},
 })
 
