@@ -2,12 +2,15 @@ import type { MemoryItem } from '#/lib/pcloud.server'
 
 import { AdminDateOverride } from '#/components/AdminDateOverride'
 import { AppShell } from '#/components/AppShell'
+import { EmptyState } from '#/components/EmptyState'
+import { Hero } from '#/components/Hero'
 import { MemoryView } from '#/components/MemoryView'
 import { Topbar } from '#/components/Topbar'
 import { getServerUser } from '#/lib/auth'
-import { formatCaptureDate } from '#/lib/date'
+import { groupMemoriesByYear } from '#/lib/memory-grouping'
 import { getTodayMemories } from '#/lib/pcloud'
-import { Box, Container, Stack, Text } from '@chakra-ui/react'
+import { spanishMonth } from '#/lib/spanish-months'
+import { Box, Container, Stack } from '@chakra-ui/react'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -26,6 +29,15 @@ function isoToOverride(iso: string): { month: number; day: number } | null {
 	const day = Number(dayStr)
 	if (!Number.isInteger(month) || !Number.isInteger(day)) return null
 	return { month, day }
+}
+
+function todayParts(activeDate: string | undefined): { year: number; month: number; day: number } {
+	if (activeDate) {
+		const [y, m, d] = activeDate.split('-').map(Number)
+		if (y && m && d) return { year: y, month: m, day: d }
+	}
+	const now = new Date()
+	return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() }
 }
 
 export const Route = createFileRoute('/')({
@@ -59,27 +71,26 @@ function Home() {
 	const { memories, isAdmin } = Route.useLoaderData()
 	const { date: activeDate } = Route.useSearch()
 
-	const emptyMessage = activeDate
-		? `No memories for ${formatCaptureDate(activeDate)}.`
-		: 'No memories on this day.'
+	const today = todayParts(activeDate)
+	const todayDisplay = { day: today.day, month: spanishMonth(today.month - 1), year: today.year }
+	const groups = groupMemoriesByYear(memories, today)
 
 	return (
 		<AppShell>
 			<Topbar />
 			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
 			<Container as="main" maxW="1080px" px={{ base: 4, md: 4.5 }} pt={8} pb={20}>
-				{memories.length === 0 ? (
-					<Box pt={8}>
-						<Text fontSize="md" color="ink.muted">
-							{emptyMessage}
-						</Text>
-					</Box>
+				<Hero today={todayDisplay} totalItems={memories.length} groupCount={groups.length} />
+				{groups.length === 0 ? (
+					<EmptyState today={todayDisplay} />
 				) : (
-					<Stack gap={8}>
-						{memories.map((item) => (
-							<MemoryView key={memoryKey(item)} item={item} />
-						))}
-					</Stack>
+					<Box>
+						<Stack gap={8}>
+							{memories.map((item) => (
+								<MemoryView key={memoryKey(item)} item={item} />
+							))}
+						</Stack>
+					</Box>
 				)}
 			</Container>
 		</AppShell>
