@@ -5,10 +5,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, renderHook } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 
+import { hardNavigate } from '../utils/navigation'
 import { IdentityProvider, useIdentity } from './identity-context'
-import { hardNavigate } from './navigation'
 
-vi.mock('./navigation', () => ({
+vi.mock('../utils/navigation', () => ({
 	hardNavigate: vi.fn<(url: string) => unknown>(),
 }))
 

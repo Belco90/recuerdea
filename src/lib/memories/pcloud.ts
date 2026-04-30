@@ -23,7 +23,7 @@ export const getTodayMemories = createServerFn({ method: 'GET' })
 	.inputValidator((input: unknown): DateOverride | null => parseOverrideInput(input))
 	.handler(async ({ data }): Promise<MemoryItem[]> => {
 		// Hard auth gate — every API endpoint in this app requires authentication.
-		const { loadServerUser } = await import('./auth.server')
+		const { loadServerUser } = await import('../auth/auth.server')
 		const user = await loadServerUser()
 		if (!user) throw new Error('unauthenticated')
 

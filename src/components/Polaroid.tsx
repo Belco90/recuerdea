@@ -1,6 +1,6 @@
-import type { MemoryItem } from '#/lib/pcloud.server'
+import type { MemoryItem } from '#/lib/memories/pcloud.server'
 
-import { rotForKey } from '#/lib/rotation'
+import { rotForKey } from '#/lib/utils/rotation'
 import { Box, HStack, Image, Text } from '@chakra-ui/react'
 import { Play } from 'lucide-react'
 

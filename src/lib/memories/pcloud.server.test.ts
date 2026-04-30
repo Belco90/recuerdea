@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { FolderCacheStore, FolderSnapshot } from './folder-cache'
-import type { CachedMedia, MediaCacheStore } from './media-cache'
+import type { FolderCacheStore, FolderSnapshot } from '../cache/folder-cache'
+import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
 
-import { getFolderCacheStore } from './folder-cache.server'
-import { getMediaCacheStore } from './media-cache.server'
+import { getFolderCacheStore } from '../cache/folder-cache.server'
+import { getMediaCacheStore } from '../cache/media-cache.server'
 import { fetchTodayMemories } from './pcloud.server'
 
-vi.mock('./folder-cache.server')
-vi.mock('./media-cache.server')
+vi.mock('../cache/folder-cache.server')
+vi.mock('../cache/media-cache.server')
 
 const mockedGetFolderCacheStore = vi.mocked(getFolderCacheStore)
 const mockedGetMediaCacheStore = vi.mocked(getMediaCacheStore)

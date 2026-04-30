@@ -1,9 +1,9 @@
-import type { FetchBytes } from '#/lib/memory-route.server'
+import type { FetchBytes } from '#/lib/memories/memory-route.server'
 
-import { loadServerUser } from '#/lib/auth.server'
-import { createMediaCache } from '#/lib/media-cache'
-import { getMediaCacheStore } from '#/lib/media-cache.server'
-import { handleMemoryRequest } from '#/lib/memory-route.server'
+import { loadServerUser } from '#/lib/auth/auth.server'
+import { createMediaCache } from '#/lib/cache/media-cache'
+import { getMediaCacheStore } from '#/lib/cache/media-cache.server'
+import { handleMemoryRequest } from '#/lib/memories/memory-route.server'
 import { createFileRoute } from '@tanstack/react-router'
 import { createClient } from 'pcloud-kit'
 

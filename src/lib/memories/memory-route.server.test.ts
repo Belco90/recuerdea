@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ServerUser } from './auth.server'
-import type { CachedMedia, MediaCache } from './media-cache'
+import type { ServerUser } from '../auth/auth.server'
+import type { CachedMedia, MediaCache } from '../cache/media-cache'
 import type { FetchBytes, MemoryRequestDeps, ResolveStreamUrl } from './memory-route.server'
 
 import { handleMemoryRequest } from './memory-route.server'

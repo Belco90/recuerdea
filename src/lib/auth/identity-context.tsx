@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { getUser, logout as nfLogout, onAuthChange } from '@netlify/identity'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
-import { hardNavigate } from './navigation'
+import { hardNavigate } from '../utils/navigation'
 
 type IdentityValue = {
 	user: User | null
