@@ -1,16 +1,15 @@
-import type { MemoryItem } from '#/lib/pcloud.server'
-
 import { AdminDateOverride } from '#/components/AdminDateOverride'
 import { AppShell } from '#/components/AppShell'
 import { EmptyState } from '#/components/EmptyState'
 import { Hero } from '#/components/Hero'
-import { MemoryView } from '#/components/MemoryView'
+import { Timeline } from '#/components/Timeline'
 import { Topbar } from '#/components/Topbar'
+import { YearSection } from '#/components/YearSection'
 import { getServerUser } from '#/lib/auth'
 import { groupMemoriesByYear } from '#/lib/memory-grouping'
 import { getTodayMemories } from '#/lib/pcloud'
 import { spanishMonth } from '#/lib/spanish-months'
-import { Box, Container, Stack } from '@chakra-ui/react'
+import { Container } from '@chakra-ui/react'
 import { createFileRoute, redirect } from '@tanstack/react-router'
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -63,9 +62,8 @@ export const Route = createFileRoute('/')({
 	component: Home,
 })
 
-function memoryKey(item: MemoryItem): string {
-	return item.uuid
-}
+// Slice 7 replaces this with a stateful callback wired to the lightbox.
+const noopOpen = (_year: number, _idx: number) => undefined
 
 function Home() {
 	const { memories, isAdmin } = Route.useLoaderData()
@@ -84,13 +82,11 @@ function Home() {
 				{groups.length === 0 ? (
 					<EmptyState today={todayDisplay} />
 				) : (
-					<Box>
-						<Stack gap={8}>
-							{memories.map((item) => (
-								<MemoryView key={memoryKey(item)} item={item} />
-							))}
-						</Stack>
-					</Box>
+					<Timeline>
+						{groups.map((group) => (
+							<YearSection key={group.year} group={group} onOpen={noopOpen} />
+						))}
+					</Timeline>
 				)}
 			</Container>
 		</AppShell>
