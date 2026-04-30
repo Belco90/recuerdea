@@ -65,46 +65,20 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 - [x] All previously-green tests still green after literal updates.
 - [x] Type errors are localized to intentional call sites only.
 
-## Slice 4 — OpenCage client (raw fetch, refined per official OpenCage skill)
+## Slice 4 — OpenCage client (raw fetch, refined per official OpenCage skill) — `05d1835`
 
-- [ ] New file `src/lib/media-meta/opencage.server.ts`:
-  - [ ] Signature: `export async function reverseGeocode({ lat, lng }: { lat: number; lng: number }, { apiKey, signal? }: { apiKey: string; signal?: AbortSignal }): Promise<{ ok: true; place: string | null } | { ok: false; reason: 'auth' | 'suspended' | 'quota' | 'ratelimit' | 'server' | 'network' | 'parse' }>`.
-  - [ ] URL: `https://api.opencagedata.com/geocode/v1/json?key=${apiKey}&q=${encodeURIComponent(lat + ',' + lng)}&language=es&no_annotations=1&limit=1` — comma-separated reverse query (becomes `%2C` after encoding).
-  - [ ] Authoritative status: read `data.status.code` from the response body, fall back to `res.status`. (OpenCage skill: proxies can mask HTTP status.)
-  - [ ] Status mapping:
-    - 200 → success path
-    - 401 → `auth`
-    - 402 → `quota`
-    - 403 → `suspended`
-    - 429 → `ratelimit`
-    - 5xx (incl. 500/502/503) → `server`
-    - other unexpected → `server`
-  - [ ] Success path: prefer `components.city ?? .town ?? .village ?? .municipality ?? .county ?? .state` (all optional chaining; nothing guaranteed). If non-null and `components.country` exists, return `${head}, ${country}` unless head already ends with country. If all six are absent, fall back to `results[0].formatted ?? null`. `total_results === 0 || results.length === 0` → `{ ok: true, place: null }`.
-  - [ ] Network reject → `network`. JSON parse throw → `parse`.
-  - [ ] Set `Accept: application/json` header. No User-Agent header (no policy requirement on OpenCage).
-  - [ ] **Never** call `console.*` with the URL, response body, lat/lng, `place`, `status.message`, or any sub-component.
-- [ ] Tests in `opencage.server.test.ts` (mock `globalThis.fetch`):
-  - [ ] Request URL contains `key=${apiKey}`, `q=${encodeURIComponent('40.4168,-3.7038')}` (i.e. `40.4168%2C-3.7038`), `language=es`, `no_annotations=1`, `limit=1`.
-  - [ ] Request `Accept: application/json` header set.
-  - [ ] OK + `components.{city: 'Madrid', country: 'España'}` → `{ ok: true, place: 'Madrid, España' }`.
-  - [ ] OK preferring `town` when no `city`.
-  - [ ] OK preferring `village` when no `city`/`town`.
-  - [ ] OK preferring `state` when no narrower component.
-  - [ ] OK + no useful component but `formatted: 'Algún sitio'` → `{ ok: true, place: 'Algún sitio' }`.
-  - [ ] OK + `total_results: 0` → `{ ok: true, place: null }`.
-  - [ ] OK + empty `results` array → `{ ok: true, place: null }`.
-  - [ ] HTTP 200 but body's `status.code: 402` (proxy-obscured) → `{ ok: false, reason: 'quota' }`.
-  - [ ] HTTP 401 → `{ ok: false, reason: 'auth' }`.
-  - [ ] HTTP 402 → `{ ok: false, reason: 'quota' }`.
-  - [ ] HTTP 403 → `{ ok: false, reason: 'suspended' }`.
-  - [ ] HTTP 429 → `{ ok: false, reason: 'ratelimit' }`.
-  - [ ] HTTP 503 → `{ ok: false, reason: 'server' }`.
-  - [ ] fetch rejects → `{ ok: false, reason: 'network' }`.
-  - [ ] non-JSON response → `{ ok: false, reason: 'parse' }`.
-  - [ ] head-already-ends-with-country dedup: `{ city: 'España', country: 'España' }` → `'España'`, not `'España, España'`.
-  - [ ] All paths: `vi.spyOn(console, 'log'|'info'|'warn'|'error')` are never called with strings containing the lat, lng, place value, country, city, or `status.message`.
+- [x] New file `src/lib/media-meta/opencage.server.ts`:
+  - [x] Signature: `reverseGeocode({ lat, lng }, { apiKey, signal? }) → ReverseGeocodeResult`.
+  - [x] URL via `URLSearchParams` — comma in `q` becomes `%2C` after encoding.
+  - [x] Authoritative status from `body.status.code`, fall back to `res.status`.
+  - [x] Status mapping: 200 → success, 401 → auth, 402 → quota, 403 → suspended, 429 → ratelimit, 5xx + unexpected → server.
+  - [x] Success path: `city ?? town ?? village ?? municipality ?? county ?? state`, append `, country` (deduped), fall back to `formatted`, then `null`.
+  - [x] Network reject → network. JSON parse throw → parse.
+  - [x] `Accept: application/json` header set. No User-Agent.
+  - [x] Zero `console.*` calls anywhere on this module's path.
+- [x] 25 tests in `opencage.server.test.ts` covering: URL shape (4), component preference (10), status mapping (8), and console hygiene (2).
 
-**Verify:** `pnpm test src/lib/media-meta/opencage.server.test.ts` green.
+**Verified:** 164/164 pnpm test, type-check, format:check, build all green; lint on the two new files: 0/0.
 
 ## Slice 5 — Wire OpenCage into the cron
 
