@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { extractVideoCaptureDate } from './video-meta'
+import { extractVideoMeta } from './video-meta'
 
 const MP4_EPOCH_OFFSET = 2_082_844_800
 
@@ -26,8 +26,7 @@ function makeAtom(type: string, body: Uint8Array): Uint8Array {
 }
 
 function makeMvhdV0Body(creationTime: number): Uint8Array {
-	// v0 mvhd is 100 bytes: version+flags(4) + creation(4) + modification(4) + timescale(4)
-	// + duration(4) + rate(4) + volume(2) + reserved(10) + matrix(36) + pre_defined(24) + next_track_id(4)
+	// v0 mvhd is 100 bytes
 	const body = new Uint8Array(100)
 	const view = new DataView(body.buffer)
 	view.setUint32(0, 0) // version=0, flags=0
@@ -47,8 +46,22 @@ function makeMvhdV1Body(creationTime: number): Uint8Array {
 	return body
 }
 
-function makeMoov(mvhdBody: Uint8Array): Uint8Array {
-	return makeAtom('moov', makeAtom('mvhd', mvhdBody))
+function makeTkhdV0Body(width: number, height: number): Uint8Array {
+	// v0 tkhd is 84 bytes; width/height live in the trailing 8 bytes as
+	// 16.16 fixed-point.
+	const body = new Uint8Array(84)
+	const view = new DataView(body.buffer)
+	view.setUint32(76, width << 16)
+	view.setUint32(80, height << 16)
+	return body
+}
+
+function makeTrak(tkhdBody: Uint8Array): Uint8Array {
+	return makeAtom('trak', makeAtom('tkhd', tkhdBody))
+}
+
+function makeMoov(...children: Uint8Array[]): Uint8Array {
+	return makeAtom('moov', concat(...children))
 }
 
 function concat(...parts: Uint8Array[]): Uint8Array {
@@ -68,7 +81,7 @@ function bytesToBuffer(bytes: Uint8Array): ArrayBuffer {
 	return ab
 }
 
-describe('extractVideoCaptureDate', () => {
+describe('extractVideoMeta', () => {
 	let fetchSpy: ReturnType<typeof vi.spyOn<typeof globalThis, 'fetch'>>
 
 	beforeEach(() => {
@@ -79,119 +92,228 @@ describe('extractVideoCaptureDate', () => {
 		fetchSpy.mockRestore()
 	})
 
-	it('parses moov-at-start with v0 mvhd', async () => {
-		const expected = new Date('2019-04-27T14:30:00Z')
-		const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
-		const moov = makeMoov(makeMvhdV0Body(dateToMp4Seconds(expected)))
-		const mdat = makeAtom('mdat', new Uint8Array(64))
-		const file = concat(ftyp, moov, mdat)
-		fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+	describe('captureDate', () => {
+		it('parses moov-at-start with v0 mvhd', async () => {
+			const expected = new Date('2019-04-27T14:30:00Z')
+			const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
+			const moov = makeMoov(makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(expected))))
+			const mdat = makeAtom('mdat', new Uint8Array(64))
+			const file = concat(ftyp, moov, mdat)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
 
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toEqual(expected)
-	})
-
-	it('parses moov-at-start with v1 mvhd (64-bit)', async () => {
-		const expected = new Date('2024-01-15T09:00:00Z')
-		const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
-		const moov = makeMoov(makeMvhdV1Body(dateToMp4Seconds(expected)))
-		const file = concat(ftyp, moov)
-		fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
-
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toEqual(expected)
-	})
-
-	it('falls back to tail fetch when moov sits after a large mdat', async () => {
-		const expected = new Date('2019-04-27T14:30:00Z')
-		const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
-		const mdat = makeAtom('mdat', new Uint8Array(70_000)) // > 64KB → forces tail fallback
-		const moov = makeMoov(makeMvhdV0Body(dateToMp4Seconds(expected)))
-		const file = concat(ftyp, mdat, moov)
-
-		fetchSpy.mockImplementation(async (_url, init) => {
-			const opts = (init ?? {}) as RequestInit
-			if (opts.method === 'HEAD') {
-				return new Response(null, {
-					status: 200,
-					headers: { 'content-length': String(file.byteLength) },
-				})
-			}
-			const range = (opts.headers as Record<string, string> | undefined)?.Range
-			if (!range) return new Response(bytesToBuffer(file), { status: 200 })
-			const match = range.match(/bytes=(\d+)-(\d+)/)
-			if (!match) return new Response(null, { status: 416 })
-			const start = Number(match[1])
-			const end = Number(match[2])
-			const slice = file.slice(start, Math.min(end + 1, file.byteLength))
-			return new Response(bytesToBuffer(slice), { status: 206 })
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(expected)
 		})
 
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toEqual(expected)
-	})
+		it('parses moov-at-start with v1 mvhd (64-bit)', async () => {
+			const expected = new Date('2024-01-15T09:00:00Z')
+			const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
+			const moov = makeMoov(makeAtom('mvhd', makeMvhdV1Body(dateToMp4Seconds(expected))))
+			const file = concat(ftyp, moov)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
 
-	it('returns null when no moov is found anywhere', async () => {
-		const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
-		const mdat = makeAtom('mdat', new Uint8Array(64))
-		const file = concat(ftyp, mdat)
-		fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
-
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toBeNull()
-	})
-
-	it('returns null when moov has no mvhd inside it', async () => {
-		const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
-		const moovWithoutMvhd = makeAtom('moov', makeAtom('trak', new Uint8Array(20)))
-		const file = concat(ftyp, moovWithoutMvhd)
-		fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
-
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toBeNull()
-	})
-
-	it('returns null on HTTP 4xx response', async () => {
-		fetchSpy.mockResolvedValue(new Response(null, { status: 404 }))
-
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toBeNull()
-	})
-
-	it('returns null when HEAD fails during tail fallback', async () => {
-		const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
-		const mdat = makeAtom('mdat', new Uint8Array(70_000))
-		const file = concat(ftyp, mdat)
-
-		fetchSpy.mockImplementation(async (_url, init) => {
-			const opts = (init ?? {}) as RequestInit
-			if (opts.method === 'HEAD') return new Response(null, { status: 500 })
-			return new Response(bytesToBuffer(file.slice(0, 65_536)), { status: 206 })
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(expected)
 		})
 
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toBeNull()
-	})
+		it('falls back to tail fetch when moov sits after a large mdat', async () => {
+			const expected = new Date('2019-04-27T14:30:00Z')
+			const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
+			const mdat = makeAtom('mdat', new Uint8Array(70_000))
+			const moov = makeMoov(makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(expected))))
+			const file = concat(ftyp, mdat, moov)
 
-	it('returns null for an unrecognized mvhd version', async () => {
-		const badMvhdBody = new Uint8Array(100)
-		const view = new DataView(badMvhdBody.buffer)
-		view.setUint32(0, 0x05_00_00_00) // version=5 (unknown)
-		const file = concat(
-			makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
-			makeAtom('moov', makeAtom('mvhd', badMvhdBody)),
-		)
-		fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+			fetchSpy.mockImplementation(async (_url, init) => {
+				const opts = (init ?? {}) as RequestInit
+				if (opts.method === 'HEAD') {
+					return new Response(null, {
+						status: 200,
+						headers: { 'content-length': String(file.byteLength) },
+					})
+				}
+				const range = (opts.headers as Record<string, string> | undefined)?.Range
+				if (!range) return new Response(bytesToBuffer(file), { status: 200 })
+				const match = range.match(/bytes=(\d+)-(\d+)/)
+				if (!match) return new Response(null, { status: 416 })
+				const start = Number(match[1])
+				const end = Number(match[2])
+				const slice = file.slice(start, Math.min(end + 1, file.byteLength))
+				return new Response(bytesToBuffer(slice), { status: 206 })
+			})
 
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).resolves.toBeNull()
-	})
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(expected)
+		})
 
-	it('sends a Range header for the first fetch', async () => {
-		fetchSpy.mockResolvedValue(new Response(new ArrayBuffer(8), { status: 200 }))
+		it('returns null captureDate when no moov is found anywhere', async () => {
+			const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
+			const mdat = makeAtom('mdat', new Uint8Array(64))
+			const file = concat(ftyp, mdat)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
 
-		await extractVideoCaptureDate('https://x.test/v.mp4')
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta).toEqual({ captureDate: null, width: null, height: null })
+		})
 
-		expect(fetchSpy).toHaveBeenCalledWith('https://x.test/v.mp4', {
-			headers: { Range: 'bytes=0-65535' },
+		it('returns null captureDate when moov has no mvhd inside it', async () => {
+			const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
+			const moovWithoutMvhd = makeMoov(makeAtom('trak', new Uint8Array(20)))
+			const file = concat(ftyp, moovWithoutMvhd)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
+		})
+
+		it('returns null on HTTP 4xx response', async () => {
+			fetchSpy.mockResolvedValue(new Response(null, { status: 404 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta).toEqual({ captureDate: null, width: null, height: null })
+		})
+
+		it('returns null when HEAD fails during tail fallback', async () => {
+			const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
+			const mdat = makeAtom('mdat', new Uint8Array(70_000))
+			const file = concat(ftyp, mdat)
+
+			fetchSpy.mockImplementation(async (_url, init) => {
+				const opts = (init ?? {}) as RequestInit
+				if (opts.method === 'HEAD') return new Response(null, { status: 500 })
+				return new Response(bytesToBuffer(file.slice(0, 65_536)), { status: 206 })
+			})
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta).toEqual({ captureDate: null, width: null, height: null })
+		})
+
+		it('returns null for an unrecognized mvhd version', async () => {
+			const badMvhdBody = new Uint8Array(100)
+			const view = new DataView(badMvhdBody.buffer)
+			view.setUint32(0, 0x05_00_00_00) // version=5 (unknown)
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(makeAtom('mvhd', badMvhdBody)),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
 		})
 	})
 
-	it('propagates network errors from fetch', async () => {
-		fetchSpy.mockRejectedValue(new Error('network down'))
+	describe('width and height', () => {
+		it('extracts width/height from a single-track tkhd', async () => {
+			const date = new Date('2020-06-01T10:00:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(date))),
+					makeTrak(makeTkhdV0Body(1920, 1080)),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
 
-		await expect(extractVideoCaptureDate('https://x.test/v.mp4')).rejects.toThrow('network down')
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta).toEqual({ captureDate: date, width: 1920, height: 1080 })
+		})
+
+		it('skips audio tracks (zero dimensions) and picks the video track', async () => {
+			const date = new Date('2021-04-27T10:00:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(date))),
+					makeTrak(makeTkhdV0Body(0, 0)), // audio: zero dims
+					makeTrak(makeTkhdV0Body(3840, 2160)), // video
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.width).toBe(3840)
+			expect(meta.height).toBe(2160)
+		})
+
+		it('returns null dimensions when moov has no trak', async () => {
+			const date = new Date('2019-04-27T14:30:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(date)))),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(date)
+			expect(meta.width).toBeNull()
+			expect(meta.height).toBeNull()
+		})
+
+		it('returns null dimensions when all tracks have zero dimensions', async () => {
+			const date = new Date('2019-04-27T14:30:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(date))),
+					makeTrak(makeTkhdV0Body(0, 0)),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.width).toBeNull()
+			expect(meta.height).toBeNull()
+		})
+
+		it('extracts width/height in the moov-at-end tail-fallback path', async () => {
+			const date = new Date('2019-04-27T14:30:00Z')
+			const ftyp = makeAtom('ftyp', new Uint8Array([0, 0, 0, 0]))
+			const mdat = makeAtom('mdat', new Uint8Array(70_000))
+			const moov = makeMoov(
+				makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(date))),
+				makeTrak(makeTkhdV0Body(1280, 720)),
+			)
+			const file = concat(ftyp, mdat, moov)
+
+			fetchSpy.mockImplementation(async (_url, init) => {
+				const opts = (init ?? {}) as RequestInit
+				if (opts.method === 'HEAD') {
+					return new Response(null, {
+						status: 200,
+						headers: { 'content-length': String(file.byteLength) },
+					})
+				}
+				const range = (opts.headers as Record<string, string> | undefined)?.Range
+				if (!range) return new Response(bytesToBuffer(file), { status: 200 })
+				const match = range.match(/bytes=(\d+)-(\d+)/)
+				if (!match) return new Response(null, { status: 416 })
+				const start = Number(match[1])
+				const end = Number(match[2])
+				const slice = file.slice(start, Math.min(end + 1, file.byteLength))
+				return new Response(bytesToBuffer(slice), { status: 206 })
+			})
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.width).toBe(1280)
+			expect(meta.height).toBe(720)
+		})
+	})
+
+	describe('error handling', () => {
+		it('sends a Range header for the first fetch', async () => {
+			fetchSpy.mockResolvedValue(new Response(new ArrayBuffer(8), { status: 200 }))
+
+			await extractVideoMeta('https://x.test/v.mp4')
+
+			expect(fetchSpy).toHaveBeenCalledWith('https://x.test/v.mp4', {
+				headers: { Range: 'bytes=0-65535' },
+			})
+		})
+
+		it('propagates network errors from fetch', async () => {
+			fetchSpy.mockRejectedValue(new Error('network down'))
+
+			await expect(extractVideoMeta('https://x.test/v.mp4')).rejects.toThrow('network down')
+		})
 	})
 })

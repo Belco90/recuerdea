@@ -48,6 +48,8 @@ const imageA: CachedMedia = {
 	contenttype: 'image/jpeg',
 	name: 'a.jpg',
 	captureDate: '2024-04-27T14:30:00.000Z',
+	width: 4032,
+	height: 3024,
 }
 
 const imageB: CachedMedia = {
@@ -59,6 +61,8 @@ const imageB: CachedMedia = {
 	contenttype: 'image/jpeg',
 	name: 'b.jpg',
 	captureDate: '2024-06-15T09:00:00.000Z',
+	width: null,
+	height: null,
 }
 
 const videoC: CachedMedia = {
@@ -70,6 +74,8 @@ const videoC: CachedMedia = {
 	contenttype: 'video/mp4',
 	name: 'c.mp4',
 	captureDate: '2018-04-27T10:00:00.000Z',
+	width: 1920,
+	height: 1080,
 }
 
 const undatedD: CachedMedia = {
@@ -81,6 +87,8 @@ const undatedD: CachedMedia = {
 	contenttype: 'image/heic',
 	name: 'IMG_4567.HEIC',
 	captureDate: null,
+	width: null,
+	height: null,
 }
 
 beforeEach(() => {
@@ -128,12 +136,39 @@ describe('fetchTodayMemories', () => {
 				contenttype: 'video/mp4',
 				name: 'c.mp4',
 				captureDate: '2018-04-27T10:00:00.000Z',
+				width: 1920,
+				height: 1080,
 			},
 			{
 				kind: 'image',
 				uuid: 'uuid-a',
 				name: 'a.jpg',
 				captureDate: '2024-04-27T14:30:00.000Z',
+				width: 4032,
+				height: 3024,
+			},
+		])
+	})
+
+	it('passes through null width/height for legacy entries', async () => {
+		mockedGetFolderCacheStore.mockReturnValue(
+			makeFolderStore({
+				refreshedAt: '2026-04-29T04:00:00.000Z',
+				uuids: ['uuid-b'],
+			}),
+		)
+		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-b': imageB }))
+
+		const result = await fetchTodayMemories({ month: 6, day: 15 })
+
+		expect(result).toEqual([
+			{
+				kind: 'image',
+				uuid: 'uuid-b',
+				name: 'b.jpg',
+				captureDate: '2024-06-15T09:00:00.000Z',
+				width: null,
+				height: null,
 			},
 		])
 	})
