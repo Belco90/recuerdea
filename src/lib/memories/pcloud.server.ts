@@ -1,9 +1,9 @@
-import type { CachedMedia } from './media-cache'
+import type { CachedMedia } from '../cache/media-cache'
 
-import { createFolderCache } from './folder-cache'
-import { getFolderCacheStore } from './folder-cache.server'
-import { createMediaCache } from './media-cache'
-import { getMediaCacheStore } from './media-cache.server'
+import { createFolderCache } from '../cache/folder-cache'
+import { getFolderCacheStore } from '../cache/folder-cache.server'
+import { createMediaCache } from '../cache/media-cache'
+import { getMediaCacheStore } from '../cache/media-cache.server'
 
 export type MemoryItem =
 	| {

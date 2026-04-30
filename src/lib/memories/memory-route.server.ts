@@ -1,5 +1,5 @@
-import type { ServerUser } from './auth.server'
-import type { CachedMedia, MediaCache } from './media-cache'
+import type { ServerUser } from '../auth/auth.server'
+import type { CachedMedia, MediaCache } from '../cache/media-cache'
 
 export type MediaVariant = 'image' | 'stream' | 'poster'
 

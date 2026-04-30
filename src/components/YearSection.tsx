@@ -1,4 +1,4 @@
-import type { YearGroup } from '#/lib/memory-grouping'
+import type { YearGroup } from '#/lib/memories/memory-grouping'
 
 import { Polaroid } from '#/components/Polaroid'
 import { Box, Heading, Text } from '@chakra-ui/react'

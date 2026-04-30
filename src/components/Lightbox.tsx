@@ -1,4 +1,4 @@
-import type { YearGroup } from '#/lib/memory-grouping'
+import type { YearGroup } from '#/lib/memories/memory-grouping'
 
 import { Box, Carousel, Dialog, HStack, IconButton, Image, Portal, VStack } from '@chakra-ui/react'
 import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'

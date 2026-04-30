@@ -1,5 +1,5 @@
 import { Wordmark } from '#/components/Wordmark'
-import { useIdentity } from '#/lib/identity-context'
+import { useIdentity } from '#/lib/auth/identity-context'
 import { Avatar, Box, Container, HStack, IconButton, Text } from '@chakra-ui/react'
 import { Link, getRouteApi } from '@tanstack/react-router'
 import { LogOut } from 'lucide-react'

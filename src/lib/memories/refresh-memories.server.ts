@@ -1,12 +1,12 @@
 import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 
-import type { FileidIndex } from './fileid-index'
-import type { FolderCache } from './folder-cache'
-import type { CachedMedia, MediaCache } from './media-cache'
+import type { FileidIndex } from '../cache/fileid-index'
+import type { FolderCache } from '../cache/folder-cache'
+import type { CachedMedia, MediaCache } from '../cache/media-cache'
 
-import { extractImageMeta } from './exif'
-import { parseFilenameCaptureDate } from './filename-date'
-import { extractVideoMeta } from './video-meta'
+import { extractImageMeta } from '../media-meta/exif'
+import { parseFilenameCaptureDate } from '../media-meta/filename-date'
+import { extractVideoMeta } from '../media-meta/video-meta'
 
 type Publink = { code: string; linkid: number }
 

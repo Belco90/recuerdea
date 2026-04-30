@@ -2,19 +2,19 @@ import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { FileidIndexStore } from './fileid-index'
-import type { FolderCacheStore, FolderSnapshot } from './folder-cache'
-import type { CachedMedia, MediaCacheStore } from './media-cache'
+import type { FileidIndexStore } from '../cache/fileid-index'
+import type { FolderCacheStore, FolderSnapshot } from '../cache/folder-cache'
+import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
 
-import { extractImageMeta } from './exif'
-import { createFileidIndex } from './fileid-index'
-import { createFolderCache } from './folder-cache'
-import { createMediaCache } from './media-cache'
+import { createFileidIndex } from '../cache/fileid-index'
+import { createFolderCache } from '../cache/folder-cache'
+import { createMediaCache } from '../cache/media-cache'
+import { extractImageMeta } from '../media-meta/exif'
+import { extractVideoMeta } from '../media-meta/video-meta'
 import { refreshMemories } from './refresh-memories.server'
-import { extractVideoMeta } from './video-meta'
 
-vi.mock('./exif')
-vi.mock('./video-meta')
+vi.mock('../media-meta/exif')
+vi.mock('../media-meta/video-meta')
 
 const mockedExtractImageMeta = vi.mocked(extractImageMeta)
 const mockedExtractVideoMeta = vi.mocked(extractVideoMeta)

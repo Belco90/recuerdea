@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { IdentityProvider } from '#/lib/identity-context'
+import { IdentityProvider } from '#/lib/auth/identity-context'
 import { system } from '#/theme'
 import { ChakraProvider } from '@chakra-ui/react'
 import { TanStackDevtools } from '@tanstack/react-devtools'
