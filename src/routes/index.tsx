@@ -1,13 +1,18 @@
-import type { MemoryItem } from '#/lib/pcloud.server'
-
 import { AdminDateOverride } from '#/components/AdminDateOverride'
-import { MemoryView } from '#/components/MemoryView'
+import { AppShell } from '#/components/AppShell'
+import { EmptyState } from '#/components/EmptyState'
+import { Hero } from '#/components/Hero'
+import { Lightbox } from '#/components/Lightbox'
+import { Timeline } from '#/components/Timeline'
+import { Topbar } from '#/components/Topbar'
+import { YearSection } from '#/components/YearSection'
 import { getServerUser } from '#/lib/auth'
-import { formatCaptureDate } from '#/lib/date'
-import { useIdentity } from '#/lib/identity-context'
+import { groupMemoriesByYear } from '#/lib/memory-grouping'
 import { getTodayMemories } from '#/lib/pcloud'
-import { Box, Button, Heading, Stack, Text } from '@chakra-ui/react'
+import { spanishMonth } from '#/lib/spanish-months'
+import { Container } from '@chakra-ui/react'
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { useState } from 'react'
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -27,15 +32,21 @@ function isoToOverride(iso: string): { month: number; day: number } | null {
 	return { month, day }
 }
 
+function todayParts(activeDate: string | undefined): { year: number; month: number; day: number } {
+	if (activeDate) {
+		const [y, m, d] = activeDate.split('-').map(Number)
+		if (y && m && d) return { year: y, month: m, day: d }
+	}
+	const now = new Date()
+	return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() }
+}
+
 export const Route = createFileRoute('/')({
 	validateSearch: (raw): HomeSearch => ({ date: parseSearchDate(raw.date) }),
-	beforeLoad: async ({ location }) => {
+	beforeLoad: async () => {
 		const user = await getServerUser()
 		if (!user) {
-			throw redirect({
-				to: '/login',
-				search: { redirect: location.href },
-			})
+			throw redirect({ to: '/login' })
 		}
 		return { user }
 	},
@@ -50,48 +61,48 @@ export const Route = createFileRoute('/')({
 	component: Home,
 })
 
-function memoryKey(item: MemoryItem): string {
-	return item.uuid
-}
+type LightboxState = { yearIndex: number; idx: number }
 
 function Home() {
-	const { user, logout } = useIdentity()
 	const { memories, isAdmin } = Route.useLoaderData()
-	const { user: serverUser } = Route.useRouteContext()
 	const { date: activeDate } = Route.useSearch()
+	const [lightbox, setLightbox] = useState<LightboxState | null>(null)
 
-	// Use `serverUser` as fallback while the client-side `user` is ready
-	// to avoid blank glitches on the browser.
-	const finalUser = user || serverUser
+	const today = todayParts(activeDate)
+	const todayDisplay = { day: today.day, month: spanishMonth(today.month - 1), year: today.year }
+	const groups = groupMemoriesByYear(memories, today)
 
-	const emptyMessage = activeDate
-		? `No memories for ${formatCaptureDate(activeDate)}.`
-		: 'No memories on this day.'
+	const handleOpen = (year: number, idx: number) => {
+		const yearIndex = groups.findIndex((g) => g.year === year)
+		if (yearIndex >= 0) setLightbox({ yearIndex, idx })
+	}
+
+	const activeGroup = lightbox ? groups[lightbox.yearIndex] : null
 
 	return (
-		<Box p={8}>
-			<Heading size="2xl">Welcome back</Heading>
-			<Text mt={4} fontSize="lg">
-				Signed in as {finalUser.email}
-			</Text>
-
-			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
-
-			{memories.length === 0 ? (
-				<Text mt={6} fontSize="md">
-					{emptyMessage}
-				</Text>
-			) : (
-				<Stack mt={6} gap={8}>
-					{memories.map((item) => (
-						<MemoryView key={memoryKey(item)} item={item} />
-					))}
-				</Stack>
+		<AppShell>
+			<Topbar />
+			{isAdmin && <AdminDateOverride initialActiveDate={activeDate} />}
+			<Container as="main" maxW="1080px" px={{ base: 4, md: 4.5 }} pt={8} pb={20}>
+				<Hero today={todayDisplay} totalItems={memories.length} groupCount={groups.length} />
+				{groups.length === 0 ? (
+					<EmptyState today={todayDisplay} />
+				) : (
+					<Timeline>
+						{groups.map((group) => (
+							<YearSection key={group.year} group={group} onOpen={handleOpen} />
+						))}
+					</Timeline>
+				)}
+			</Container>
+			{activeGroup && lightbox && (
+				<Lightbox
+					group={activeGroup}
+					startIndex={lightbox.idx}
+					open={true}
+					onClose={() => setLightbox(null)}
+				/>
 			)}
-
-			<Button mt={6} onClick={() => void logout()}>
-				Sign out
-			</Button>
-		</Box>
+		</AppShell>
 	)
 }

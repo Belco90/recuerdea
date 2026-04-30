@@ -1,112 +1,108 @@
-import { todayIso } from '#/lib/date'
-import {
-	Button,
-	DatePicker,
-	Flex,
-	IconButton,
-	Input,
-	parseDate,
-	Portal,
-	Stack,
-	Text,
-} from '@chakra-ui/react'
+import { Badge, Box, DatePicker, HStack, Input, parseDate, Portal } from '@chakra-ui/react'
 import { getRouteApi } from '@tanstack/react-router'
-import { Calendar } from 'lucide-react'
+import { CalendarIcon, Star } from 'lucide-react'
 
 const route = getRouteApi('/')
 
-export function AdminDateOverride({ activeDate }: { activeDate: string | undefined }) {
+const STRIPE_BG = `repeating-linear-gradient(-45deg,
+  color-mix(in srgb, var(--chakra-colors-accent-500) 10%, var(--chakra-colors-bg)) 0 14px,
+  color-mix(in srgb, var(--chakra-colors-accent-500) 4%, var(--chakra-colors-bg)) 14px 28px)`
+
+export function AdminDateOverride({
+	initialActiveDate,
+}: {
+	initialActiveDate: string | undefined
+}) {
 	const navigate = route.useNavigate()
-	const value = activeDate ?? todayIso()
 
 	return (
-		<Stack mt={6} gap={2} maxW="sm">
-			<Text fontSize="sm" color="gray.600">
-				Admin: preview "today's memories" for any date
-			</Text>
-			<Flex gap={2} align="center">
-				<DatePicker.Root
-					selectionMode="single"
-					startOfWeek={1}
-					value={[parseDate(value)]}
-					onValueChange={({ value: picked }) => {
-						const next = picked[0]
-						if (!next) return
-						void navigate({ search: { date: next.toString() } })
-					}}
-				>
-					<DatePicker.Control>
-						<DatePicker.Input asChild>
-							<Input size="sm" />
-						</DatePicker.Input>
-						<DatePicker.Trigger asChild>
-							<IconButton size="sm" variant="outline" aria-label="Open calendar">
-								<Calendar size={16} />
-							</IconButton>
-						</DatePicker.Trigger>
-					</DatePicker.Control>
-					<Portal>
-						<DatePicker.Positioner>
-							<DatePicker.Content>
-								<DatePicker.View view="day">
-									<DatePicker.Context>
-										{(api) => (
-											<Stack gap={2}>
-												<DatePicker.ViewControl>
-													<DatePicker.PrevTrigger asChild>
-														<IconButton size="xs" variant="ghost" aria-label="Previous month">
-															‹
-														</IconButton>
-													</DatePicker.PrevTrigger>
-													<DatePicker.ViewTrigger asChild>
-														<Button size="xs" variant="ghost">
-															<DatePicker.RangeText />
-														</Button>
-													</DatePicker.ViewTrigger>
-													<DatePicker.NextTrigger asChild>
-														<IconButton size="xs" variant="ghost" aria-label="Next month">
-															›
-														</IconButton>
-													</DatePicker.NextTrigger>
-												</DatePicker.ViewControl>
-												<DatePicker.Table>
-													<DatePicker.TableHead>
-														<DatePicker.TableRow>
-															{api.weekDays.map((day) => (
-																<DatePicker.TableHeader key={day.short}>
-																	{day.narrow}
-																</DatePicker.TableHeader>
-															))}
-														</DatePicker.TableRow>
-													</DatePicker.TableHead>
-													<DatePicker.TableBody>
-														{api.weeks.map((week) => (
-															<DatePicker.TableRow key={week[0].toString()}>
-																{week.map((day) => (
-																	<DatePicker.TableCell key={day.toString()} value={day}>
-																		<DatePicker.TableCellTrigger>
-																			{day.day}
-																		</DatePicker.TableCellTrigger>
-																	</DatePicker.TableCell>
-																))}
-															</DatePicker.TableRow>
-														))}
-													</DatePicker.TableBody>
-												</DatePicker.Table>
-											</Stack>
-										)}
-									</DatePicker.Context>
-								</DatePicker.View>
-							</DatePicker.Content>
-						</DatePicker.Positioner>
-					</Portal>
-				</DatePicker.Root>
-				{activeDate && (
-					<Button size="sm" variant="ghost" onClick={() => void navigate({ search: {} })}>
-						Reset to today
-					</Button>
-				)}
-			</Flex>
-		</Stack>
+		<Box
+			as="section"
+			role="region"
+			aria-label="Controles de administración"
+			position="relative"
+			bgImage={STRIPE_BG}
+			borderBottomWidth="1px"
+			borderBottomStyle="dashed"
+			borderBottomColor="accent.300"
+		>
+			<HStack
+				mx="auto"
+				px={{ base: '2', md: '4' }}
+				py="2"
+				gap="2"
+				flexWrap="wrap"
+				justify="space-between"
+				align="center"
+			>
+				<Badge size="sm" variant="solid" bg="accent.500" fontFamily="mono">
+					<Star size={10} fill="currentColor" aria-hidden />
+					Solo admin
+				</Badge>
+
+				<HStack gap="2" flexWrap="wrap" align="center">
+					<DatePicker.Root
+						maxW="12rem"
+						size={{ base: 'xs', md: 'lg' }}
+						selectionMode="single"
+						startOfWeek={1}
+						locale="es-ES"
+						defaultValue={initialActiveDate ? [parseDate(initialActiveDate)] : undefined}
+						onValueChange={({ value: picked }) => {
+							const next = picked[0]
+							if (!next) {
+								void navigate({ search: {} })
+								return
+							}
+							void navigate({ search: { date: next.toString() } })
+						}}
+					>
+						<DatePicker.Control>
+							<DatePicker.Input asChild>
+								<Input
+									bg="paper"
+									color="ink"
+									fontFamily="mono"
+									borderColor="accent.300"
+									_focus={{
+										borderColor: 'accent.500',
+										boxShadow: '0 0 0 3px var(--chakra-colors-accent-200)',
+									}}
+								/>
+							</DatePicker.Input>
+							<DatePicker.IndicatorGroup>
+								<DatePicker.Context>
+									{(context) => {
+										return context.value.length ? <DatePicker.ClearTrigger /> : null
+									}}
+								</DatePicker.Context>
+								<DatePicker.Trigger>
+									<CalendarIcon aria-hidden />
+								</DatePicker.Trigger>
+							</DatePicker.IndicatorGroup>
+						</DatePicker.Control>
+
+						<Portal>
+							<DatePicker.Positioner>
+								<DatePicker.Content bg="paper">
+									<DatePicker.View view="day">
+										<DatePicker.Header />
+										<DatePicker.DayTable />
+									</DatePicker.View>
+									<DatePicker.View view="month">
+										<DatePicker.Header />
+										<DatePicker.MonthTable />
+									</DatePicker.View>
+									<DatePicker.View view="year">
+										<DatePicker.Header />
+										<DatePicker.YearTable />
+									</DatePicker.View>
+								</DatePicker.Content>
+							</DatePicker.Positioner>
+						</Portal>
+					</DatePicker.Root>
+				</HStack>
+			</HStack>
+		</Box>
 	)
 }

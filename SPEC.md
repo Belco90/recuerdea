@@ -50,24 +50,35 @@ CI (`.github/workflows/ci.yml`) runs type-check, test, lint, and format-check in
 src/
   routes/           # TanStack Router file-based routes
     __root.tsx
-    index.tsx       # Home route — beforeLoad auth gate + loader + Home component (composes MemoryView and AdminDateOverride)
-    login.tsx       # Netlify Identity login + invite/recovery callbacks
+    index.tsx       # Home route — beforeLoad auth gate + loader + Home component (composes Topbar, AdminDateOverride, Hero, Timeline / YearSection / Polaroid, EmptyState, Lightbox)
+    login.tsx       # Netlify Identity login + invite/recovery callbacks (analog-album layout — v5)
     api/
       memory/
         $uuid.ts    # GET /api/memory/:uuid?variant=image|stream|poster — auth-gated, byte-streams the public-link response — added in v4
-  components/       # Reusable presentational React components (PascalCase per file)
-    MemoryView.tsx        # Single memory row (image or video + capture date)
-    AdminDateOverride.tsx # Admin-only date picker that drives the `?date=` search param
+  components/       # Reusable presentational React components (PascalCase per file). All Chakra-native — v5.
+    AppShell.tsx          # Page-level Box wrapper (paper bg lives on body via globalCss)
+    Wordmark.tsx          # Italic Fraunces "Recuerdea" wordmark with rotated R + accent dot
+    Topbar.tsx            # Sticky blurred topbar — Wordmark + user pill (Avatar.Fallback) + logout
+    Hero.tsx              # Big day + italic-accent month + mono caps year/count meta
+    EmptyState.tsx        # Three striped polaroids + Spanish empty copy
+    Polaroid.tsx          # Polaroid tile (paper frame, stable rotation, lazy image, video badge, handwritten caption)
+    YearSection.tsx       # Year-marker dot + "Hace N año(s)" title + columnCount masonry of Polaroid tiles
+    Timeline.tsx          # Vertical timeline line + end dot + Spanish footer
+    Lightbox.tsx          # Per-year fullscreen Chakra Dialog (image or video controls autoPlay, swipe, arrow keys, dots)
+    AdminDateOverride.tsx # Admin-only banner: striped diagonal bg + paper tape + Chakra DatePicker + state pill
   lib/              # Pure logic + server functions; tests colocated as *.test.ts(x)
     date.ts         # formatCaptureDate / todayIso — display + ISO helpers shared by route + components
+    spanish-months.ts # SPANISH_MONTHS const + spanishMonth(idx) — used by Hero, login, AdminDateOverride — v5
+    memory-grouping.ts # groupMemoriesByYear pure helper — v5
+    rotation.ts     # Stable per-key rotation for polaroid scatter — v5
     auth.ts         # createServerFn wrapper for getServerUser
     auth.server.ts  # loadServerUser — server-only auth (isAdmin, JWT decode)
     pcloud.ts       # createServerFn wrapper for getTodayMemories — returns MemoryItem[]
-    pcloud.server.ts# Loader — reads from folder-cache + media-cache only; no listfolder, no pCloud client
-    exif.ts         # EXIF capture-date extraction (images)
-    video-meta.ts   # MP4/MOV creation_time extraction (videos) — added in v2
+    pcloud.server.ts# Loader — reads from folder-cache + media-cache only; no listfolder, no pCloud client. MemoryItem now carries width/height — v5.
+    exif.ts         # EXIF image capture date + dimensions extraction (extractImageMeta) — extended in v5
+    video-meta.ts   # MP4/MOV moov walker — capture date (mvhd) + dimensions (tkhd) (extractVideoMeta) — extended in v5
     filename-date.ts# Filename-based capture-date fallback
-    media-cache.ts          # Pure (uuid → CachedMedia) cache abstraction — v4
+    media-cache.ts          # Pure (uuid → CachedMedia) cache abstraction — v4. CachedMedia gains width/height — v5.
     media-cache.server.ts   # Netlify-Blobs-backed MediaCacheStore + no-op fallback — v4
     fileid-index.ts         # Pure (fileid → uuid) sidecar abstraction — v4
     fileid-index.server.ts  # Netlify-Blobs-backed FileidIndexStore + no-op fallback — v4
@@ -75,8 +86,12 @@ src/
     folder-cache.server.ts  # Netlify-Blobs-backed snapshot store + no-op fallback — v4
     identity-context.tsx
     navigation.ts   # hardNavigate (post-logout cookie refresh)
+  theme.ts          # Chakra v3 createSystem — accent.50…950 palette, semantic light/dark tokens, fonts, shadows, keyframes, breakpoints.md=720px, paper-noise body bg via globalCss — v5
+  fonts.css         # @font-face declarations for the four self-hosted variable woff2 in public/fonts/ — v5
   router.tsx        # getRouter() factory
   routeTree.gen.ts  # auto-generated, never edit by hand
+public/
+  fonts/            # Self-hosted variable woff2 (Fraunces, Inter, Caveat, JetBrains Mono — latin subset only) — v5
 test/
   setup.ts          # Vitest browser-mode setup, mocks @netlify/identity
   stubs/            # Stubs for @tanstack/react-start in browser mode

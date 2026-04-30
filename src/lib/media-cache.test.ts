@@ -28,6 +28,8 @@ const sampleImage: CachedMedia = {
 	contenttype: 'image/jpeg',
 	name: 'a.jpg',
 	captureDate: '2019-04-28T12:00:00.000Z',
+	width: 4032,
+	height: 3024,
 }
 
 const sampleVideo: CachedMedia = {
@@ -39,6 +41,8 @@ const sampleVideo: CachedMedia = {
 	contenttype: 'video/mp4',
 	name: 'b.mp4',
 	captureDate: null,
+	width: null,
+	height: null,
 }
 
 describe('createMediaCache', () => {
@@ -94,6 +98,24 @@ describe('createMediaCache', () => {
 
 			expect(store.delete).toHaveBeenCalledWith('uuid-1')
 			expect(await cache.lookup('uuid-1')).toBeUndefined()
+		})
+	})
+
+	describe('width and height', () => {
+		it('round-trips numeric width/height alongside other fields', async () => {
+			const cache = createMediaCache(makeFakeStore())
+			await cache.remember('uuid-1', sampleImage)
+			const result = await cache.lookup('uuid-1')
+			expect(result?.width).toBe(4032)
+			expect(result?.height).toBe(3024)
+		})
+
+		it('preserves null width/height (entries that pre-date the schema bump)', async () => {
+			const cache = createMediaCache(makeFakeStore())
+			await cache.remember('uuid-1', sampleVideo)
+			const result = await cache.lookup('uuid-1')
+			expect(result?.width).toBeNull()
+			expect(result?.height).toBeNull()
 		})
 	})
 

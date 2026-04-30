@@ -6,13 +6,22 @@ import { createMediaCache } from './media-cache'
 import { getMediaCacheStore } from './media-cache.server'
 
 export type MemoryItem =
-	| { kind: 'image'; uuid: string; name: string; captureDate: string }
+	| {
+			kind: 'image'
+			uuid: string
+			name: string
+			captureDate: string
+			width: number | null
+			height: number | null
+	  }
 	| {
 			kind: 'video'
 			uuid: string
 			contenttype: string
 			name: string
 			captureDate: string
+			width: number | null
+			height: number | null
 	  }
 
 type Match = { uuid: string; meta: CachedMedia; capture: Date }
@@ -32,9 +41,18 @@ function buildMemoryItem({ uuid, meta, capture }: Match): MemoryItem {
 			contenttype: meta.contenttype,
 			name: meta.name,
 			captureDate,
+			width: meta.width,
+			height: meta.height,
 		}
 	}
-	return { kind: 'image', uuid, name: meta.name, captureDate }
+	return {
+		kind: 'image',
+		uuid,
+		name: meta.name,
+		captureDate,
+		width: meta.width,
+		height: meta.height,
+	}
 }
 
 export async function fetchTodayMemories(today: {

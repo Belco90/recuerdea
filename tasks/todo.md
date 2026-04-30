@@ -1,118 +1,242 @@
-# Recuerdea v4 — Task List (UUID indirection + cron-warmed public links + 302)
+# Recuerdea v5 — Task list (analog-album UI port, Chakra-native)
 
-See `tasks/plan.md` for full context. Current `v4` HEAD is `47b0a4f` and includes the failed browser-signing pivot. Slice F reverts that; Slice G is the new work.
+See `tasks/plan.md` for full context. Branch: `v5-ui-design` (already checked out). PR target: `main`. Smoke local at `http://localhost:8888` (`pnpm dev:netlify`).
 
-## Slice F — Revert the failed pivot
+## Pre-flight
 
-- [ ] `git revert --no-commit 47b0a4f c1af573 cbfb98f && git commit` — single combined revert. Tree returns to `4e3c0fa` (byte-stream proxy state).
-- [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check`, `pnpm build` clean.
+- [x] Confirm assumptions in `tasks/plan.md` "Assumptions" with the human (especially the open question on lazy vs forced cache backfill in Slice 2).
 
-## Slice G — UUID + public links + 302 (single PR)
+## Slice 1 — Chakra theme + self-hosted fonts + AppShell — `5ff622d`, mono font dropped in `45b244c`
 
-### G1 — SPEC + plan + todo amendments (docs commit)
+- [x] Self-host fonts:
+  - [x] Fetch Google Fonts CSS for Fraunces / Inter / Caveat / JetBrains Mono with a Chrome User-Agent (variable woff2). Save URLs in `public/fonts/README.md`.
+  - [x] Download each woff2 into `public/fonts/`. Prefer variable-axis files where available.
+  - [x] `public/fonts/README.md` records source URLs + OFL attribution per family.
+- [x] NEW `src/theme.ts`:
+  - [x] Import `createSystem`, `defaultConfig`, `defineConfig` from `@chakra-ui/react`.
+  - [x] `tokens.colors.accent.{50…950}` — values from plan §5.
+  - [x] `tokens.fonts.{body, heading, handwriting}` — Inter / Fraunces / Caveat with system fallbacks. _(Originally also `mono` (JetBrains Mono); dropped in `45b244c` — uses Chakra default mono stack.)_
+  - [x] `tokens.shadows.{polaroid, polaroidLift}` — values from `styles-v5.css:13–14`.
+  - [x] `semanticTokens.colors.{bg, bg.muted, paper, ink, ink.muted, line}` with `_light` / `_dark` variants from `styles-v5.css` `:root` + `[data-theme="dark"]`.
+  - [x] `keyframes.{shimmer, pulse, fade, zoom}` with the prototype's steps + durations.
+  - [x] `breakpoints.md = "720px"`.
+  - [x] `globalCss`:
+    - [x] `* { box-sizing: border-box }`.
+    - [x] `body` paper-noise `bgImage` (the SVG data URI, with `_light` / `_dark` color variants via accent token references).
+    - [x] `@font-face` blocks for the four families, `font-display: swap`, pointing at `/fonts/<file>.woff2`. (Moved to `src/fonts.css` because Chakra v3's `globalCss` typing rejects `@font-face` arrays — same effect via head stylesheet link.)
+  - [x] Export `system = createSystem(defaultConfig, config)`.
+- [x] MODIFY `src/routes/__root.tsx`:
+  - [x] `<html lang>` → `"es"`.
+  - [x] Replace `defaultSystem` import with `system` from `#/theme`.
+  - [x] Add font preload links in `head.links` (Fraunces + Inter primary; Caveat + JBM via on-demand swap).
+- [x] DELETE `src/styles.css` (everything moves into `globalCss`).
+- [x] NEW `src/components/AppShell.tsx`: `<Box minH="100vh" color="ink">{children}</Box>`.
+- [x] MODIFY `src/routes/index.tsx`: wrap component body in `<AppShell>`.
+- [x] MODIFY `src/routes/login.tsx`: wrap component body in `<AppShell>`.
+- [ ] Smoke `pnpm dev:netlify` at `http://localhost:8888`: paper bg, fonts loading, no console errors. OS dark-mode toggle flips theme. _(awaiting your manual smoke)_
+- [x] All gates green (`test`, `type-check`, `lint`, `format:check`, `build`).
+- [x] Commit: `v5(slice1): chakra theme + self-hosted fonts + AppShell`.
 
-- [ ] `SPEC.md` §2/§4/§7/§8/§11/§12 rewritten per `tasks/plan.md` G1 (UUID, cron, public links, 302, every-endpoint-auth-gate).
-- [ ] `tasks/plan.md` (already this revision).
-- [ ] `tasks/todo.md` (this file).
-- [ ] `pnpm format:check` clean.
-- [ ] Commit as a single docs commit.
+## Slice 2 — Aspect-ratio metadata in `CachedMedia` + cron extractors — `1299246`
 
-### G2 — Cache modules
+- [x] MODIFY `src/lib/media-cache.ts`: add `width: number | null`, `height: number | null` to `CachedMedia`.
+- [x] UPDATE `src/lib/media-cache.test.ts`: round-trip the new fields including `null`.
+- [x] MODIFY `src/lib/exif.ts`:
+  - [x] Refactor `extractCaptureDate` → `extractImageMeta(downloadUrl): Promise<{ captureDate: Date | null; width: number | null; height: number | null }>` (single fetch, single `exifr.parse` call requesting date + dimension tags).
+  - [x] Dimension fallback chain: `ExifImageWidth` / `ExifImageHeight` → `PixelXDimension` / `PixelYDimension` → `ImageWidth` / `ImageHeight` → `null`.
+- [x] UPDATE `src/lib/exif.test.ts`: extend with dimension cases (with-EXIF, without-EXIF).
+- [x] MODIFY `src/lib/video-meta.ts`:
+  - [x] Refactor `extractVideoCaptureDate` → `extractVideoMeta(downloadUrl): Promise<{ captureDate: Date | null; width: number | null; height: number | null }>`.
+  - [x] Walk `moov` → `trak` → `tkhd` and read the trailing 16.16 fixed-point width/height (last 8 bytes of `tkhd`). Returns `null` when not found.
+  - [x] Multi-track videos: pick the first `trak` whose `tkhd` reports non-zero dimensions (audio tracks have zero dims and are skipped).
+- [x] UPDATE `src/lib/video-meta.test.ts`: add a fixture-based case asserting non-null `{ width, height }` for a known fixture.
+- [x] MODIFY `src/lib/refresh-memories.server.ts`:
+  - [x] Replace `extractCaptureDateForFile` with `extractFileMeta(client, file)` that calls the new image/video helpers based on `contenttype`.
+  - [x] `fileToCachedMedia` accepts `{ captureDate, width, height }` and writes them.
+- [x] UPDATE `src/lib/refresh-memories.server.test.ts`: assert `width`/`height` end up in the cached entry for new files; existing-hash files still skip the rewrite.
+- [x] MODIFY `src/lib/pcloud.server.ts`: extend `MemoryItem` (image + video variants) with `width: number | null`, `height: number | null`. `buildMemoryItem` passes them through.
+- [x] UPDATE `src/lib/pcloud.server.test.ts` for the new shape.
+- [x] TOUCH `src/components/MemoryView.tsx`: takes the wider type cleanly (was deleted in Slice 6 — no logic change needed).
+- [x] All gates green.
+- [ ] Manual smoke: trigger the cron locally (or via `pnpm invoke:refresh-memories`) and inspect a fresh `media/<uuid>` Blobs entry — confirm `width` and `height` are integers. _(you said you'll wipe the cache manually to force regen — verifies as part of your smoke)_
+- [x] Commit: `v5(slice2): width/height metadata extraction + cache schema bump`.
 
-- [ ] `src/lib/media-cache.ts` + test. Pure abstraction over `MediaCacheStore`. `CachedMedia = { fileid, hash, code, linkid, kind, contenttype, name, captureDate }`.
-- [ ] `src/lib/media-cache.server.ts` + test. Memoized `getMediaCacheStore()` with `media/` prefix, no-op fallback (mirrors v3's `capture-cache.server.ts:25` pattern).
-- [ ] `src/lib/fileid-index.ts` + test. Pure sidecar (`fileid → uuid`).
-- [ ] `src/lib/fileid-index.server.ts` + test. Memoized factory; `fileid-index/` prefix.
-- [ ] `src/lib/folder-cache.ts` + test. Pure snapshot abstraction (`{ refreshedAt, uuids }`).
-- [ ] `src/lib/folder-cache.server.ts` + test. Single key `folder/v1`.
-- [ ] `pnpm test` green for the six new test files.
-- [ ] Commit.
+## Slice 3 — Wordmark + Topbar (Chakra-native) — `b9e0052`, simplified in `45e48d0`
 
-### G3 — Cron + dependency add (pre-acked in plan-mode review)
+- [x] NEW `src/components/Wordmark.tsx`:
+  - [x] Props: `size?: 'sm' | 'md' | 'lg'` (default `'md'`); maps to `fontSize` `20px` / `22px` / `28px`.
+  - [x] Renders a Chakra `<Box as="span">` (italic, `fontFamily="heading"`, `letterSpacing="-0.025em"`, `color="ink"`) wrapping a leading rotated R `<Box as="span">` in `accent.500` and a trailing accent dot `<Box as="span">`.
+  - [x] No CSS classes.
+- [x] NEW `src/components/Topbar.tsx`:
+  - [x] Sticky `<Box as="header" position="sticky" top={0} zIndex="docked" bg="bg/80" backdropFilter="blur(14px) saturate(160%)" borderBottomWidth="1px" borderColor="line">`.
+  - [x] Inner `<Container maxW="1080px"><HStack justify="space-between" align="center" gap={3} py={2.5} px={{ base: 4, md: 4.5 }}>…</HStack></Container>`.
+  - [x] Left: TanStack Router `<Link to="/" style={{ color: 'inherit', textDecoration: 'none' }}><Wordmark /></Link>` (Chakra `<Box as="a">` typing rejected `href`; Link is the natural SPA-aware swap).
+  - [x] Right: `<HStack gap={2.5}>` with the user pill + logout button.
+  - [x] User pill: `<HStack borderWidth="1px" borderColor="line" borderRadius="full" pl="3px" pr={{ base: '3px', sm: 3 }} py="3px" gap={2}><Avatar.Root size="xs"><Avatar.Fallback name={user.email} /></Avatar.Root><Text display={{ base: 'none', sm: 'inline' }} fontSize="sm" fontWeight={500}>{user.email}</Text></HStack>`.
+  - [x] Logout: icon-only `IconButton` with `LogOut` lucide icon + `aria-label="Cerrar sesión"`. _(Originally a `Button` with text; trimmed to `IconButton` in `45e48d0`.)_
+  - [x] Source the user via `useIdentity()` plus `Route.useRouteContext().user` fallback.
+- [x] MODIFY `src/routes/index.tsx`: render `<Topbar />` at the top of the home component (above any existing content). Old "Welcome back" Chakra heading and "Sign out" button stay temporarily (replaced in Slice 5).
+- [ ] Smoke at port 8888: avatar pill compresses on narrow viewports; logout works; no CSS classes used. _(awaiting your manual smoke)_
+- [x] All gates green.
+- [x] Commit: `v5(slice3): wordmark + topbar`.
 
-Curl verifications are done (2026-04-29 — see `tasks/plan.md` "Curl-verified facts"). All pass; no API gate remains before this task.
+## Slice 4 — Login redesign (Chakra-native) — `6389ba3`
 
-- [ ] Add `@netlify/functions` to `dependencies` in `package.json`. `pnpm install` re-runs.
-- [ ] Add `[functions."refresh-memories"]` block with `schedule = "0 4 * * *"` to `netlify.toml`.
-- [ ] NEW `netlify/functions/refresh-memories.ts` per the outline in `tasks/plan.md` G3 (handler + `ensurePublink` helper + stale cleanup).
-- [ ] NEW `netlify/functions/refresh-memories.test.ts` with in-memory fake stores + fake pcloud-kit client. Cases: new file added, existing-uuid reuse, hash mismatch, removed file (cache + public link cleared), folder snapshot updated.
-- [ ] `pnpm test` green; `pnpm build` clean; `rg '@netlify/functions' dist/client/` returns 0 matches.
-- [ ] Commit.
+- [x] REPLACE the body of `LoginPage` in `src/routes/login.tsx`:
+  - [x] Outer `<AppShell>` wraps `<VStack minH="100vh" justify="center" align="center" gap={7} px={6} py={10} position="relative" overflow="hidden">`.
+  - [x] Decorative polaroids container `<Box position="absolute" inset={0} pointerEvents="none" display="flex" justifyContent="center" alignItems="center">` with three rotated `<Box>` children sized 140×165, `bg="paper"`, `boxShadow="rdShadowLift"`, opacity 0.6, with `_before` for the diagonal stripes. Third polaroid hidden on `<sm`.
+  - [x] Card: `<Box maxW="400px" w="full" bg="paper" borderWidth="1px" borderColor="line" borderRadius="4px" p={{ base: 8, md: 9 }} boxShadow="rdShadowLift" position="relative" zIndex={1}>`.
+  - [x] Card content:
+    - [x] `<Wordmark size="lg" />`.
+    - [x] `<Heading whiteSpace="pre-line">Hoy te espera\nalgo del pasado.</Heading>` styled per the prototype.
+    - [x] `<Text>Entra para ver lo que pasó un {today.day} de {today.month} en años anteriores.</Text>` — computes `today` (Spanish month) inline.
+    - [x] `<form onSubmit={handleSubmit}><Stack gap={3.5}>…</Stack></form>` with two `<Field.Root>` blocks styled per the prototype (mono uppercase labels in `ink.muted`).
+    - [x] Email field hidden in invite/recovery modes.
+    - [x] Password field label flips between `Contraseña` (login) and `Elige una contraseña` (invite/recovery).
+    - [x] Error: `<Text color="red.600" _dark={{ color: 'orange.300' }} fontSize="13px">{error}</Text>`.
+    - [x] Submit: `<Button bg="ink" color="paper" _hover={{ bg: 'accent.700' }}>Entrar</Button>` (mode-specific text via `TITLES` map).
+    - [x] Forgot link: `<Link href="#" textAlign="center" color="ink.muted" fontSize="13px" _hover={{ color: 'accent.500' }}>¿Olvidaste tu contraseña?</Link>`.
+  - [x] Tagline (outside card): `<Text fontFamily="heading" fontStyle="italic" fontSize="14px" color="ink.muted">Un pequeño ritual diario para tu familia.</Text>`.
+  - [x] Mode-specific titles, headings, and sublines via `TITLES` / `HEADINGS` / `PASSWORD_LABELS` maps for `login` / `invite` / `recovery`.
+- [ ] Manual smoke: log in successfully → redirect to `/`. Trigger an invite hash in the URL → mode flips to invite. Trigger recovery hash → mode flips to recovery. _(awaiting your manual smoke)_
+- [x] All gates green.
+- [x] Commit: `v5(slice4): analog-album login redesign`.
 
-### G4 — `/api/memory/$uuid` route (auth-gated 302)
+## Slice 5 — Year-grouping helper + Hero + EmptyState — `2980974`
 
-- [ ] NEW `src/routes/api/memory/$uuid.ts`. GET handler: auth gate → uuid + variant validation → cache lookup → `Response.redirect(publicUrl, 302)` with `Cache-Control: private, max-age=60`.
-- [ ] Variant defaults from cached `kind` (image → image, video → stream).
-- [ ] URL templates:
-  - image/poster → `https://eapi.pcloud.com/getpubthumb?code=${code}&size=2048x1024` (direct bytes)
-  - stream → server calls `getpublinkdownload({ code })`, derives `https://${hosts[0]}${path}` from the response, 302s to that CDN URL
-- [ ] NEW `src/routes/api/memory/$uuid.test.ts` (Vitest): unauth → 401, bad uuid → 400, bad variant → 400, miss → 404, image → 302 to `eapi.pcloud.com/getpubthumb`, video default → 302 to derived CDN URL (mock `getpublinkdownload`), video poster → 302 to `getpubthumb`, getpublinkdownload throw → 502.
-- [ ] Manual curl smoke under `pnpm netlify dev` (with cache pre-populated):
-  - [ ] `curl -i .../api/memory/<image-uuid>?variant=image` → 302; following the redirect returns image bytes.
-  - [ ] `curl -iL .../api/memory/<video-uuid>?variant=stream` → 302 → CDN URL → bytes.
-  - [ ] `curl -iL -H 'Range: bytes=0-1023' .../api/memory/<video-uuid>?variant=stream` → final response `206 Partial Content`. **If 200, switch stream variant to byte-stream (server fetches CDN URL and pipes Response with Range forwarding) and re-test.**
-- [ ] Commit.
+- [x] NEW `src/lib/spanish-months.ts`: `SPANISH_MONTHS` const + `spanishMonth(idx)` helper.
+- [x] NEW `src/lib/memory-grouping.ts`:
+  - [x] `export type YearGroup = { readonly year: number; readonly yearsAgo: number; readonly items: readonly MemoryItem[] }`.
+  - [x] `export function groupMemoriesByYear(items: readonly MemoryItem[], today: { year: number; month: number; day: number }): readonly YearGroup[]`.
+  - [x] Pure: build a `Map<year, MemoryItem[]>`, then map to the output shape preserving input order. `yearsAgo = today.year - year`.
+- [x] NEW `src/lib/memory-grouping.test.ts`: 7 cases — empty, single, multi-year ordering, same-year preservation, caller-order across years, bad captureDate skipped, current-year zero.
+- [x] NEW `src/components/Hero.tsx`:
+  - [x] Props: `today: { day: number; month: string; year: number }`, `totalItems: number`, `groupCount: number`.
+  - [x] Renders the big day + italic-accent month + meta line per the prototype using Chakra primitives. Count text: `{N} recuerdos · {M} año/años` if `totalItems > 0`; `Hoy en tus recuerdos` if 0.
+- [x] NEW `src/components/EmptyState.tsx`:
+  - [x] Props: `today: { day: number; month: string }`.
+  - [x] Three decorative striped polaroids in a `<Box position="relative" h="130px" w="220px">`, each `<Box position="absolute" …>` with rotation + `_before` stripes.
+  - [x] Heading + paragraph copy verbatim from `app.jsx`.
+- [x] MODIFY `src/routes/index.tsx`:
+  - [x] Compute `today` from the `activeDate` search param (parse YYYY-MM-DD) or `new Date()`. Convert to `{ day, month, year }` plus a Spanish-month `todayDisplay` for the UI.
+  - [x] Compute `groups = groupMemoriesByYear(memories, today)`.
+  - [x] Layout: `<AppShell><Topbar /><AdminDateOverride … /><Container as="main" maxW="1080px" …><Hero … />{groups.length === 0 ? <EmptyState … /> : /* placeholder list — Slice 6 replaces */ }</Container></AppShell>`.
+  - [x] DROP the old "Welcome back" heading and inline "Sign out" button.
+- [ ] Smoke: empty day → `<EmptyState>`; rich day → placeholder rows with the new hero up top. _(awaiting your manual smoke)_
+- [x] All gates green.
+- [x] Commit: `v5(slice5): year grouping helper + Hero + EmptyState`.
 
-### G5 — Loader: read from cache, drop pCloud calls
+## Slice 6 — Polaroid + YearSection + masonry + timeline (Chakra-native) — `34c39f4`
 
-- [ ] `src/lib/pcloud.server.ts`: `MemoryItem` becomes `{ kind, uuid, name, captureDate, contenttype? }`. `fetchTodayMemories` reads `folder-cache.lookup()` + parallel `media-cache.lookup(uuid)`; filters by today; sorts by year asc / fileid asc; returns `MemoryItem[]`. **No `client.listfolder`, no pCloud API client constructed in this path.**
-- [ ] `src/lib/pcloud.server.test.ts` rewritten — mocks `getMediaCacheStore` + `getFolderCacheStore`; asserts cache-only behavior (snapshot present → items, snapshot missing → [] + warn).
-- [ ] `src/lib/pcloud.ts`: hard auth gate (`loadServerUser` early-throw), payload simplifies to `MemoryItem[]` (no token).
-- [ ] `pnpm test`, `pnpm type-check` green.
-- [ ] Commit.
+- [x] NEW `src/lib/rotation.ts`: pure `rotForKey(key: string): number` returning a deterministic angle in `[-2.4, 2.4]` (uses absolute value to keep range symmetric — prototype's raw hash skewed negative).
+- [x] NEW `src/lib/rotation.test.ts`: determinism, range bounds (200 samples), distinctness across 50 keys, empty-string handling.
+- [x] NEW `src/components/Polaroid.tsx`:
+  - [x] Props: `item: MemoryItem`, `keyId: string`, `onClick: () => void`.
+  - [x] Outer `<Box as="button">` with stable rotation transform, hover/active variants, `breakInside: avoid`.
+  - [x] Inner frame `<Box bg="paper" pl={2} pr={2} pt={2} pb={7} borderRadius="2px" boxShadow="rdShadow">`.
+  - [x] Photo box `<Box position="relative" bg="bg.muted" overflow="hidden" w="full" aspectRatio={…}>` with `<Image>` (cover, lazy, slight saturation/contrast filter). Video kind uses `?variant=poster` plus a play badge.
+  - [x] Play badge with `Play` lucide icon + "VÍDEO" mono label.
+  - [x] Caption derived from `item.name` (strip extension, replace `_-` with spaces). Renders only if non-empty.
+- [x] NEW `src/components/YearSection.tsx`:
+  - [x] Props: `group: YearGroup`, `onOpen: (year: number, idx: number) => void`.
+  - [x] Outer `<Box as="section" position="relative" pl={{ base: 12, md: '130px' }} mb={14}>`.
+  - [x] Year marker block (absolute) with the dot + year-num for `md+`.
+  - [x] Title: italic Fraunces "Hace N año(s)" with mobile-only "· {year}" suffix.
+  - [x] Helper `yearsAgoLabel(n)`: `'Hoy mismo'` for 0, `'Hace un año'` for 1, `\`Hace ${n} años\`` otherwise.
+  - [x] Meta: `{N} recuerdo(s)` mono caps line.
+  - [x] Masonry: `<Box columnCount={{ base: 2, md: 3, lg: 4 }} columnGap={{ base: 3.5, md: 4.5 }}>` with `<Polaroid>` per item, `keyId={\`${group.year}-${idx}\`}`.
+- [x] NEW `src/components/Timeline.tsx`: wrapper `<Box position="relative">` with the timeline gradient line + bottom end dot + Spanish footer.
+- [x] MODIFY `src/routes/index.tsx`: replace placeholder list with `<Timeline>{groups.map(YearSection)}</Timeline>`. `noopOpen` stub (Slice 7 wires the lightbox).
+- [x] DELETE `src/components/MemoryView.tsx`. Verify `rg -n MemoryView src/` returns 0 matches.
+- [ ] Smoke: home renders with full polaroid masonry; rotation stable on re-render; layout looks correct on iPhone-width (`base`), tablet (`md`), desktop (`lg`). _(awaiting your manual smoke)_
+- [x] All gates green.
+- [x] Commit: `v5(slice6): polaroid masonry + timeline ornament`.
 
-### G6 — `routes/index.tsx` consumer update
+## Slice 7 — Lightbox using Chakra `Dialog` — `6a18424`
 
-- [ ] Loader returns `MemoryItem[]` directly (drop the `{ items, pcloudToken }` destructure).
-- [ ] `<MemoryView>` becomes synchronous; URLs constructed inline from `item.uuid` + variant.
-- [ ] `memoryKey(item)` returns `item.uuid`.
-- [ ] Drop `PcloudClientProvider` import + wrapper (already removed by F revert; verify `rg PcloudClientProvider src/` returns 0).
-- [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check` clean.
-- [ ] Commit.
+- [x] NEW `src/components/Lightbox.tsx`:
+  - [x] Props: `group: YearGroup`, `startIndex: number`, `open: boolean`, `onClose: () => void`.
+  - [x] Internal `idx` state (initialised from `startIndex`); reset when `startIndex` changes.
+  - [x] `<Dialog.Root open={open} onOpenChange={({ open }) => !open && onClose()} size="full">`.
+  - [x] `<Dialog.Backdrop bg="rgba(12,9,6,0.94)" backdropFilter="blur(16px)" />`.
+  - [x] `<Dialog.Content bg="transparent" boxShadow="none" display="flex" flexDirection="column">`.
+  - [x] Top bar (HStack with year + lowercase "hace n años" + counter + download icon + close trigger).
+  - [x] Stage (Box flex=1, image or native `<video controls autoPlay key={uuid}>`, prev/next IconButtons hidden on `<md`).
+  - [x] Caption (handwriting font + dots indicator using `accent.500` for active dot).
+  - [x] Keyboard: `useEffect` adding ArrowLeft / ArrowRight; clamp to range. Escape closed by Chakra `Dialog`.
+  - [x] Touch: 50px-threshold swipe.
+  - [x] `<video key={item.uuid}>` so unmount-on-navigate stops playback cleanly.
+- [x] MODIFY `src/routes/index.tsx`:
+  - [x] State: `const [lightbox, setLightbox] = useState<{ yearIndex: number; idx: number } | null>(null)`.
+  - [x] Pass `onOpen={(year, idx) => …}` to year sections.
+  - [x] Render `<Lightbox open={true} group={…} startIndex={…} onClose={() => setLightbox(null)} />` only when state is non-null.
+- [ ] Smoke: open lightbox on a year with 3+ items, navigate via arrow keys + swipe + dots + prev/next; close via Esc + scrim click + close button. Video autoplays on entry, stops on next/prev. Download link opens in a new tab. _(awaiting your manual smoke)_
+- [x] All gates green.
+- [x] Commit: `v5(slice7): per-year swipe lightbox via chakra dialog`.
 
-### G7 — Delete the byte-stream proxy + capture-cache
+## Slice 8 — Admin date-override banner restyle — `9a13221`, simplified in `7193a81`
 
-- [ ] DELETE `src/routes/api/media/$fileid.ts`.
-- [ ] DELETE `src/lib/media-proxy.server.ts`, `src/lib/media-proxy.server.test.ts`.
-- [ ] DELETE `src/lib/capture-cache.ts`, `capture-cache.test.ts`, `capture-cache.server.ts`, `capture-cache.server.test.ts`.
-- [ ] Remove empty `src/routes/api/media/` and `src/routes/api/` (only if `api/memory/` no longer makes them empty — keep `src/routes/api/memory/`).
-- [ ] `rg -n 'media-proxy|/api/media|capture-cache' src/ test/ netlify/` returns 0 matches.
-- [ ] `pnpm build` clean; `routeTree.gen.ts` regenerates without `/api/media/$fileid`.
-- [ ] Commit.
+- [x] REPLACE `src/components/AdminDateOverride.tsx`:
+  - [x] Outer striped `<Box>` background + dashed accent border-bottom.
+  - [x] Inner `<HStack maxW="1080px" mx="auto">` with Chakra `Badge` (`<Star /> Solo admin`) on the left and Chakra `<DatePicker>` with `IndicatorGroup` (Clear + Calendar trigger) on the right.
+  - [x] Mono compact input with accent focus ring (`accent.300` border, `accent.200` glow).
+  - [x] Wire `onValueChange` → `navigate({ search: { date } })`; clear via `DatePicker.ClearTrigger` → `navigate({ search: {} })`.
+  - [x] **Manually trimmed in `7193a81`**: removed paper-tape decoration, banner title, italic help text, hand-built `Restablecer` button, animated state pill — see `tasks/plan.md` "Post-implementation manual adjustments". The simpler version now uses the Chakra `Badge` primitive directly and the built-in `DatePicker.ClearTrigger`.
+  - [x] Prop renamed `activeDate` → `initialActiveDate` (uncontrolled `defaultValue`). `src/routes/index.tsx` updated.
+  - [x] **Bug fix**: `onValueChange` missing `return` after empty-search navigate caused crash on date clear. Fixed.
+- [ ] Smoke: as admin, change date → URL param updates, loader re-runs. Calendar `ClearTrigger` returns to today (URL param dropped). Banner not rendered when `isAdmin === false`. _(awaiting your manual smoke)_
+- [x] All gates green.
+- [x] Commits: `v5(slice8): admin date-override banner restyle`, `Simplify AdminDateOverride` (`7193a81`).
 
-## Checkpoint G — Deploy preview + PR
+## Slice 9 — Spanish copy sweep, cleanup, deploy preview — `3ce81b4`
 
-- [ ] All standard gates clean (`test`, `type-check`, `lint`, `format:check`, `build`).
-- [ ] Push `v4`. PR #4 (or new PR `[v4] UUID indirection + cron-warmed public links + 302`) → `main`. Deploy preview rebuilds.
-- [ ] **Manually trigger the cron** via Netlify dashboard ("Run now" on `refresh-memories`).
-- [ ] Inspect Netlify Blobs panel: `folder/v1`, multiple `media/<uuid>`, multiple `fileid-index/<fileid>`.
-- [ ] On the deploy preview:
-  - [ ] Hard reload `/`. Network tab: `/api/memory/<uuid>` → 302 → direct `*.pcloud.com` fetch. No `/api/media/*`. No 7010 / 410 / "another IP address" errors.
-  - [ ] View source on `/`: only uuids in HTML — no fileid, no code, no token.
-  - [ ] Wait 30+ min, return — images render, video plays + seeks.
-  - [ ] `curl -i https://<deploy-preview>/api/memory/<uuid>?variant=image` without auth cookie → 401.
-  - [ ] `getTodayMemories` server-fn endpoint without auth → 401.
-  - [ ] `curl -I https://<deploy-preview>/` — `cache-control: private` (or `no-store` / absent), never `public, s-maxage=...`.
-  - [ ] (Optional) Rename a file in pCloud → trigger cron → confirm `media/<uuid>` updates with the new hash, same code.
-  - [ ] (Optional) Delete a file in pCloud → trigger cron → confirm `media/<uuid>` + `fileid-index/<fileid>` removed; pCloud's Public Links panel shows the link gone.
-- [ ] **Pre-prod**: trigger the prod cron manually so the snapshot exists at merge time.
-- [ ] Merge `v4 → main`. Post-merge prod smoke (same checks on prod URL).
+- [x] `rg -n '\b(Welcome|Sign|Choose|Memories?|Today|Yesterday|Reset|Email|Password|Loading)\b' src/` — 0 hits in non-test source.
+- [x] `rg -n MemoryView src/` returns 0 matches.
+- [x] `pnpm test` green (121/121); `pnpm type-check` clean; `pnpm lint` clean; `pnpm format:check` clean; `pnpm build` clean. After build, `rm -rf dist .netlify` (per SPEC §7).
+- [x] SPEC.md §4 refreshed to document the v5 component + lib layout.
+- [ ] Manual visual smoke against each prototype state at `localhost:8888`:
+  - Logged-out, logged-in non-admin, logged-in admin, override-set rich day, override-set empty day, lightbox on a multi-item year, OS dark-mode toggle. _(your turn — feel free to tweak components manually first)_
+- [ ] Push the v5-ui-design branch. _(awaiting your "go")_
+- [ ] Open PR `[v5] Analog-album UI port` → `main`. _(awaiting your "go")_
+- [ ] Deploy preview smoke:
+  - [ ] Each prototype state matches the design.
+  - [ ] Network tab: media still flows through `/api/memory/<uuid>` only.
+  - [ ] `curl -I https://<deploy-preview>/` → `cache-control: private` (or `no-store` / absent).
+  - [ ] No console errors / 401s.
+- [ ] (Optional) Trigger the cron once on the deploy preview (or wipe the Blobs cache) so existing entries refresh and pick up `width`/`height` proactively.
+- [ ] Pre-merge: human review on the deploy preview.
+- [ ] Merge `v5-ui-design → main`. Post-merge prod smoke (same checks on prod URL).
 
-## G8 — Pivot `/api/memory/$uuid` from 302 to byte-stream
+## Post-implementation manual adjustments
 
-User noted on the deploy preview: the 302 leaks the public-link URL to the browser's Network tab. Public links aren't IP-bound, so anyone with the URL can fetch the bytes outside the auth gate.
+User pushed four follow-up commits trimming ornaments to taste. Branch is now at `origin/v5-ui-design 45b244c` (pushed). See `tasks/plan.md` "Post-implementation manual adjustments" for full diff context.
 
-- [x] `src/lib/memory-route.server.ts` — replace `Response.redirect(...)` with a `streamFromUpstream` helper that fetches the upstream URL (with Range forwarded for stream) and pipes the body. Add `FetchBytes` dep type.
-- [x] `src/routes/api/memory/$uuid.ts` — wire a default `fetchBytes` (global `fetch` + Range injection) into the deps.
-- [x] Tests: assert `Location` header is null and that bytes flow through; cover image, poster-on-video, stream-with-Range (206 + content-range), and 502 paths.
-- [x] Commit (3b714e3 — "Byte-stream /api/memory instead of 302-redirecting (G8)").
-- [x] Push `v4` (8f14949). Deploy preview verified by user: image/video/poster render, no `eapi.pcloud.com` URL in Network tab, no 7010/410 errors.
-- [ ] Pre-prod: trigger the prod cron manually so the snapshot exists at merge time.
-- [ ] Merge `v4 → main`. Post-merge prod smoke (hard reload `/`, video seek, `curl -I /` cache-control private/no-store).
+- [x] `956229b` — `Update todos` (refresh task list with commit shas)
+- [x] `7193a81` — `Simplify AdminDateOverride` (-194 / +45; lost paper-tape, title, help, Restablecer button, state pill; gained Chakra `Badge` primitive + `DatePicker.IndicatorGroup` + `ClearTrigger`)
+- [x] `45e48d0` — `Use IconButton for logout` (Topbar logout becomes icon-only)
+- [x] `45b244c` — `Remove custom mono font` (drops JetBrains Mono; mono token removed; system mono fallback)
+- [x] **Bug fix** — `AdminDateOverride.onValueChange` missing `return` after empty-search navigate caused crash on date clear (TypeScript missed it because `noUncheckedIndexedAccess` is off). Fixed in this turn.
 
-## Slice D — Component split (separate PR)
+## Remaining to merge `v5-ui-design → main`
 
-- [x] Extract `src/routes/index.tsx` → `src/components/{Home,MemoryView,AdminDateOverride}.tsx`. Route file keeps only `validateSearch` / `beforeLoad` / `loaderDeps` / `loader` / `component`.
-- [x] Use `getRouteApi('/')` in `Home` + `AdminDateOverride` to consume loader data / navigate / search without the route-bound `Route.useX` hooks.
-- [x] SPEC §4 + §12 updated to reflect the new `src/components/` layout.
-- [x] All gates clean (`test` 91/91, `type-check`, `lint`, `format:check`, `build`).
+- [x] All gates green (`pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check`, `pnpm build`).
+- [x] Branch pushed (`origin/v5-ui-design`).
+- [ ] Manual smoke at `localhost:8888` for each prototype state — _user's responsibility_.
+- [ ] Open PR `[v5] Analog-album UI port` → `main` — _awaiting your "go" before opening (PR creation is shared-state)_.
+- [ ] Deploy preview smoke (after PR opens):
+  - [ ] Each prototype state matches the design.
+  - [ ] Network tab: media still flows through `/api/memory/<uuid>` only.
+  - [ ] `curl -I https://<deploy-preview>/` → `cache-control: private` (or `no-store` / absent).
+  - [ ] No console errors / 401s.
+- [ ] (Optional) Trigger the cron once on the deploy preview (or wipe Blobs `media/*`) so existing entries refresh and pick up `width`/`height` proactively.
+- [ ] Pre-merge review on the deploy preview.
+- [ ] Merge `v5-ui-design → main`. Post-merge prod smoke.
+
+## Deferred / out of scope
+
+- [ ] User-facing theme toggle (system preference only in v5).
+- [ ] User-facing accent color picker.
+- [ ] Pending-component for date-picker transitions (only if jank is observable).
+- [ ] Captions richer than filename-derived.
+- [ ] Real avatar image wiring (currently `Avatar.Fallback` only).
+- [ ] Forced cache backfill for legacy entries lacking `width`/`height` — only if lazy refresh feels too slow.

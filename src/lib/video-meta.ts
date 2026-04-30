@@ -1,6 +1,10 @@
-// Hand-rolled MP4/MOV `mvhd` reader. Both formats use ISO Base Media File Format,
-// so the same atom walk works for either. We only extract `creation_time`; the
-// rest of the atom layout is ignored.
+// Hand-rolled MP4/MOV ISO Base Media File Format reader. Both formats share
+// the same atom layout, so the same walker works for either. We extract:
+//
+//   - creation_time from the `mvhd` (movie header) atom
+//   - width / height from the first `tkhd` (track header) with non-zero dims
+//
+// Best-effort: every field independently degrades to `null`.
 
 const MP4_EPOCH_OFFSET = 2_082_844_800
 const RANGE_HEADER_START = 'bytes=0-65535'
@@ -8,9 +12,17 @@ const TAIL_SIZE = 1_048_576
 
 type BoxLocation = { start: number; end: number }
 
-export async function extractVideoCaptureDate(downloadUrl: string): Promise<Date | null> {
+export type VideoMeta = {
+	captureDate: Date | null
+	width: number | null
+	height: number | null
+}
+
+const EMPTY: VideoMeta = { captureDate: null, width: null, height: null }
+
+export async function extractVideoMeta(downloadUrl: string): Promise<VideoMeta> {
 	const startBuffer = await rangeFetch(downloadUrl, RANGE_HEADER_START)
-	if (!startBuffer) return null
+	if (!startBuffer) return EMPTY
 
 	const fromStart = parseFromBufferStart(startBuffer)
 	if (fromStart) return fromStart
@@ -18,12 +30,12 @@ export async function extractVideoCaptureDate(downloadUrl: string): Promise<Date
 	// moov-at-end fallback: cameras often write `mdat` first and finalize `moov`
 	// at the end. Range-fetch the tail and linear-scan for the `moov` magic.
 	const totalSize = await headContentLength(downloadUrl)
-	if (totalSize === null) return null
+	if (totalSize === null) return EMPTY
 
 	const tailStart = Math.max(startBuffer.byteLength, totalSize - TAIL_SIZE)
-	if (tailStart >= totalSize) return null
+	if (tailStart >= totalSize) return EMPTY
 	const tailBuffer = await rangeFetch(downloadUrl, `bytes=${tailStart}-${totalSize - 1}`)
-	if (!tailBuffer) return null
+	if (!tailBuffer) return EMPTY
 
 	return scanForMoov(new DataView(tailBuffer))
 }
@@ -43,37 +55,90 @@ async function headContentLength(url: string): Promise<number | null> {
 	return Number.isInteger(n) && n > 0 ? n : null
 }
 
-function parseFromBufferStart(buffer: ArrayBuffer): Date | null {
+function parseFromBufferStart(buffer: ArrayBuffer): VideoMeta | null {
 	const view = new DataView(buffer)
 	const moov = walkForBox(view, 0, view.byteLength, 'moov')
 	if (!moov) return null
-	const mvhd = walkForBox(view, moov.start, moov.end, 'mvhd')
-	if (!mvhd) return null
-	return parseMvhd(view, mvhd.start, mvhd.end)
+	return parseMoov(view, moov.start, moov.end)
+}
+
+function parseMoov(view: DataView, start: number, end: number): VideoMeta {
+	const mvhd = walkForBox(view, start, end, 'mvhd')
+	const captureDate = mvhd ? parseMvhd(view, mvhd.start, mvhd.end) : null
+	const dims = findTkhdDimensions(view, start, end)
+	return { captureDate, width: dims.width, height: dims.height }
+}
+
+// Walk all top-level children of `moov` looking for `trak` boxes; pick the
+// first `tkhd` with non-zero dimensions (skips audio tracks, which are zero).
+function findTkhdDimensions(
+	view: DataView,
+	moovStart: number,
+	moovEnd: number,
+): { width: number | null; height: number | null } {
+	let pos = moovStart
+	while (pos + 8 <= moovEnd) {
+		const sized = readBoxHeader(view, pos, moovEnd)
+		if (!sized) return { width: null, height: null }
+		if (readType(view, pos + 4) === 'trak') {
+			const tkhd = walkForBox(view, sized.bodyStart, sized.boxEnd, 'tkhd')
+			if (tkhd) {
+				const dims = parseTkhdDimensions(view, tkhd.start, tkhd.end)
+				if (dims.width !== null && dims.height !== null) return dims
+			}
+		}
+		pos = sized.boxEnd
+	}
+	return { width: null, height: null }
+}
+
+function parseTkhdDimensions(
+	view: DataView,
+	bodyStart: number,
+	bodyEnd: number,
+): { width: number | null; height: number | null } {
+	if (bodyEnd - bodyStart < 8) return { width: null, height: null }
+	// Last 8 bytes of `tkhd` are width and height as 16.16 fixed-point.
+	const widthFixed = view.getUint32(bodyEnd - 8)
+	const heightFixed = view.getUint32(bodyEnd - 4)
+	const width = widthFixed >>> 16
+	const height = heightFixed >>> 16
+	if (width === 0 || height === 0) return { width: null, height: null }
+	return { width, height }
 }
 
 function walkForBox(view: DataView, start: number, end: number, type: string): BoxLocation | null {
 	let pos = start
 	while (pos + 8 <= end) {
-		let size = view.getUint32(pos)
-		let bodyStart = pos + 8
-		if (size === 1) {
-			if (pos + 16 > end) return null
-			const high = view.getUint32(pos + 8)
-			const low = view.getUint32(pos + 12)
-			if (high !== 0) return null
-			size = low
-			bodyStart = pos + 16
-		} else if (size === 0) {
-			size = end - pos
-		}
-		if (size < 8 || pos + size > end) return null
+		const sized = readBoxHeader(view, pos, end)
+		if (!sized) return null
 		if (readType(view, pos + 4) === type) {
-			return { start: bodyStart, end: pos + size }
+			return { start: sized.bodyStart, end: sized.boxEnd }
 		}
-		pos += size
+		pos = sized.boxEnd
 	}
 	return null
+}
+
+function readBoxHeader(
+	view: DataView,
+	pos: number,
+	end: number,
+): { bodyStart: number; boxEnd: number } | null {
+	let size = view.getUint32(pos)
+	let bodyStart = pos + 8
+	if (size === 1) {
+		if (pos + 16 > end) return null
+		const high = view.getUint32(pos + 8)
+		const low = view.getUint32(pos + 12)
+		if (high !== 0) return null
+		size = low
+		bodyStart = pos + 16
+	} else if (size === 0) {
+		size = end - pos
+	}
+	if (size < 8 || pos + size > end) return null
+	return { bodyStart, boxEnd: pos + size }
 }
 
 function readType(view: DataView, offset: number): string {
@@ -106,7 +171,7 @@ function parseMvhd(view: DataView, bodyStart: number, bodyEnd: number): Date | n
 	return Number.isNaN(date.getTime()) ? null : date
 }
 
-function scanForMoov(view: DataView): Date | null {
+function scanForMoov(view: DataView): VideoMeta {
 	// Linear scan for the literal "moov" four-byte magic. The atom's size prefix
 	// sits in the four bytes immediately before the magic.
 	const M = 0x6d
@@ -124,11 +189,8 @@ function scanForMoov(view: DataView): Date | null {
 		const moovStart = i - 4
 		const size = view.getUint32(moovStart)
 		if (size < 8 || moovStart + size > view.byteLength) continue
-		const moov: BoxLocation = { start: moovStart + 8, end: moovStart + size }
-		const mvhd = walkForBox(view, moov.start, moov.end, 'mvhd')
-		if (!mvhd) continue
-		const date = parseMvhd(view, mvhd.start, mvhd.end)
-		if (date) return date
+		const result = parseMoov(view, moovStart + 8, moovStart + size)
+		if (result.captureDate || result.width !== null) return result
 	}
-	return null
+	return EMPTY
 }

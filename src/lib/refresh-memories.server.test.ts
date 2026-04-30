@@ -6,18 +6,18 @@ import type { FileidIndexStore } from './fileid-index'
 import type { FolderCacheStore, FolderSnapshot } from './folder-cache'
 import type { CachedMedia, MediaCacheStore } from './media-cache'
 
-import { extractCaptureDate } from './exif'
+import { extractImageMeta } from './exif'
 import { createFileidIndex } from './fileid-index'
 import { createFolderCache } from './folder-cache'
 import { createMediaCache } from './media-cache'
 import { refreshMemories } from './refresh-memories.server'
-import { extractVideoCaptureDate } from './video-meta'
+import { extractVideoMeta } from './video-meta'
 
 vi.mock('./exif')
 vi.mock('./video-meta')
 
-const mockedExtractCaptureDate = vi.mocked(extractCaptureDate)
-const mockedExtractVideoCaptureDate = vi.mocked(extractVideoCaptureDate)
+const mockedExtractImageMeta = vi.mocked(extractImageMeta)
+const mockedExtractVideoMeta = vi.mocked(extractVideoMeta)
 
 function makeMediaStore() {
 	const data = new Map<string, CachedMedia>()
@@ -130,8 +130,16 @@ const jpegA = makeFile({ fileid: 100, name: 'a.jpg', contenttype: 'image/jpeg', 
 const mp4B = makeFile({ fileid: 200, name: 'b.mp4', contenttype: 'video/mp4', hash: 'h-b' })
 
 beforeEach(() => {
-	mockedExtractCaptureDate.mockResolvedValue(new Date('2020-01-15T10:00:00Z'))
-	mockedExtractVideoCaptureDate.mockResolvedValue(new Date('2018-04-27T10:00:00Z'))
+	mockedExtractImageMeta.mockResolvedValue({
+		captureDate: new Date('2020-01-15T10:00:00Z'),
+		width: 4032,
+		height: 3024,
+	})
+	mockedExtractVideoMeta.mockResolvedValue({
+		captureDate: new Date('2018-04-27T10:00:00Z'),
+		width: 1920,
+		height: 1080,
+	})
 })
 
 afterEach(() => {
@@ -165,6 +173,8 @@ describe('refreshMemories', () => {
 			contenttype: 'image/jpeg',
 			name: 'a.jpg',
 			captureDate: '2020-01-15T10:00:00.000Z',
+			width: 4032,
+			height: 3024,
 		})
 		expect(fileidStore.set).toHaveBeenCalledWith(100, { uuid })
 		expect(folderStore.set).toHaveBeenCalledTimes(1)
@@ -185,6 +195,8 @@ describe('refreshMemories', () => {
 			contenttype: 'image/jpeg',
 			name: 'a.jpg',
 			captureDate: '2020-01-15T10:00:00.000Z',
+			width: 4032,
+			height: 3024,
 		})
 		const client = fakeClient({ files: [jpegA] })
 
@@ -199,7 +211,7 @@ describe('refreshMemories', () => {
 		expect(result.scanned).toBe(1)
 		expect(mediaStore.set).not.toHaveBeenCalled()
 		expect(fileidStore.set).not.toHaveBeenCalled()
-		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
+		expect(mockedExtractImageMeta).not.toHaveBeenCalled()
 		expect(client.call).not.toHaveBeenCalledWith('getfilepublink', expect.anything())
 		expect(folderStore.set.mock.calls[0]![0].uuids).toEqual(['stable-uuid'])
 	})
@@ -218,9 +230,15 @@ describe('refreshMemories', () => {
 			contenttype: 'image/jpeg',
 			name: 'a.jpg',
 			captureDate: '2018-01-01T00:00:00.000Z',
+			width: null,
+			height: null,
 		})
 		const client = fakeClient({ files: [jpegA] })
-		mockedExtractCaptureDate.mockResolvedValueOnce(new Date('2021-04-27T10:00:00Z'))
+		mockedExtractImageMeta.mockResolvedValueOnce({
+			captureDate: new Date('2021-04-27T10:00:00Z'),
+			width: 6000,
+			height: 4000,
+		})
 
 		await refreshMemories(
 			client,
@@ -238,8 +256,34 @@ describe('refreshMemories', () => {
 			code: 'code-100',
 			linkid: 1000,
 			captureDate: '2021-04-27T10:00:00.000Z',
+			width: 6000,
+			height: 4000,
 		})
 		expect(client.call).not.toHaveBeenCalledWith('getfilepublink', expect.anything())
+	})
+
+	it('writes null width/height when the extractor returns null dims', async () => {
+		const mediaStore = makeMediaStore()
+		const fileidStore = makeFileidStore()
+		const folderStore = makeFolderStore()
+		const client = fakeClient({ files: [jpegA] })
+		mockedExtractImageMeta.mockResolvedValueOnce({
+			captureDate: new Date('2020-01-15T10:00:00Z'),
+			width: null,
+			height: null,
+		})
+
+		await refreshMemories(
+			client,
+			42,
+			createMediaCache(mediaStore),
+			createFileidIndex(fileidStore),
+			createFolderCache(folderStore),
+		)
+
+		const [, meta] = mediaStore.set.mock.calls[0]!
+		expect(meta.width).toBeNull()
+		expect(meta.height).toBeNull()
 	})
 
 	it('sweeps stale uuids: deletes public link + clears caches', async () => {
@@ -256,6 +300,8 @@ describe('refreshMemories', () => {
 			contenttype: 'image/jpeg',
 			name: 'gone.jpg',
 			captureDate: null,
+			width: null,
+			height: null,
 		})
 		const deleted: number[] = []
 		const client = fakeClient({
@@ -295,6 +341,8 @@ describe('refreshMemories', () => {
 			contenttype: 'image/jpeg',
 			name: 'gone.jpg',
 			captureDate: null,
+			width: null,
+			height: null,
 		})
 		const client = fakeClient({
 			files: [],
@@ -330,10 +378,12 @@ describe('refreshMemories', () => {
 			createFolderCache(folderStore),
 		)
 
-		expect(mockedExtractVideoCaptureDate).toHaveBeenCalled()
-		expect(mockedExtractCaptureDate).not.toHaveBeenCalled()
+		expect(mockedExtractVideoMeta).toHaveBeenCalled()
+		expect(mockedExtractImageMeta).not.toHaveBeenCalled()
 		const [, meta] = mediaStore.set.mock.calls[0]!
 		expect(meta.kind).toBe('video')
 		expect(meta.contenttype).toBe('video/mp4')
+		expect(meta.width).toBe(1920)
+		expect(meta.height).toBe(1080)
 	})
 })

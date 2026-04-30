@@ -7,6 +7,8 @@ export type CachedMedia = {
 	contenttype: string
 	name: string
 	captureDate: string | null
+	width: number | null
+	height: number | null
 }
 
 export type MediaCacheStore = {

@@ -4,11 +4,19 @@ import type { FileidIndex } from './fileid-index'
 import type { FolderCache } from './folder-cache'
 import type { CachedMedia, MediaCache } from './media-cache'
 
-import { extractCaptureDate } from './exif'
+import { extractImageMeta } from './exif'
 import { parseFilenameCaptureDate } from './filename-date'
-import { extractVideoCaptureDate } from './video-meta'
+import { extractVideoMeta } from './video-meta'
 
 type Publink = { code: string; linkid: number }
+
+type FileMeta = {
+	captureDate: Date | null
+	width: number | null
+	height: number | null
+}
+
+const EMPTY_META: FileMeta = { captureDate: null, width: null, height: null }
 
 function isMediaFile(item: FileMetadata | FolderMetadata): item is FileMetadata {
 	if (item.isfolder) return false
@@ -21,15 +29,19 @@ async function listMediaFiles(client: Client, folderId: number): Promise<FileMet
 	return folder.contents?.filter(isMediaFile) ?? []
 }
 
-async function extractCaptureDateForFile(client: Client, file: FileMetadata): Promise<Date | null> {
+async function extractFileMeta(client: Client, file: FileMetadata): Promise<FileMeta> {
 	try {
 		const downloadUrl = await client.getfilelink(file.fileid)
-		const exifCapture = file.contenttype.startsWith('video/')
-			? await extractVideoCaptureDate(downloadUrl)
-			: await extractCaptureDate(downloadUrl)
-		return exifCapture ?? parseFilenameCaptureDate(file.name) ?? null
+		const meta = file.contenttype.startsWith('video/')
+			? await extractVideoMeta(downloadUrl)
+			: await extractImageMeta(downloadUrl)
+		return {
+			captureDate: meta.captureDate ?? parseFilenameCaptureDate(file.name) ?? null,
+			width: meta.width,
+			height: meta.height,
+		}
 	} catch {
-		return null
+		return EMPTY_META
 	}
 }
 
@@ -47,11 +59,7 @@ async function ensurePublink(
 	return { code: res.code, linkid: res.linkid }
 }
 
-function fileToCachedMedia(
-	file: FileMetadata,
-	publink: Publink,
-	captureDate: Date | null,
-): CachedMedia {
+function fileToCachedMedia(file: FileMetadata, publink: Publink, meta: FileMeta): CachedMedia {
 	return {
 		fileid: file.fileid,
 		hash: file.hash,
@@ -60,7 +68,9 @@ function fileToCachedMedia(
 		kind: file.contenttype.startsWith('video/') ? 'video' : 'image',
 		contenttype: file.contenttype,
 		name: file.name,
-		captureDate: captureDate ? captureDate.toISOString() : null,
+		captureDate: meta.captureDate ? meta.captureDate.toISOString() : null,
+		width: meta.width,
+		height: meta.height,
 	}
 }
 
@@ -75,9 +85,9 @@ async function processFile(
 	const cached = await mediaCache.lookup(uuid)
 	if (!cached || cached.hash !== file.hash) {
 		const publink = await ensurePublink(client, file.fileid, cached)
-		const captureDate = await extractCaptureDateForFile(client, file)
-		const meta = fileToCachedMedia(file, publink, captureDate)
-		await mediaCache.remember(uuid, meta)
+		const meta = await extractFileMeta(client, file)
+		const next = fileToCachedMedia(file, publink, meta)
+		await mediaCache.remember(uuid, next)
 		if (!existingUuid) await fileidIndex.remember(file.fileid, uuid)
 	}
 	return uuid
