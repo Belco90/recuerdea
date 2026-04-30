@@ -85,7 +85,7 @@ function Home() {
 	return (
 		<AppShell>
 			<Topbar />
-			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
+			{isAdmin && <AdminDateOverride initialActiveDate={activeDate} />}
 			<Container as="main" maxW="1080px" px={{ base: 4, md: 4.5 }} pt={8} pb={20}>
 				<Hero today={todayDisplay} totalItems={memories.length} groupCount={groups.length} />
 				{groups.length === 0 ? (
