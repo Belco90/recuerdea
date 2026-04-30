@@ -1,8 +1,18 @@
 import type { YearGroup } from '#/lib/memory-grouping'
 
-import { Box, Dialog, HStack, IconButton, Image, Portal, Text, VStack } from '@chakra-ui/react'
+import {
+	Box,
+	Carousel,
+	Dialog,
+	HStack,
+	IconButton,
+	Image,
+	Portal,
+	Text,
+	VStack,
+} from '@chakra-ui/react'
 import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 type LightboxProps = {
 	group: YearGroup
@@ -24,8 +34,6 @@ function captionFromName(name: string): string {
 
 export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 	const [idx, setIdx] = useState(startIndex)
-	const touchStartX = useRef<number | null>(null)
-	const touchStartYRef = useRef<number | null>(null)
 
 	useEffect(() => {
 		if (open) setIdx(startIndex)
@@ -34,50 +42,22 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 	const items = group.items
 	const item = items[idx]
 
-	const next = useCallback(() => setIdx((i) => Math.min(items.length - 1, i + 1)), [items.length])
-	const prev = useCallback(() => setIdx((i) => Math.max(0, i - 1)), [])
-
 	useEffect(() => {
 		if (!open) return
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === 'ArrowRight') {
 				e.preventDefault()
-				next()
+				setIdx((i) => Math.min(items.length - 1, i + 1))
 			} else if (e.key === 'ArrowLeft') {
 				e.preventDefault()
-				prev()
+				setIdx((i) => Math.max(0, i - 1))
 			}
 		}
 		document.addEventListener('keydown', onKey)
 		return () => document.removeEventListener('keydown', onKey)
-	}, [open, next, prev])
+	}, [open, items.length])
 
 	if (!item) return null
-
-	const onTouchStart = (e: React.TouchEvent) => {
-		const t = e.touches[0]
-		if (!t) return
-		touchStartX.current = t.clientX
-		touchStartYRef.current = t.clientY
-	}
-	const onTouchEnd = (e: React.TouchEvent) => {
-		const startX = touchStartX.current
-		const startY = touchStartYRef.current
-		touchStartX.current = null
-		touchStartYRef.current = null
-		if (startX == null || startY == null) return
-		const t = e.changedTouches[0]
-		if (!t) return
-		const dx = t.clientX - startX
-		const dy = t.clientY - startY
-		if (Math.abs(dy) >= 30) return
-		if (dx > 50) prev()
-		else if (dx < -50) next()
-	}
-	const onTouchCancel = () => {
-		touchStartX.current = null
-		touchStartYRef.current = null
-	}
 
 	const caption = captionFromName(item.name)
 	const downloadHref = `/api/memory/${item.uuid}?variant=image`
@@ -131,7 +111,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 									{idx + 1} / {items.length}
 								</Box>
 								<IconButton asChild variant="ghost" size="sm" aria-label="Descargar">
-									<a href={downloadHref} download target="_blank" rel="noopener">
+									<a href={downloadHref} download target="_blank" rel="noopener noreferrer">
 										<Download size={18} aria-hidden />
 									</a>
 								</IconButton>
@@ -143,110 +123,137 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 							</HStack>
 						</HStack>
 
-						<Box
+						<Carousel.Root
+							slideCount={items.length}
+							page={idx}
+							onPageChange={({ page }) => setIdx(page)}
+							slidesPerPage={1}
+							loop={false}
+							allowMouseDrag
+							snapType="mandatory"
 							flex={1}
-							position="relative"
 							display="flex"
-							alignItems="center"
-							justifyContent="center"
-							px={3}
-							overflow="hidden"
-							onTouchStart={onTouchStart}
-							onTouchEnd={onTouchEnd}
-							onTouchCancel={onTouchCancel}
+							flexDirection="column"
+							minH={0}
 						>
-							{item.kind === 'video' ? (
-								<video
-									key={item.uuid}
-									src={`/api/memory/${item.uuid}?variant=stream`}
-									poster={`/api/memory/${item.uuid}?variant=poster`}
-									controls
-									autoPlay
-									style={{
-										maxWidth: '100%',
-										maxHeight: '100%',
-										objectFit: 'contain',
-										borderRadius: '2px',
-										background: '#000',
-									}}
-								>
-									<track kind="captions" />
-								</video>
-							) : (
-								<Image
-									key={item.uuid}
-									src={`/api/memory/${item.uuid}?variant=image`}
-									alt={caption || 'Recuerdo'}
-									maxW="full"
-									maxH="full"
-									objectFit="contain"
-									borderRadius="2px"
-									bg="black"
-								/>
-							)}
+							<Box flex={1} position="relative" minH={0}>
+								<Carousel.ItemGroup h="full">
+									{items.map((it, i) => (
+										<Carousel.Item
+											key={it.uuid}
+											index={i}
+											display="flex"
+											alignItems="center"
+											justifyContent="center"
+											px={3}
+											h="full"
+										>
+											{it.kind === 'video' ? (
+												<video
+													src={`/api/memory/${it.uuid}?variant=stream`}
+													poster={`/api/memory/${it.uuid}?variant=poster`}
+													controls
+													autoPlay={i === idx}
+													preload={i === idx ? 'metadata' : 'none'}
+													style={{
+														maxWidth: '100%',
+														maxHeight: '100%',
+														objectFit: 'contain',
+														borderRadius: '2px',
+														background: '#000',
+													}}
+												>
+													<track kind="captions" />
+												</video>
+											) : (
+												<Image
+													src={`/api/memory/${it.uuid}?variant=image`}
+													alt={captionFromName(it.name) || 'Recuerdo'}
+													maxW="full"
+													maxH="full"
+													objectFit="contain"
+													borderRadius="2px"
+													bg="black"
+													draggable={false}
+												/>
+											)}
+										</Carousel.Item>
+									))}
+								</Carousel.ItemGroup>
 
-							{idx > 0 && (
-								<IconButton
-									position="absolute"
-									left={3.5}
-									top="50%"
-									transform="translateY(-50%)"
-									w="44px"
-									h="44px"
-									minW="44px"
-									borderRadius="full"
-									bg="whiteAlpha.100"
-									color="white"
-									_hover={{ bg: 'whiteAlpha.300' }}
-									display={{ base: 'none', md: 'inline-flex' }}
-									onClick={prev}
-									aria-label="Anterior"
-								>
-									<ChevronLeft size={20} aria-hidden />
-								</IconButton>
-							)}
-							{idx < items.length - 1 && (
-								<IconButton
-									position="absolute"
-									right={3.5}
-									top="50%"
-									transform="translateY(-50%)"
-									w="44px"
-									h="44px"
-									minW="44px"
-									borderRadius="full"
-									bg="whiteAlpha.100"
-									color="white"
-									_hover={{ bg: 'whiteAlpha.300' }}
-									display={{ base: 'none', md: 'inline-flex' }}
-									onClick={next}
-									aria-label="Siguiente"
-								>
-									<ChevronRight size={20} aria-hidden />
-								</IconButton>
-							)}
-						</Box>
-
-						<VStack gap={2.5} px={4.5} py={5} color="whiteAlpha.85" textAlign="center">
-							{caption && (
-								<Text fontFamily="handwriting" fontSize="22px" fontWeight={500} m={0}>
-									{caption}
-								</Text>
-							)}
-							<HStack gap={1.5} role="tablist" aria-label="Recuerdos del año">
-								{items.map((it, i) => (
-									<Box
-										key={it.uuid}
-										w="6px"
-										h="6px"
+								<Carousel.PrevTrigger asChild>
+									<IconButton
+										position="absolute"
+										left={3.5}
+										top="50%"
+										transform="translateY(-50%)"
+										w="44px"
+										h="44px"
+										minW="44px"
 										borderRadius="full"
-										bg={i === idx ? 'accent.500' : 'whiteAlpha.300'}
-										transform={i === idx ? 'scale(1.3)' : undefined}
-										transition="background 0.15s, transform 0.15s"
-									/>
-								))}
-							</HStack>
-						</VStack>
+										bg="whiteAlpha.100"
+										color="white"
+										_hover={{ bg: 'whiteAlpha.300' }}
+										_disabled={{ opacity: 0, pointerEvents: 'none' }}
+										display={{ base: 'none', md: 'inline-flex' }}
+										aria-label="Anterior"
+									>
+										<ChevronLeft size={20} aria-hidden />
+									</IconButton>
+								</Carousel.PrevTrigger>
+								<Carousel.NextTrigger asChild>
+									<IconButton
+										position="absolute"
+										right={3.5}
+										top="50%"
+										transform="translateY(-50%)"
+										w="44px"
+										h="44px"
+										minW="44px"
+										borderRadius="full"
+										bg="whiteAlpha.100"
+										color="white"
+										_hover={{ bg: 'whiteAlpha.300' }}
+										_disabled={{ opacity: 0, pointerEvents: 'none' }}
+										display={{ base: 'none', md: 'inline-flex' }}
+										aria-label="Siguiente"
+									>
+										<ChevronRight size={20} aria-hidden />
+									</IconButton>
+								</Carousel.NextTrigger>
+							</Box>
+
+							<VStack gap={2.5} px={4.5} py={5} color="whiteAlpha.85" textAlign="center">
+								{caption && (
+									<Text fontFamily="handwriting" fontSize="22px" fontWeight={500} m={0}>
+										{caption}
+									</Text>
+								)}
+								<Carousel.IndicatorGroup gap={1.5}>
+									{items.map((it, i) => (
+										<Carousel.Indicator
+											key={it.uuid}
+											index={i}
+											aria-label={`Ir al recuerdo ${i + 1}`}
+											css={{
+												width: '6px',
+												height: '6px',
+												borderRadius: '9999px',
+												background: 'var(--chakra-colors-whiteAlpha-300)',
+												border: 0,
+												padding: 0,
+												cursor: 'pointer',
+												transition: 'background 0.15s, transform 0.15s',
+												'&[data-current]': {
+													background: 'var(--chakra-colors-accent-500)',
+													transform: 'scale(1.3)',
+												},
+											}}
+										/>
+									))}
+								</Carousel.IndicatorGroup>
+							</VStack>
+						</Carousel.Root>
 					</Dialog.Content>
 				</Dialog.Positioner>
 			</Portal>
