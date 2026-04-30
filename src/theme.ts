@@ -38,9 +38,6 @@ const config = defineConfig({
 				heading: {
 					value: "'Fraunces', 'Newsreader', Georgia, serif",
 				},
-				mono: {
-					value: "'JetBrains Mono', ui-monospace, monospace",
-				},
 				handwriting: {
 					value: "'Caveat', 'Patrick Hand', cursive",
 				},
