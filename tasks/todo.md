@@ -113,12 +113,11 @@ See `tasks/plan.md` for full context. All open questions resolved (OpenCage, man
 
 **Verified:** 176/176 pnpm test, type-check, format:check, build all green; lint on 4 changed files: 0/0.
 
-## Slice 7 — Lightbox header
+## Slice 7 — Lightbox header — `9c3d516`
 
-- [ ] In `src/components/Lightbox.tsx` header `HStack`:
-  - [ ] After the `yearsAgoLowercase` span, render `· {item.place}` only when `item.place` is non-null. Use the same mono caps styling as the surrounding text.
-- [ ] `alt={item.name}` stays unchanged for a11y.
-- [ ] Manual smoke: open lightbox on a GPS'd item then on a non-GPS'd item; both layouts intact.
+- [x] After `yearsAgoLowercase`, render `·` + `{item.place}` only when non-null, mono-caps styling matching the surrounding spans.
+- [x] `alt={item.name}` unchanged.
+- [ ] Manual smoke pending Checkpoint D.
 
 ## Checkpoint D — End-to-end
 
