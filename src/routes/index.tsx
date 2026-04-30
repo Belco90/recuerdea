@@ -1,6 +1,7 @@
 import type { MemoryItem } from '#/lib/pcloud.server'
 
 import { AdminDateOverride } from '#/components/AdminDateOverride'
+import { AppShell } from '#/components/AppShell'
 import { MemoryView } from '#/components/MemoryView'
 import { getServerUser } from '#/lib/auth'
 import { formatCaptureDate } from '#/lib/date'
@@ -69,29 +70,31 @@ function Home() {
 		: 'No memories on this day.'
 
 	return (
-		<Box p={8}>
-			<Heading size="2xl">Welcome back</Heading>
-			<Text mt={4} fontSize="lg">
-				Signed in as {finalUser.email}
-			</Text>
-
-			{isAdmin && <AdminDateOverride activeDate={activeDate} />}
-
-			{memories.length === 0 ? (
-				<Text mt={6} fontSize="md">
-					{emptyMessage}
+		<AppShell>
+			<Box p={8}>
+				<Heading size="2xl">Welcome back</Heading>
+				<Text mt={4} fontSize="lg">
+					Signed in as {finalUser.email}
 				</Text>
-			) : (
-				<Stack mt={6} gap={8}>
-					{memories.map((item) => (
-						<MemoryView key={memoryKey(item)} item={item} />
-					))}
-				</Stack>
-			)}
 
-			<Button mt={6} onClick={() => void logout()}>
-				Sign out
-			</Button>
-		</Box>
+				{isAdmin && <AdminDateOverride activeDate={activeDate} />}
+
+				{memories.length === 0 ? (
+					<Text mt={6} fontSize="md">
+						{emptyMessage}
+					</Text>
+				) : (
+					<Stack mt={6} gap={8}>
+						{memories.map((item) => (
+							<MemoryView key={memoryKey(item)} item={item} />
+						))}
+					</Stack>
+				)}
+
+				<Button mt={6} onClick={() => void logout()}>
+					Sign out
+				</Button>
+			</Box>
+		</AppShell>
 	)
 }

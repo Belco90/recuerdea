@@ -1,5 +1,6 @@
 import type { SubmitEventHandler } from 'react'
 
+import { AppShell } from '#/components/AppShell'
 import { getServerUser } from '#/lib/auth'
 import { Box, Button, Field, Heading, Input, Text, VStack } from '@chakra-ui/react'
 import { acceptInvite, handleAuthCallback, login, updateUser } from '@netlify/identity'
@@ -75,45 +76,47 @@ function LoginPage() {
 		mode === 'login' ? 'Sign in' : mode === 'invite' ? 'Accept invitation' : 'Set new password'
 
 	return (
-		<Box minH="100vh" display="flex" alignItems="center" justifyContent="center" p={4}>
-			<Box w="full" maxW="360px">
-				<VStack gap={6} align="stretch">
-					<Heading size="xl" textAlign="center">
-						{title}
-					</Heading>
+		<AppShell>
+			<Box minH="100vh" display="flex" alignItems="center" justifyContent="center" p={4}>
+				<Box w="full" maxW="360px">
+					<VStack gap={6} align="stretch">
+						<Heading size="xl" textAlign="center">
+							{title}
+						</Heading>
 
-					<form onSubmit={handleSubmit}>
-						<VStack gap={4} align="stretch">
-							{mode === 'login' && (
+						<form onSubmit={handleSubmit}>
+							<VStack gap={4} align="stretch">
+								{mode === 'login' && (
+									<Field.Root>
+										<Field.Label>Email</Field.Label>
+										<Input type="email" name="email" required autoComplete="email" />
+									</Field.Root>
+								)}
+
 								<Field.Root>
-									<Field.Label>Email</Field.Label>
-									<Input type="email" name="email" required autoComplete="email" />
+									<Field.Label>{mode === 'login' ? 'Password' : 'Choose a password'}</Field.Label>
+									<Input
+										type="password"
+										name="password"
+										required
+										autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+									/>
 								</Field.Root>
-							)}
 
-							<Field.Root>
-								<Field.Label>{mode === 'login' ? 'Password' : 'Choose a password'}</Field.Label>
-								<Input
-									type="password"
-									name="password"
-									required
-									autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-								/>
-							</Field.Root>
+								{error && (
+									<Text color="red.500" fontSize="sm">
+										{error}
+									</Text>
+								)}
 
-							{error && (
-								<Text color="red.500" fontSize="sm">
-									{error}
-								</Text>
-							)}
-
-							<Button type="submit" loading={loading} width="full">
-								{title}
-							</Button>
-						</VStack>
-					</form>
-				</VStack>
+								<Button type="submit" loading={loading} width="full">
+									{title}
+								</Button>
+							</VStack>
+						</form>
+					</VStack>
+				</Box>
 			</Box>
-		</Box>
+		</AppShell>
 	)
 }
