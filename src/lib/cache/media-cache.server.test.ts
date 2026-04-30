@@ -19,6 +19,8 @@ const sample: CachedMedia = {
 	captureDate: '2019-04-28T12:00:00.000Z',
 	width: 4032,
 	height: 3024,
+	location: null,
+	place: null,
 }
 
 describe('getMediaCacheStore', () => {

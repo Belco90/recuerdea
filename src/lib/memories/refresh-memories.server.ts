@@ -14,9 +14,10 @@ type FileMeta = {
 	captureDate: Date | null
 	width: number | null
 	height: number | null
+	location: { lat: number; lng: number } | null
 }
 
-const EMPTY_META: FileMeta = { captureDate: null, width: null, height: null }
+const EMPTY_META: FileMeta = { captureDate: null, width: null, height: null, location: null }
 
 function isMediaFile(item: FileMetadata | FolderMetadata): item is FileMetadata {
 	if (item.isfolder) return false
@@ -39,6 +40,7 @@ async function extractFileMeta(client: Client, file: FileMetadata): Promise<File
 			captureDate: meta.captureDate ?? parseFilenameCaptureDate(file.name) ?? null,
 			width: meta.width,
 			height: meta.height,
+			location: meta.location,
 		}
 	} catch {
 		return EMPTY_META
@@ -71,6 +73,8 @@ function fileToCachedMedia(file: FileMetadata, publink: Publink, meta: FileMeta)
 		captureDate: meta.captureDate ? meta.captureDate.toISOString() : null,
 		width: meta.width,
 		height: meta.height,
+		location: meta.location,
+		place: null,
 	}
 }
 

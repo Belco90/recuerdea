@@ -50,6 +50,8 @@ const imageA: CachedMedia = {
 	captureDate: '2024-04-27T14:30:00.000Z',
 	width: 4032,
 	height: 3024,
+	location: null,
+	place: null,
 }
 
 const imageB: CachedMedia = {
@@ -63,6 +65,8 @@ const imageB: CachedMedia = {
 	captureDate: '2024-06-15T09:00:00.000Z',
 	width: null,
 	height: null,
+	location: null,
+	place: null,
 }
 
 const videoC: CachedMedia = {
@@ -76,6 +80,8 @@ const videoC: CachedMedia = {
 	captureDate: '2018-04-27T10:00:00.000Z',
 	width: 1920,
 	height: 1080,
+	location: null,
+	place: null,
 }
 
 const undatedD: CachedMedia = {
@@ -89,6 +95,8 @@ const undatedD: CachedMedia = {
 	captureDate: null,
 	width: null,
 	height: null,
+	location: null,
+	place: null,
 }
 
 beforeEach(() => {

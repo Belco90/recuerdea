@@ -9,6 +9,8 @@ export type CachedMedia = {
 	captureDate: string | null
 	width: number | null
 	height: number | null
+	location: { lat: number; lng: number } | null
+	place: string | null
 }
 
 export type MediaCacheStore = {

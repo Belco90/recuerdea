@@ -19,6 +19,8 @@ const imageMeta: CachedMedia = {
 	captureDate: '2020-04-27T10:00:00.000Z',
 	width: 4032,
 	height: 3024,
+	location: null,
+	place: null,
 }
 
 const videoMeta: CachedMedia = {
@@ -32,6 +34,8 @@ const videoMeta: CachedMedia = {
 	captureDate: '2018-04-27T10:00:00.000Z',
 	width: 1920,
 	height: 1080,
+	location: null,
+	place: null,
 }
 
 function makeMediaCache(entries: Record<string, CachedMedia> = {}): MediaCache {

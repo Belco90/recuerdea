@@ -177,6 +177,8 @@ describe('refreshMemories', () => {
 			captureDate: '2020-01-15T10:00:00.000Z',
 			width: 4032,
 			height: 3024,
+			location: null,
+			place: null,
 		})
 		expect(fileidStore.set).toHaveBeenCalledWith(100, { uuid })
 		expect(folderStore.set).toHaveBeenCalledTimes(1)
@@ -199,6 +201,8 @@ describe('refreshMemories', () => {
 			captureDate: '2020-01-15T10:00:00.000Z',
 			width: 4032,
 			height: 3024,
+			location: null,
+			place: null,
 		})
 		const client = fakeClient({ files: [jpegA] })
 
@@ -234,6 +238,8 @@ describe('refreshMemories', () => {
 			captureDate: '2018-01-01T00:00:00.000Z',
 			width: null,
 			height: null,
+			location: null,
+			place: null,
 		})
 		const client = fakeClient({ files: [jpegA] })
 		mockedExtractImageMeta.mockResolvedValueOnce({
@@ -306,6 +312,8 @@ describe('refreshMemories', () => {
 			captureDate: null,
 			width: null,
 			height: null,
+			location: null,
+			place: null,
 		})
 		const deleted: number[] = []
 		const client = fakeClient({
@@ -347,6 +355,8 @@ describe('refreshMemories', () => {
 			captureDate: null,
 			width: null,
 			height: null,
+			location: null,
+			place: null,
 		})
 		const client = fakeClient({
 			files: [],
@@ -366,6 +376,56 @@ describe('refreshMemories', () => {
 		expect(result.removed).toBe(1)
 		expect(mediaStore.delete).toHaveBeenCalledWith('stale-uuid')
 		expect(fileidStore.delete).toHaveBeenCalledWith(999)
+	})
+
+	it('persists location from the image extractor onto CachedMedia', async () => {
+		const mediaStore = makeMediaStore()
+		const fileidStore = makeFileidStore()
+		const folderStore = makeFolderStore()
+		const client = fakeClient({ files: [jpegA] })
+		mockedExtractImageMeta.mockResolvedValueOnce({
+			captureDate: new Date('2020-01-15T10:00:00Z'),
+			width: 4032,
+			height: 3024,
+			location: { lat: 40.4168, lng: -3.7038 },
+		})
+
+		await refreshMemories(
+			client,
+			42,
+			createMediaCache(mediaStore),
+			createFileidIndex(fileidStore),
+			createFolderCache(folderStore),
+		)
+
+		const [, meta] = mediaStore.set.mock.calls[0]!
+		expect(meta.location).toEqual({ lat: 40.4168, lng: -3.7038 })
+		expect(meta.place).toBeNull()
+	})
+
+	it('persists location from the video extractor onto CachedMedia', async () => {
+		const mediaStore = makeMediaStore()
+		const fileidStore = makeFileidStore()
+		const folderStore = makeFolderStore()
+		const client = fakeClient({ files: [mp4B] })
+		mockedExtractVideoMeta.mockResolvedValueOnce({
+			captureDate: new Date('2018-04-27T10:00:00Z'),
+			width: 1920,
+			height: 1080,
+			location: { lat: 38.7169, lng: -9.1399 },
+		})
+
+		await refreshMemories(
+			client,
+			42,
+			createMediaCache(mediaStore),
+			createFileidIndex(fileidStore),
+			createFolderCache(folderStore),
+		)
+
+		const [, meta] = mediaStore.set.mock.calls[0]!
+		expect(meta.location).toEqual({ lat: 38.7169, lng: -9.1399 })
+		expect(meta.place).toBeNull()
 	})
 
 	it('uses the video extractor for video files', async () => {
