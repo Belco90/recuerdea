@@ -8,13 +8,13 @@ Branch: `v6-location` (to create from `main`). PR target: `main`. Cron remains t
 
 ## Resolved decisions (locked in)
 
-| #   | Decision                   | Outcome                                                                                                                                                                                               |
-| --- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Q1  | Reverse geocoding provider | **OpenCage Data API** (`https://api.opencagedata.com/geocode/v1/json`). Free tier: 2,500 req/day, 1 req/sec. Reads API key from `OPENCAGE_API_KEY` Netlify env var. Spanish output via `language=es`. |
-| Q2  | Cache migration            | **Clear Blobs manually before deploy.** No `schemaVersion` field. The cron rebuilds every entry on its first post-deploy run. (Slice 4 dropped vs the prior draft.)                                   |
-| Q3  | UI fallback when no place  | Hide the caption entirely. No filename fallback, no "Sin ubicación" label.                                                                                                                            |
-| Q4  | Lightbox header            | Append place after the years-ago line (e.g. `2019 · hace 6 años · Madrid`). Hidden when null.                                                                                                         |
-| Q5  | Logging                    | **Never log any geo-derived data** — neither lat/lng, the OpenCage response, nor the resolved `place` string. Counts only (`[refresh] geocoded N/M`).                                                 |
+| #   | Decision                   | Outcome                                                                                                                                                                                                                                                                                                                                                                                              |
+| --- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Q1  | Reverse geocoding provider | **OpenCage Data API** (`https://api.opencagedata.com/geocode/v1/json`). Free tier: 2,500 req/day, 1 req/sec. Reads API key from `OPENCAGE_API_KEY` Netlify env var. Spanish output via `language=es`. **Implementation refined per the official `opencage-skills` guidance** (raw fetch, status.code in body authoritative, comma-separated reverse query, distinct error categories — see Slice 4). |
+| Q2  | Cache migration            | **Clear Blobs manually before deploy.** No `schemaVersion` field. The cron rebuilds every entry on its first post-deploy run. (Slice 4 dropped vs the prior draft.)                                                                                                                                                                                                                                  |
+| Q3  | UI fallback when no place  | Hide the caption entirely. No filename fallback, no "Sin ubicación" label.                                                                                                                                                                                                                                                                                                                           |
+| Q4  | Lightbox header            | Append place after the years-ago line (e.g. `2019 · hace 6 años · Madrid`). Hidden when null.                                                                                                                                                                                                                                                                                                        |
+| Q5  | Logging                    | **Never log any geo-derived data** — neither lat/lng, the OpenCage response, nor the resolved `place` string. Counts only (`[refresh] geocoded N/M`).                                                                                                                                                                                                                                                |
 
 ## Confirmed assumptions
 
@@ -105,29 +105,46 @@ Bottom-up build order: extractors → cache shape → geocoder → cron orchestr
 
 ### Phase 3 — Reverse geocoding (OpenCage)
 
-- **Slice 4: OpenCage client**
+- **Slice 4: OpenCage client (refined per the official OpenCage skill)**
   - New file: `src/lib/media-meta/opencage.server.ts`.
-  - Export `reverseGeocode({ lat, lng }, { apiKey, signal? }): Promise<string | null>`.
-  - URL: `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lng}&key=${apiKey}&language=es&no_annotations=1&limit=1`.
-  - Parse `results[0].components`. Display string preference order:
-    `city || town || village || municipality || county || state` then append `, ${country}` if present and not already a duplicate.
-    Fall back to `results[0].formatted` if no useful component exists. Fall back to `null` if no results.
-  - Treat 401 / 402 / 429 / 5xx / network errors / malformed JSON as `null` (no throw).
-  - **Never log** request URL, response body, lat/lng, or returned string. Only log a category on failure (`auth | quota | server | network`) and a count on success.
-  - Tests in `opencage.server.test.ts`:
-    - mocked OK → returns "City, Country".
-    - prefers town when no city.
-    - falls back to `formatted` when no useful component.
-    - 4xx/5xx → `null`.
-    - fetch throws → `null`.
-    - request URL has correct query params + key + `language=es`.
-    - on success/failure, no `console.log/info/warn/error` is called with the response or coords.
+  - Export `reverseGeocode({ lat, lng }, { apiKey, signal? }): Promise<Result>` where `Result = { ok: true; place: string | null } | { ok: false; reason: 'auth' | 'suspended' | 'quota' | 'ratelimit' | 'server' | 'network' | 'parse' }`.
+  - **Stay on raw `fetch`** rather than adding the `opencage-api-client` SDK. Consistent with `exif.ts` / `video-meta.ts` / `memory-route.server.ts`, and avoids the "ask first" dep gate per spec §7.
+  - URL: `https://api.opencagedata.com/geocode/v1/json?key=${apiKey}&q=${encodeURIComponent(lat + ',' + lng)}&language=es&no_annotations=1&limit=1` — comma-separated reverse query per the OpenCage spec, properly encoded (the comma becomes `%2C`).
+  - **Trust the body's `status.code` over the HTTP code** — the OpenCage skill explicitly notes that some proxies can obscure HTTP status. Pseudocode:
+    1. `await fetch(url, { signal, headers: { Accept: 'application/json' } })` → `network` on reject.
+    2. Try `await res.json()` → `parse` on throw.
+    3. Read `data?.status?.code` (fall back to `res.status`).
+    4. Map: 200 → process; 401 → auth; 402 → quota; 403 → suspended; 429 → ratelimit; 5xx → server; anything else → server.
+    5. On 200: `total_results === 0 || results.length === 0` → `{ ok: true, place: null }`.
+  - Component preference (apply optional chaining throughout — the skill warns that none of these fields are guaranteed):
+    `components.city ?? components.town ?? components.village ?? components.municipality ?? components.county ?? components.state ?? null`.
+    If non-null and `components.country` exists and the head doesn't already end with the country, return `${head}, ${country}`. Else return `head`. If all are null, fall back to `results[0].formatted ?? null`.
+  - **Never log** request URL, response body, `place` value, lat, lng, or `status.message`. The cron caller logs counts and reasons only. Aborting via `signal` is safe — no timer left dangling on cancel.
+  - Tests in `opencage.server.test.ts` (mock `globalThis.fetch`):
+    - request URL: contains `q=${encodeURIComponent('40.4,-3.7')}` (comma, encoded), `key`, `language=es`, `no_annotations=1`, `limit=1`. Lat/lng come from inputs, not test keys.
+    - status.code 200 + `components.city` + `components.country` → `{ ok: true, place: 'Madrid, España' }`.
+    - prefers `town` when no `city`.
+    - prefers `village` over nothing-else.
+    - falls back to `formatted` when none of city/town/village/municipality/county/state are present.
+    - status.code 200, `total_results: 0` → `{ ok: true, place: null }`.
+    - status.code 200, `results: []` → `{ ok: true, place: null }`.
+    - body says `status.code: 402` even on HTTP 200 → `{ ok: false, reason: 'quota' }` (proxy-obscured case).
+    - HTTP 401 → `{ ok: false, reason: 'auth' }`.
+    - HTTP 402 → `{ ok: false, reason: 'quota' }`.
+    - HTTP 403 → `{ ok: false, reason: 'suspended' }`.
+    - HTTP 429 → `{ ok: false, reason: 'ratelimit' }`.
+    - HTTP 503 → `{ ok: false, reason: 'server' }`.
+    - fetch rejects → `{ ok: false, reason: 'network' }`.
+    - non-JSON response → `{ ok: false, reason: 'parse' }`.
+    - on every above path: assert `console.log/info/warn/error` is never called with `place`, lat, lng, response body, or `status.message`. Spy on each console method and assert via `expect.not.stringMatching`.
 
 - **Slice 5: Wire OpenCage into `refresh-memories.server.ts`**
   - After `processFile` writes the per-uuid entry, if `location !== null && place === null`, call `reverseGeocode` and `mediaCache.remember` again with `place` set.
   - Run geocode calls **sequentially** at the cron level (not per-file `Promise.all`). Spacing ≥1100ms between consecutive calls (1 req/sec is OpenCage's free-tier ceiling; small headroom).
-  - Per-cron cap: env-configurable, default 200; remaining items stay `place: null` and pick up on the next run.
-  - Logs (counts only): `[refresh] geocoded N (capped at K)` and `[refresh] geocode failures: { auth: x, quota: y, server: z, network: w }`. **Zero** log lines containing the cached place string or coordinates.
+  - Per-cron cap: env-configurable (`RECUERDEA_GEOCODE_MAX_PER_RUN`), default 200; remaining items stay `place: null` and pick up on the next run.
+  - On `quota` or `ratelimit` reason: **stop the geocode pass immediately** for the rest of this run (no point hammering the API once the quota's gone). Subsequent files keep `place: null`. The next cron run will retry.
+  - On `auth` or `suspended` reason: also stop and log a single warn — these don't fix themselves between calls.
+  - Logs (counts only): `[refresh] geocoded N (capped at K)` and `[refresh] geocode failures: { auth, suspended, quota, ratelimit, server, network, parse }`. **Zero** log lines containing the cached place string or coordinates.
   - Tests in `refresh-memories.server.test.ts`:
     - happy path: file with GPS → geocode called → entry remembered with `place`.
     - GPS missing → geocode not called.
