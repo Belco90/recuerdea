@@ -1,6 +1,6 @@
 import { Wordmark } from '#/components/Wordmark'
 import { useIdentity } from '#/lib/identity-context'
-import { Avatar, Box, Button, Container, HStack, Text } from '@chakra-ui/react'
+import { Avatar, Box, Container, HStack, IconButton, Text } from '@chakra-ui/react'
 import { Link, getRouteApi } from '@tanstack/react-router'
 import { LogOut } from 'lucide-react'
 
@@ -50,24 +50,19 @@ export function Topbar() {
 								{email}
 							</Text>
 						</HStack>
-						<Button
+						<IconButton
 							variant="outline"
 							size="sm"
 							borderRadius="full"
 							borderColor="line"
 							color="ink.muted"
 							bg="transparent"
-							px={{ base: 0, sm: 3 }}
-							w={{ base: 8, sm: 'auto' }}
 							_hover={{ color: 'ink', borderColor: 'ink.muted', bg: 'paper/70' }}
 							onClick={() => void logout()}
 							aria-label="Cerrar sesión"
 						>
 							<LogOut size={14} aria-hidden />
-							<Text as="span" display={{ base: 'none', sm: 'inline' }} ml={1.5}>
-								Cerrar sesión
-							</Text>
-						</Button>
+						</IconButton>
 					</HStack>
 				</HStack>
 			</Container>
