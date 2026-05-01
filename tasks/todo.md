@@ -11,7 +11,7 @@ Slice-by-slice checklist mirroring `plan.md`. Tick boxes as work lands. Each pha
   - [ ] Update `VARIANTS = ['thumb', 'stream', 'download'] as const`.
   - [ ] Update `CACHE_CONTROL`:
     - [ ] `thumb: 'private, max-age=86400, immutable'`
-    - [ ] `stream: 'private, max-age=60'` *(unchanged)*
+    - [ ] `stream: 'private, max-age=60'` _(unchanged)_
     - [ ] `download: 'private, max-age=0, no-store'`
   - [ ] Update `buildThumbUrl` to use `&size=640x640`.
   - [ ] Update `defaultVariant(kind)` to return `'thumb'` for image, `'stream'` for video.
@@ -66,7 +66,7 @@ Slice-by-slice checklist mirroring `plan.md`. Tick boxes as work lands. Each pha
 - [ ] `src/components/Lightbox.tsx`
   - [ ] Image carousel `<Image src>` → `?variant=thumb` (was `?variant=image`).
   - [ ] `<video poster>` → `?variant=thumb` (was `?variant=poster`).
-  - [ ] `<video src>` → `?variant=stream` *(unchanged)*.
+  - [ ] `<video src>` → `?variant=stream` _(unchanged)_.
   - [ ] `getDownloadHref(uuid)` → `?variant=download` (was `?variant=image`).
   - [ ] `<a download target="_blank" rel="noopener noreferrer">` markup unchanged.
 - [ ] Manual smoke:
