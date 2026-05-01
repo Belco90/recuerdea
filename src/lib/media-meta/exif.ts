@@ -6,11 +6,6 @@ import exifr from 'exifr'
 // eslint-disable-next-line import/no-named-as-default-member
 const { parse } = exifr
 
-// 64KB is enough for JPEG EXIF (which sits in APP1 near the start), but iPhone
-// HEIC files often place the EXIF item bytes deeper in `mdat`. 1MB covers the
-// vast majority of real-world HEIC and is still cheap on the cron path.
-const RANGE_HEADER = 'bytes=0-1048575'
-
 type ExifTags = {
 	DateTimeOriginal?: unknown
 	CreateDate?: unknown
@@ -63,7 +58,7 @@ export type ImageMeta = {
 const EMPTY: ImageMeta = { captureDate: null, width: null, height: null, location: null }
 
 export async function extractImageMeta(downloadUrl: string): Promise<ImageMeta> {
-	const res = await fetch(downloadUrl, { headers: { Range: RANGE_HEADER } })
+	const res = await fetch(downloadUrl)
 	if (!res.ok) return EMPTY
 	const buffer = await res.arrayBuffer()
 

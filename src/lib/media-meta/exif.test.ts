@@ -277,15 +277,13 @@ describe('extractImageMeta', () => {
 	})
 
 	describe('error handling', () => {
-		it('sends a 1MB Range header so HEIC EXIF past the first 64KB is reachable', async () => {
+		it('downloads the full image (no Range header) so EXIF past 1MB is still reachable', async () => {
 			mockOkResponse()
 			mockedParse.mockResolvedValue({ DateTimeOriginal: new Date() })
 
 			await extractImageMeta('https://x.test/a.jpg')
 
-			expect(fetchSpy).toHaveBeenCalledWith('https://x.test/a.jpg', {
-				headers: { Range: 'bytes=0-1048575' },
-			})
+			expect(fetchSpy).toHaveBeenCalledWith('https://x.test/a.jpg')
 		})
 
 		it('returns all-null when exifr returns undefined (no EXIF block)', async () => {
