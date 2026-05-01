@@ -102,12 +102,30 @@ describe('handleMemoryRequest', () => {
 		expect(res.status).toBe(400)
 	})
 
+	it('returns 400 for the removed image variant', async () => {
+		const res = await handleMemoryRequest(
+			makeRequest('image'),
+			VALID_UUID,
+			makeDeps({ entries: { [VALID_UUID]: imageMeta } }),
+		)
+		expect(res.status).toBe(400)
+	})
+
+	it('returns 400 for the removed poster variant', async () => {
+		const res = await handleMemoryRequest(
+			makeRequest('poster'),
+			VALID_UUID,
+			makeDeps({ entries: { [VALID_UUID]: videoMeta } }),
+		)
+		expect(res.status).toBe(400)
+	})
+
 	it('returns 404 when the uuid is not in the cache', async () => {
 		const res = await handleMemoryRequest(makeRequest(), VALID_UUID, makeDeps())
 		expect(res.status).toBe(404)
 	})
 
-	it('image (default for kind=image) → fetches getpubthumb URL and pipes bytes', async () => {
+	it('thumb (default for kind=image) → fetches getpubthumb URL at 640x640 and pipes bytes', async () => {
 		const fetchBytes = vi.fn<FetchBytes>(
 			async () =>
 				new Response('image-bytes', {
@@ -120,7 +138,7 @@ describe('handleMemoryRequest', () => {
 		const res = await handleMemoryRequest(makeRequest(), VALID_UUID, deps)
 
 		expect(fetchBytes).toHaveBeenCalledWith(
-			'https://eapi.pcloud.com/getpubthumb?code=IMG-CODE&size=2048x1024',
+			'https://eapi.pcloud.com/getpubthumb?code=IMG-CODE&size=640x640',
 			null,
 		)
 		expect(res.status).toBe(200)
@@ -132,14 +150,14 @@ describe('handleMemoryRequest', () => {
 		expect(await res.text()).toBe('image-bytes')
 	})
 
-	it('explicit variant=poster on a video → fetches getpubthumb', async () => {
+	it('explicit variant=thumb on a video → fetches getpubthumb at 640x640', async () => {
 		const fetchBytes = vi.fn<FetchBytes>(async () => new Response('poster', { status: 200 }))
 		const deps = makeDeps({ entries: { [VALID_UUID]: videoMeta }, fetchBytes })
 
-		const res = await handleMemoryRequest(makeRequest('poster'), VALID_UUID, deps)
+		const res = await handleMemoryRequest(makeRequest('thumb'), VALID_UUID, deps)
 
 		expect(fetchBytes).toHaveBeenCalledWith(
-			'https://eapi.pcloud.com/getpubthumb?code=VID-CODE&size=2048x1024',
+			'https://eapi.pcloud.com/getpubthumb?code=VID-CODE&size=640x640',
 			null,
 		)
 		expect(res.status).toBe(200)
@@ -204,7 +222,7 @@ describe('handleMemoryRequest', () => {
 		expect(await res.text()).toContain('network down')
 	})
 
-	it('encodes the code in the upstream URL (defense against odd characters)', async () => {
+	it('encodes the code in the upstream thumb URL (defense against odd characters)', async () => {
 		const odd: CachedMedia = { ...imageMeta, code: 'a/b c' }
 		const fetchBytes = vi.fn<FetchBytes>(async () => new Response('ok', { status: 200 }))
 		const deps = makeDeps({ entries: { [VALID_UUID]: odd }, fetchBytes })
@@ -212,8 +230,108 @@ describe('handleMemoryRequest', () => {
 		await handleMemoryRequest(makeRequest(), VALID_UUID, deps)
 
 		expect(fetchBytes).toHaveBeenCalledWith(
-			'https://eapi.pcloud.com/getpubthumb?code=a%2Fb%20c&size=2048x1024',
+			'https://eapi.pcloud.com/getpubthumb?code=a%2Fb%20c&size=640x640',
 			null,
 		)
+	})
+
+	it('download (image) → resolves CDN URL, ignores Range, returns 200 with attachment', async () => {
+		const resolveStreamUrl = vi.fn<ResolveStreamUrl>(
+			async (code) => `https://e1.pcloud.com/dl/${code}`,
+		)
+		const fetchBytes = vi.fn<FetchBytes>(
+			async () =>
+				new Response('original-bytes', {
+					status: 200,
+					headers: { 'content-length': '14', 'content-type': 'image/jpeg' },
+				}),
+		)
+		const deps = makeDeps({
+			entries: { [VALID_UUID]: imageMeta },
+			resolveStreamUrl,
+			fetchBytes,
+		})
+
+		const res = await handleMemoryRequest(makeRequest('download', 'bytes=0-100'), VALID_UUID, deps)
+
+		expect(resolveStreamUrl).toHaveBeenCalledWith('IMG-CODE')
+		// Range must NOT be forwarded for downloads.
+		expect(fetchBytes).toHaveBeenCalledWith('https://e1.pcloud.com/dl/IMG-CODE', null)
+		expect(res.status).toBe(200)
+		expect(res.headers.get('content-type')).toBe('image/jpeg')
+		const disposition = res.headers.get('content-disposition') ?? ''
+		expect(disposition).toContain('attachment')
+		expect(disposition).toContain("filename*=UTF-8''a.jpg")
+		expect(disposition).toContain('filename="a.jpg"')
+		expect(res.headers.get('cache-control')).toContain('no-store')
+		expect(res.headers.get('location')).toBeNull()
+	})
+
+	it('download (video) → resolves CDN URL, returns 200 with attachment disposition', async () => {
+		const resolveStreamUrl = vi.fn<ResolveStreamUrl>(
+			async (code) => `https://e1.pcloud.com/dl/${code}`,
+		)
+		const fetchBytes = vi.fn<FetchBytes>(
+			async () =>
+				new Response('mp4-bytes', {
+					status: 200,
+					headers: { 'content-length': '9', 'content-type': 'video/mp4' },
+				}),
+		)
+		const deps = makeDeps({
+			entries: { [VALID_UUID]: videoMeta },
+			resolveStreamUrl,
+			fetchBytes,
+		})
+
+		const res = await handleMemoryRequest(makeRequest('download'), VALID_UUID, deps)
+
+		expect(resolveStreamUrl).toHaveBeenCalledWith('VID-CODE')
+		expect(fetchBytes).toHaveBeenCalledWith('https://e1.pcloud.com/dl/VID-CODE', null)
+		expect(res.status).toBe(200)
+		expect(res.headers.get('content-type')).toBe('video/mp4')
+		const disposition = res.headers.get('content-disposition') ?? ''
+		expect(disposition).toContain('attachment')
+		expect(disposition).toContain("filename*=UTF-8''b.mp4")
+		expect(res.headers.get('cache-control')).toContain('no-store')
+	})
+
+	it('download → encodes accents, spaces and emoji per RFC 5987 with ASCII fallback', async () => {
+		const tricky: CachedMedia = { ...imageMeta, name: 'café 🌅 día.jpg' }
+		const deps = makeDeps({ entries: { [VALID_UUID]: tricky } })
+
+		const res = await handleMemoryRequest(makeRequest('download'), VALID_UUID, deps)
+
+		const disposition = res.headers.get('content-disposition') ?? ''
+		expect(disposition).toContain('attachment')
+		// RFC 5987 percent-encoded UTF-8 form keeps the original characters intact.
+		expect(disposition).toContain(`filename*=UTF-8''${encodeURIComponent('café 🌅 día.jpg')}`)
+		// ASCII fallback strips the non-ASCII bytes — must remain a quoted string.
+		const asciiFallback = disposition.match(/filename="([^"]*)"/)?.[1]
+		expect(asciiFallback).toBeTruthy()
+		expect(asciiFallback).toMatch(/^[\x20-\x7e]*$/)
+		expect(asciiFallback).not.toContain('"')
+	})
+
+	it('download → forces 200 even if upstream returns 206 with content-range', async () => {
+		const fetchBytes = vi.fn<FetchBytes>(
+			async () =>
+				new Response('partial', {
+					status: 206,
+					headers: {
+						'content-length': '7',
+						'content-range': 'bytes 0-6/100',
+					},
+				}),
+		)
+		const deps = makeDeps({
+			entries: { [VALID_UUID]: imageMeta },
+			fetchBytes,
+		})
+
+		const res = await handleMemoryRequest(makeRequest('download', 'bytes=0-6'), VALID_UUID, deps)
+
+		expect(res.status).toBe(200)
+		expect(res.headers.get('content-range')).toBeNull()
 	})
 })
