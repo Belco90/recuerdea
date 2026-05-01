@@ -18,7 +18,7 @@ function yearsAgoLowercase(n: number): string {
 }
 
 function getDownloadHref(itemId: string): string {
-	return `/api/memory/${itemId}?variant=image`
+	return `/api/memory/${itemId}?variant=download`
 }
 
 export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
@@ -141,7 +141,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 										{it.kind === 'video' ? (
 											<video
 												src={`/api/memory/${it.uuid}?variant=stream`}
-												poster={`/api/memory/${it.uuid}?variant=poster`}
+												poster={`/api/memory/${it.uuid}?variant=thumb`}
 												controls
 												autoPlay={i === idx}
 												preload={i === idx ? 'metadata' : 'none'}
@@ -157,7 +157,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 											</video>
 										) : (
 											<Image
-												src={`/api/memory/${it.uuid}?variant=image`}
+												src={`/api/memory/${it.uuid}?variant=thumb`}
 												alt={it.name || 'Recuerdo'}
 												maxW="full"
 												maxH="full"

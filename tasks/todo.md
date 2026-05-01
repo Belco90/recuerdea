@@ -1,178 +1,105 @@
-# Recuerdea v6 — Task list (location-as-caption)
+# v7 — Smaller media thumbs + true-original download — todo
 
-See `tasks/plan.md` for full context. All open questions resolved (OpenCage, manual Blobs clear, hide caption when no place, lightbox appends place, never log geo data).
+Slice-by-slice checklist mirroring `plan.md`. Tick boxes as work lands. Each phase ends with an explicit checkpoint.
 
-## Pre-flight
+## Phase 1 — Backend: replace variants
 
-- [ ] Sign up for OpenCage Data, generate an API key on the free tier.
-- [ ] Add `OPENCAGE_API_KEY` to Netlify env (deploy-preview scope first; production on merge).
-- [x] Create branch `v6-location` from `main`.
+### Task 1 — Reshape `MediaVariant` → `'thumb' | 'stream' | 'download'`
 
-## Slice 1 — Image GPS via `exifr` — `62c468c`
+- [ ] `src/lib/memories/memory-route.server.ts`
+  - [ ] Update `MediaVariant` type: `'thumb' | 'stream' | 'download'`.
+  - [ ] Update `VARIANTS = ['thumb', 'stream', 'download'] as const`.
+  - [ ] Update `CACHE_CONTROL`:
+    - [ ] `thumb: 'private, max-age=86400, immutable'`
+    - [ ] `stream: 'private, max-age=60'` _(unchanged)_
+    - [ ] `download: 'private, max-age=0, no-store'`
+  - [ ] Update `buildThumbUrl` to use `&size=640x640`.
+  - [ ] Update `defaultVariant(kind)` to return `'thumb'` for image, `'stream'` for video.
+  - [ ] In `handleMemoryRequest`:
+    - [ ] `variant === 'thumb'` → `buildThumbUrl(meta.code)` + `streamFromUpstream` with the request `Range` forwarded (current behaviour for image/poster).
+    - [ ] `variant === 'stream'` → unchanged.
+    - [ ] `variant === 'download'`:
+      - [ ] Resolve URL via `resolveStreamUrl(meta.code)`.
+      - [ ] Call `fetchBytes(url, null)` (do **not** forward `Range`).
+      - [ ] Build the response with `Content-Disposition: attachment; filename*=UTF-8''<encodeURIComponent(meta.name)>; filename="<asciiFallback>"`.
+      - [ ] Force status `200`; do not propagate upstream `content-range`.
+- [ ] `src/lib/memories/memory-route.server.test.ts`
+  - [ ] Rewrite "image (default for kind=image) → fetches getpubthumb URL" → asserts `…&size=640x640`.
+  - [ ] Rewrite "explicit variant=poster on a video → fetches getpubthumb" → "explicit variant=thumb on a video → `…&size=640x640`".
+  - [ ] Update "encodes the code in the upstream URL" assertion to use `&size=640x640`.
+  - [ ] Add: `?variant=download` (image) → calls `resolveStreamUrl`; `fetchBytes` called with `null` for range; response has `Content-Disposition: attachment`, `cache-control: …no-store`, status 200.
+  - [ ] Add: `?variant=download` (video) → same flow.
+  - [ ] Add: filename encoding test (spaces / accents / emoji → RFC 5987 + ASCII fallback).
+  - [ ] Add: `?variant=download` ignores request `range: bytes=…` header.
+  - [ ] Add: `?variant=download` strips upstream 206 + `content-range` and returns 200.
+  - [ ] Add: `?variant=image` → 400; `?variant=poster` → 400.
+- [ ] `pnpm test src/lib/memories/memory-route.server.test.ts`
+- [ ] `pnpm type-check`
+- [ ] `pnpm lint`
 
-- [x] In `src/lib/media-meta/exif.ts`:
-  - [x] Extend `ImageMeta` with `location: { lat: number; lng: number } | null`.
-  - [x] Add `latitude`, `longitude` to `TAG_NAMES` and the `ExifTags` type.
-  - [x] Add `pickLocation(tags)` helper: both finite, lat ∈ [-90, 90], lng ∈ [-180, 180]; otherwise null.
-  - [x] Update `EMPTY` constant.
-- [x] Tests in `exif.test.ts`:
-  - [x] present → returns `{ lat, lng }`.
-  - [x] missing → null.
-  - [x] one of lat/lng missing → null.
-  - [x] NaN / out-of-range → null.
-  - [x] exifr throws → `location: null`, no exception.
+### Checkpoint A — backend
 
-**Verified:** `pnpm test` (130/130), `pnpm type-check`, `pnpm format:check`, `pnpm build` all green. Lint on the three changed files: 0/0.
+- [ ] `pnpm test`
+- [ ] `pnpm type-check`
+- [ ] `pnpm lint`
+- [ ] `pnpm build`, then delete `dist/` + `.netlify/` cache (per SPEC §7).
+- [ ] Manual curl on `pnpm dev`:
+  - [ ] `?variant=thumb` → 200, image/jpeg, content-length much smaller than today's `?variant=image` baseline (capture for PR).
+  - [ ] `?variant=download` → 200, `content-disposition: attachment`, `cache-control: …no-store`.
+  - [ ] `?variant=image` → 400.
+  - [ ] `?variant=poster` → 400.
 
-## Slice 2 — Video GPS via `udta.©xyz` — `18dd94b`
+## Phase 2 — Frontend wiring
 
-- [x] In `src/lib/media-meta/video-meta.ts`:
-  - [x] Extend `VideoMeta` with `location: { lat: number; lng: number } | null`.
-  - [x] In `parseMoov`, call new `findUdtaXyz` walker.
-  - [x] `findUdtaXyz`: walks `moov` children for `udta`, then `udta` children for `©xyz` via a new `walkForCopyrightBox` (the existing `walkForBox` uses ASCII type matching, which can't represent `0xA9`).
-  - [x] `parseIso6709(string)`: regex per plan; reject non-finite or out-of-range.
-  - [x] Update `EMPTY` and `parseMoov` return value (`scanForMoov` reuses `parseMoov`).
-- [x] Tests in `video-meta.test.ts`:
-  - [x] synthetic mp4 with `moov.udta.©xyz` of `+40.4378-003.7036+660.000/` → ~Madrid.
-  - [x] without altitude (`+40.4378-003.7036/`) — also accepted.
-  - [x] mp4 without `udta` → location null.
-  - [x] mp4 with `udta` but no `©xyz` (other `©cmt` atom) → location null.
-  - [x] malformed payload → location null.
-  - [x] out-of-range latitude (`+91`) → location null.
-  - [x] moov-at-end fallback also reaches `udta`.
+### Task 2 — `Polaroid` uses `?variant=thumb`
 
-**Verified:** `pnpm test` (137/137), `pnpm type-check`, `pnpm build` all green. Lint on changed files: 0/0.
+- [ ] `src/components/Polaroid.tsx`
+  - [ ] Replace the `kind === 'video' ? '…?variant=poster' : '…?variant=image'` ternary with a single `\`/api/memory/${item.uuid}?variant=thumb\``.
+  - [ ] No other prop or layout changes.
+- [ ] Visual smoke on `pnpm dev`:
+  - [ ] Grid renders, aspect ratios still come from `width`/`height`.
+  - [ ] Video tiles still show the "VÍDEO" badge.
+  - [ ] Network panel: each tile is an order of magnitude lighter than `main`.
 
-## Checkpoint A — Extractors
+### Task 3 — `Lightbox` uses `?variant=thumb` for stills + posters; `?variant=download` for downloads
 
-- [ ] `pnpm test src/lib/media-meta` green.
-- [ ] `pnpm type-check` clean.
-- [ ] No extractor throws on any input shape.
+- [ ] `src/components/Lightbox.tsx`
+  - [ ] Image carousel `<Image src>` → `?variant=thumb` (was `?variant=image`).
+  - [ ] `<video poster>` → `?variant=thumb` (was `?variant=poster`).
+  - [ ] `<video src>` → `?variant=stream` _(unchanged)_.
+  - [ ] `getDownloadHref(uuid)` → `?variant=download` (was `?variant=image`).
+  - [ ] `<a download target="_blank" rel="noopener noreferrer">` markup unchanged.
+- [ ] Manual smoke:
+  - [ ] Lightbox image at fullscreen → readable from the thumb (mobile target).
+  - [ ] Lightbox video → poster from thumb, plays via stream.
+  - [ ] Download an image → original file lands (HEIC / large JPEG / PNG).
+  - [ ] Download a video → original MP4/MOV lands.
 
-## Slice 3 — Extend `CachedMedia` + cron writer — `6b75ea4`
+### Checkpoint B — preview
 
-- [x] In `src/lib/cache/media-cache.ts`: add `location: { lat: number; lng: number } | null` and `place: string | null` to `CachedMedia`.
-- [x] In `src/lib/memories/refresh-memories.server.ts`:
-  - [x] Extend `FileMeta` and `extractFileMeta` with `location`.
-  - [x] `fileToCachedMedia` writes `location` from extractor and `place: null`.
-- [x] Update existing `CachedMedia` literals in 5 test files: `media-cache.test.ts`, `media-cache.server.test.ts`, `pcloud.server.test.ts`, `memory-route.server.test.ts`, `refresh-memories.server.test.ts` (6 fixture sites).
-- [x] Add happy-path tests: file with GPS via image extractor → location persisted; same via video extractor.
+- [ ] PR opened from `v7-thumbs` → `main`.
+- [ ] Cron triggered once on the preview (sanity; no cache-shape change).
+- [ ] Smoke on the deploy-preview URL:
+  - [ ] Timeline loads fast; all `<img>` requests use `?variant=thumb`.
+  - [ ] No `<video>` element in the timeline DOM (DevTools → Elements).
+  - [ ] Lightbox swipe: only the active slide loads video bytes.
+  - [ ] Image + video downloads return originals with attachment disposition.
+  - [ ] No requests reference `?variant=image` or `?variant=poster`.
+- [ ] `curl -I https://<preview>.netlify.app/` → `Cache-Control: private` still set on the home HTML.
+- [ ] Lighthouse perf delta noted in the PR body.
 
-**Verified:** `pnpm test` (139/139), `pnpm type-check`, `pnpm format:check`, `pnpm build` all green. Lint on 7 changed files: 0/0.
+## Phase 3 — Ship
 
-## Checkpoint B — Cache shape ✅
+### Task 4 — Merge + prod smoke
 
-- [x] All previously-green tests still green after literal updates.
-- [x] Type errors are localized to intentional call sites only.
+- [ ] PR description includes before/after Network HAR weights for a representative day.
+- [ ] CI green (type-check, test, lint, format-check).
+- [ ] Reviewer signs off on visual diff at 1× and 2× DPR (mobile-first per Q1).
+- [ ] Merge to `main`. Production deploy completes.
+- [ ] Repeat Checkpoint B smoke on prod URL.
+- [ ] File a follow-up issue for the deferred unpic-img + Netlify Image CDN spike.
 
-## Slice 4 — OpenCage client (raw fetch, refined per official OpenCage skill) — `05d1835`
+## Open follow-ups (not in scope for v7)
 
-- [x] New file `src/lib/media-meta/opencage.server.ts`:
-  - [x] Signature: `reverseGeocode({ lat, lng }, { apiKey, signal? }) → ReverseGeocodeResult`.
-  - [x] URL via `URLSearchParams` — comma in `q` becomes `%2C` after encoding.
-  - [x] Authoritative status from `body.status.code`, fall back to `res.status`.
-  - [x] Status mapping: 200 → success, 401 → auth, 402 → quota, 403 → suspended, 429 → ratelimit, 5xx + unexpected → server.
-  - [x] Success path: `city ?? town ?? village ?? municipality ?? county ?? state`, append `, country` (deduped), fall back to `formatted`, then `null`.
-  - [x] Network reject → network. JSON parse throw → parse.
-  - [x] `Accept: application/json` header set. No User-Agent.
-  - [x] Zero `console.*` calls anywhere on this module's path.
-- [x] 25 tests in `opencage.server.test.ts` covering: URL shape (4), component preference (10), status mapping (8), and console hygiene (2).
-
-**Verified:** 164/164 pnpm test, type-check, format:check, build all green; lint on the two new files: 0/0.
-
-## Slice 5 — Wire OpenCage into the cron — `36fc4d2`
-
-- [x] `refreshMemories` accepts an optional `geocodeOpts: { apiKey, cap?, sleepMs?, sleep?, geocoder? }`. Defaults: cap 200, sleepMs 1100, real `setTimeout`, real `reverseGeocode`.
-- [x] Geocode pass runs sequentially after the folder snapshot is written.
-- [x] Spacing: `await sleep(sleepMs)` between consecutive calls (not before first, not after last).
-- [x] Cap respected; items beyond cap counted as `geocodeCapped`.
-- [x] On success + non-null place: re-write cache entry. On success + null place: no-op (no second write).
-- [x] `quota` / `ratelimit` → stop pass. `auth` / `suspended` → stop + warn once (no coords/message).
-- [x] `server` / `network` / `parse` → counted, pass continues.
-- [x] Disabled `no-await-in-loop` for the sequential loop with a why-comment.
-- [x] Netlify entrypoint reads `OPENCAGE_API_KEY` and `RECUERDEA_GEOCODE_MAX_PER_RUN`; warns once when key is missing; logs counts + failures summary.
-- [x] 10 new tests; full suite 175/175 green.
-
-**Verified:** `pnpm test`, `pnpm type-check`, `pnpm format:check`, `pnpm build`, lint on 3 changed files all green.
-
-## Checkpoint C — Geocoding live (deploy preview)
-
-- [ ] Push branch; deploy preview built.
-- [ ] In Netlify dashboard, **clear Blobs** for the deploy-preview context: `media/*`, `fileid-index/*`, `folder/v1`. (Verify they're empty.)
-- [ ] Trigger `refresh-memories` once via Netlify dashboard.
-- [ ] Inspect 3+ `media/<uuid>` Blobs entries: contain `location` (where GPS exists) and `place` (where geocoded).
-- [ ] Inspect cron function logs: only summary counts. No coords, no place strings, no OpenCage URLs.
-- [ ] Re-trigger cron: `geocoded` count should be 0 (everything already has `place` or no `location`).
-
-## Slice 6 — `MemoryItem.place` + Polaroid render — `a515013`
-
-- [x] `MemoryItem` gains `place: string | null` on both variants; `buildMemoryItem` passes `meta.place`.
-- [x] `pcloud.server.test.ts`: existing fixtures updated; new test asserts place flow.
-- [x] `Polaroid.tsx`: caption = `item.place`; aria-label = `item.place ?? 'Recuerdo'`; `captionFromName` deleted.
-- [x] `memory-grouping.test.ts`: MemoryItem literals updated.
-
-**Verified:** 176/176 pnpm test, type-check, format:check, build all green; lint on 4 changed files: 0/0.
-
-## Slice 7 — Lightbox header — `9c3d516`
-
-- [x] After `yearsAgoLowercase`, render `·` + `{item.place}` only when non-null, mono-caps styling matching the surrounding spans.
-- [x] `alt={item.name}` unchanged.
-- [ ] Manual smoke pending Checkpoint D.
-
-## Checkpoint D — End-to-end
-
-- [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm format:check` all green.
-- [ ] Local smoke: `pnpm dev:netlify` → `pnpm invoke:refresh-memories` → visit `/`. Polaroids show place captions where extracted; no captions otherwise.
-- [ ] Deploy-preview smoke on real data after Checkpoint C cron pass.
-- [ ] `curl -I https://<preview>/` confirms `Cache-Control: private` (or `no-store`).
-- [ ] Update `SPEC.md`:
-  - [ ] §13 v6 acceptance criteria.
-  - [ ] v5 → v6 changes summary.
-  - [ ] "Always do" — never log geo-derived data.
-  - [ ] "Ask first" — adding any new geocoding provider.
-  - [ ] §4 project structure adds `geoapify.server.ts`.
-  - [ ] §8 open question on geocoder marked resolved (Geoapify, after a brief OpenCage detour).
-- [ ] Open PR `v6-location → main`.
-
-## Slice 8 — Switch geocoder from OpenCage to Geoapify — `4e7de97`
-
-Mid-build pivot. OpenCage client + cron wiring (Slices 4–5) was already merged on `v6-location`; Slice 8 swapped the implementation under the same `reverseGeocode` shape. No UI / schema changes.
-
-### 8a — Renamed + rewrote the geocoder module
-
-- [x] `git mv` `opencage.server.{ts,test.ts}` → `geoapify.server.{ts,test.ts}` (history preserved).
-- [x] Endpoint: `https://api.geoapify.com/v1/geocode/reverse`. Params: `lat`, `lon`, `lang=es`, `apiKey`.
-- [x] HTTP-status authoritative (no body `status.code`): 401 → auth, 403 → suspended, 429 → ratelimit, 5xx + unexpected → server. Network reject → network. JSON parse throw → parse.
-- [x] `quota` dropped from the `ReverseGeocodeResult` reason union.
-- [x] Place picker: `properties.city ?? properties.state`, append `, country` (deduped), fall back to `properties.formatted`, then null. Empty `features` → null.
-- [x] Zero `console.*` on any path.
-- [x] 19 tests in `geoapify.server.test.ts` (down from 25 because the body-status-vs-HTTP-status duality + 402-quota path collapsed into one).
-
-### 8b — Propagated the failure-reason union shrink
-
-- [x] `refresh-memories.server.ts` imports `from '../media-meta/geoapify.server'`. `FailureReason`, `STOP_REASONS`, `ZERO_FAILURES` no longer include `quota`. Sequential-by-design comment updated to mention Geoapify's 5 req/s cap.
-- [x] `refresh-memories.server.test.ts` import path updated; the `quota` test renamed to `ratelimit` (single mock + assertions).
-
-### 8c — Netlify entrypoint env var swap
-
-- [x] `process.env.OPENCAGE_API_KEY` → `process.env.GEOAPIFY_API_KEY`.
-- [x] `quota=` dropped from the failures summary log line + the conditional that decides whether to print it.
-
-### 8d — Verification
-
-- [x] `pnpm test` (170/170), `pnpm type-check`, `pnpm format:check`, `pnpm build` all green.
-- [x] Lint on the 5 changed files: 0 warnings, 0 errors.
-- [x] `grep -ri opencage src netlify` returns nothing under code paths (only deliberate historical references in `tasks/`).
-
-## Production cutover (post-PR-merge)
-
-- [ ] `GEOAPIFY_API_KEY` set in production env scope.
-- [ ] Clear Blobs in production: `media/*`, `fileid-index/*`, `folder/v1`.
-- [ ] Trigger production cron once via Netlify dashboard. Wait for completion.
-- [ ] Visit `https://<prod>/` and confirm captions render.
-
-## Post-merge follow-up
-
-- Offer to schedule a one-time agent ~1 week post-merge to:
-  - Read Blobs and report % of GPS'd entries with non-null `place`.
-  - If <90%, identify which Geoapify property shapes are failing the preference order.
+- [ ] Spike: `@unpic/react` + Netlify Image CDN forwarding Identity cookies through to `/api/memory/<uuid>?variant=thumb`. Needs SPEC §7 "ask first" approval for the new dep.
+- [ ] If desktop fullscreen lightbox softness is reported as a pain point, re-introduce a 1024×1024 `image` variant for desktop only (mobile keeps `thumb`).
