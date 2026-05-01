@@ -78,16 +78,17 @@ src/
       memory-route.server.ts    # /api/memory/$uuid handler (auth gate + byte-streaming) — v4
       memory-grouping.ts        # groupMemoriesByYear pure helper — v5
     cache/                      # Netlify-Blobs-backed stores; each pair = pure abstraction + server store-getter with no-op fallback — v4
-      media-cache.ts            # Pure (uuid → CachedMedia) cache abstraction. CachedMedia gains width/height — v5.
+      media-cache.ts            # Pure (uuid → CachedMedia) cache abstraction. CachedMedia gains width/height (v5), location + place (v6).
       media-cache.server.ts
       fileid-index.ts           # Pure (fileid → uuid) sidecar abstraction
       fileid-index.server.ts
       folder-cache.ts           # Pure folder-listing snapshot abstraction
       folder-cache.server.ts
-    media-meta/                 # Capture-date + dimensions extraction from bytes; called from refresh-memories.server
-      exif.ts                   # EXIF extraction (extractImageMeta) — extended in v5
-      video-meta.ts             # MP4/MOV moov walker — capture date (mvhd) + dimensions (tkhd) (extractVideoMeta) — extended in v5
+    media-meta/                 # Capture-date + dimensions + GPS extraction from bytes; called from refresh-memories.server
+      exif.ts                   # EXIF extraction (extractImageMeta) — extended in v5 (dims), v6 (GPS lat/lng)
+      video-meta.ts             # MP4/MOV moov walker — capture date (mvhd) + dimensions (tkhd) (extractVideoMeta) — extended in v5 (dims), v6 (GPS via udta.©xyz)
       filename-date.ts          # Filename-based capture-date fallback
+      geoapify.server.ts        # v6 — Reverse-geocode lat/lng → Spanish place string via Geoapify; raw fetch, body-status authoritative, tagged failure reasons
     utils/                      # Small leaf helpers
       spanish-months.ts         # SPANISH_MONTHS const + spanishMonth(idx) — used by Hero, login, AdminDateOverride — v5
       rotation.ts               # Stable per-key rotation for polaroid scatter — v5
@@ -143,10 +144,12 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - **The home page HTML is `Cache-Control: private` (or `no-store`).** Per-user content; never publicly cached. Verify with `curl -I` on the deploy preview after any change to the home loader.
 - When using `gh` CLI, make sure that the active user is the one who owns the repo.
 - After running `pnpm build` for checking the build, delete the `dist` folder plus Netlify cache.
+- **Never log any geo-derived data (v6).** No coordinates, no Geoapify response bodies, no resolved `place` strings, no HTTP `status.message`. The cron logs counts only (`img=A/B/C (gps/no-gps/err)`, `geocoded=N`, `failures: { auth, suspended, ratelimit, server, network, parse }`). Tests assert this on every success and failure path of `geoapify.server.ts` + the cron's geocode pass.
 
 ### Ask first
 
 - **Adding any new top-level dependency** — including the **MP4/MOV metadata parser library** needed for v2 (e.g. `mp4box`, hand-rolled `mvhd` atom reader, etc.). List candidates and tradeoffs; wait for approval. v4 adds `@netlify/functions` for the scheduled handler — pre-acked in plan-mode review.
+- **Switching or adding a reverse-geocoding provider (v6).** v6 ships with Geoapify (raw `fetch`, no SDK). Any swap or addition needs the same kind of plan-mode review: cost, rate limits, response shape, failure modes, env var name.
 - Changes to `oxlint.config.ts` / `oxfmt.config.ts` / `tsconfig.json` / `vite.config.ts`.
 - Changes to `.github/workflows/ci.yml` or `netlify.toml` (the latter is added under "ask first" in v4 because the scheduled-function block lives there — pre-acked for the v4 cron).
 - Introducing a new top-level route or restructuring `src/lib/`.
@@ -175,6 +178,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 5. **Cron schedule (v4)** — daily at 04:00 UTC (`0 4 * * *`). **Cron is the only writer.** No on-demand fallback; missing snapshot ⇒ home renders empty + warn. Manual first-run trigger required pre-prod.
 6. **Cache invalidation (v4)** — pCloud's content-derived `hash` invalidates per-uuid entries on content change (rename ≠ content change; same fileid + same hash = noop). When a fileid disappears from `listfolder`, the cron deletes the public link via `deletepublink(linkid)` and clears both `media/<uuid>` and `fileid-index/<fileid>`.
 7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path on the server: 1 `folder/v1` snapshot read + N `media/<uuid>` reads (where N = files in folder). **Zero pCloud API calls on the loader path** when warm. Per matched-item route hit: 0 pCloud API calls for image/poster (function fetches `getpubthumb` and pipes bytes); 1 lightweight `getpublinkdownload` call for stream, then the function pipes bytes from the CDN (every Range request, including video seek, goes through the function). User's pCloud premium plan has plenty of public-link traffic quota; Netlify bandwidth is the constraint to watch.
+8. **Reverse-geocoding provider (v6)** — resolved: **Geoapify** (`https://api.geoapify.com/v1/geocode/reverse`). Free tier 3,000 req/day, 5 req/sec; cron throttles to 1 req/sec via software sleep + a per-run cap (default 200, env-overridable via `RECUERDEA_GEOCODE_MAX_PER_RUN`). API key in `GEOAPIFY_API_KEY` (server-only). Spanish output via `lang=es`. History: started with OpenCage in Slices 4–7, swapped to Geoapify mid-build for project-account reasons.
 
 ## 9. v1 → v2 changes summary
 
@@ -242,3 +246,53 @@ For readers diffing this spec against v3:
 - §11 (new): v4 acceptance criteria — UUID-indirected media URLs, server-side byte-stream of public-link responses, cron-warmed cache, public-link lifecycle managed by the cron.
 
 **Earlier v4 attempts (history):** v4's first design ran a byte-stream proxy at `/api/media/:fileid` keyed by `fileid` and resolved fresh signed URLs per request (worked, but the URLs and `fileid`s appeared in the browser). The second attempt moved URL signing to the browser to avoid the proxy entirely; it failed because pCloud's API gates `getfilelink` / `getthumblink` against browser origins (error 7010 "Invalid link referer"). A third iteration tried 302-redirecting from `/api/memory/<uuid>` to a public-link URL — simpler than the proxy, but it leaked the public-link `code` to the Network tab, and public links aren't IP-bound so anyone with the URL could fetch the bytes without going through the auth gate. The current design keeps the UUID indirection and cron-warmed cache from that iteration but byte-streams the bytes through the function so the public-link URL never reaches the browser.
+
+## 13. v6 Acceptance Criteria
+
+Cumulative on top of §11. v6 adds **place captions** to the polaroid feed: every memory tile shows the city / region where the photo or video was taken instead of the file's basename.
+
+**Correctness**
+
+- For every media file the cron processes, the location pipeline runs in two stages, both server-only:
+  1. Extract raw GPS coordinates from the file's bytes. Images: `exifr` with `pick: ['GPSLatitude', 'GPSLatitudeRef', 'GPSLongitude', 'GPSLongitudeRef', ...]` (raw GPS tags — not the virtual `latitude`/`longitude` fields, which silently leave the GPS block disabled). Videos: hand-rolled `moov` walker descends into `udta` and reads the `©xyz` (`0xa9 'x' 'y' 'z'`) atom's ISO 6709 string. Both extractors return `location: { lat, lng } | null` and never throw.
+  2. If `location` is non-null and `place` is null, reverse-geocode via Geoapify (`https://api.geoapify.com/v1/geocode/reverse?lat=…&lon=…&lang=es&apiKey=…`). Place picker prefers `properties.city ?? properties.state`, appends `, country` (deduped), falls back to `properties.formatted ?? null`.
+- The home page replaces the filename caption with `item.place`. When `place` is null, the caption is hidden entirely (no fallback to filename, no "Sin ubicación" placeholder).
+- The lightbox header appends `· {item.place}` after the years-ago line when non-null.
+- `<img alt={item.name}>` stays for a11y; only the visible caption strip and lightbox header surface `place`.
+
+**Cache shape**
+
+- `CachedMedia` gains `location: { lat: number; lng: number } | null` and `place: string | null`. The pCloud `hash` still keys invalidation; on a hash mismatch we re-extract `location` and reset `place` to null so the geocoder runs again on the next pass.
+- `MemoryItem` gains `place: string | null` (passed through from `CachedMedia`); other fields unchanged. The browser only ever sees `place` and `uuid` — never raw coordinates.
+
+**EXIF reach (v6 update)**
+
+- Image EXIF range fetch is `bytes=0-1048575` (1MB) instead of v2's 64KB. iPhone HEIC routes EXIF through the `meta` box's `iloc` and the actual bytes can sit deep in `mdat`; 1MB covers the vast majority of real iPhone HEIC files at modest bandwidth cost. JPEGs are unaffected (EXIF is in APP1 near the start).
+
+**Geocode pass (cron-only)**
+
+- Sequential. ≥1100ms between consecutive Geoapify calls (well under Geoapify's 5 req/s ceiling and the 1 req/s budget we set in software). Per-run cap: 200 (env-overridable via `RECUERDEA_GEOCODE_MAX_PER_RUN`); items beyond the cap stay `place: null` and are picked up on the next cron run.
+- Stop the pass for the rest of this run on `auth | suspended | ratelimit` reasons (auth/suspended also warn once; warn line contains the reason only — no key, coords, or response body). `server | network | parse` failures are counted and the pass continues.
+- Loader and `/api/memory/<uuid>` route never call Geoapify. Hot path stays at zero pCloud + zero Geoapify calls when the cache is warm.
+
+**Logging hygiene**
+
+- Zero `console.*` with coordinates, `place`, Geoapify URL, response body, or `status.message`. Cron summary log emits counts only: `scanned=X alive=Y removed=Z img=A/B/C (gps/no-gps/err) vid=D/E/F (gps/no-gps/err) geocoded=G capped=H stopped=…`. A second line summarises geocode-failure reasons when any are non-zero. Tests assert no console method receives sensitive values on every success/failure path.
+
+**Workflow**
+
+- v6 work happens on the `v6-location` branch with a PR into `main`. Pre-merge checklist: provision `GEOAPIFY_API_KEY` in Netlify deploy-preview env scope, **clear Blobs** (`media/*`, `fileid-index/*`, `folder/v1`) on the preview context, trigger the cron once via the dashboard, smoke `/`. Production cutover after merge: same env-var + Blobs-clear + cron-trigger sequence in the production scope.
+
+## 14. v5 → v6 changes summary
+
+For readers diffing this spec against v5:
+
+- §1 Objective and §2 Acceptance Criteria: unchanged. v6 is purely additive on the cache + UI. Same memories, same sort, same layout — captions now read "Madrid, España" instead of "IMG_4567".
+- §4 Project Structure: `media-meta/` adds `geoapify.server.ts`. `exif.ts` and `video-meta.ts` extended to return `location`. `media-cache.ts` `CachedMedia` gains `location` + `place`.
+- §7 Boundaries: "always do" adds the no-geo-logging rule; "ask first" adds the geocoder-provider gate.
+- §8 Open Questions: §8.8 (new) records Geoapify as the resolved geocoding provider with rate-limit + env-var details, including the OpenCage→Geoapify swap that happened mid-build.
+- §13 (new): v6 acceptance criteria — two-stage extraction, Geoapify with cap + spacing + tagged failures, EXIF range bumped to 1MB for HEIC, place-or-nothing caption rule, no geo data in any log.
+
+**v6 build history (chronological):** Slices 1–2 added GPS extraction to the EXIF and MP4 pipelines. Slice 3 extended `CachedMedia` with `location` + `place`. Slices 4–5 wired up the OpenCage client + sequential cron geocode pass. Slices 6–7 plumbed `place` through `MemoryItem` to the polaroid + lightbox UI. Slice 8 swapped the geocoder from OpenCage to Geoapify under the same `reverseGeocode` interface (the user pivoted providers mid-build for project-account reasons; `quota` reason was dropped from the failure union since Geoapify uses 429 for both rate limit and daily quota).
+
+**Post-merge fix (commit `<TBD>`):** the first deploy-preview cron run produced `location: null` on every cached entry. Two distinct bugs surfaced: (a) `exifr.parse(buffer, ['latitude', 'longitude', ...])` doesn't enable the GPS block — the virtual `latitude`/`longitude` outputs aren't in exifr's raw-tag dictionary, so the GPS block stays disabled. Switched to picking the raw `GPSLatitude` / `GPSLatitudeRef` / `GPSLongitude` / `GPSLongitudeRef` tags. (b) iPhone HEIC EXIF often sits past the first 64KB; bumped the range fetch to 1MB. Also added per-extractor outcome counters to `RefreshResult` so the cron summary log surfaces extraction success/failure rates without leaking content.
