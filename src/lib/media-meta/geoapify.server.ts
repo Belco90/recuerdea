@@ -71,6 +71,9 @@ function buildUrl({ lat, lng, apiKey }: { lat: number; lng: number; apiKey: stri
 		// often `result_type: building`). Picker fallbacks remain for edges
 		// where the API returns no city.
 		type: 'city',
+		// We only ever read features[0]; cap the response so the API doesn't
+		// pack alternates we'd discard.
+		limit: '1',
 		lang: 'es',
 		apiKey,
 	})

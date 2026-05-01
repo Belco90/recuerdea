@@ -74,6 +74,7 @@ describe('reverseGeocode (Geoapify)', () => {
 			expect(u.searchParams.get('lat')).toBe(String(LAT))
 			expect(u.searchParams.get('lon')).toBe(String(LNG))
 			expect(u.searchParams.get('type')).toBe('city')
+			expect(u.searchParams.get('limit')).toBe('1')
 			expect(u.searchParams.get('lang')).toBe('es')
 			expect(u.searchParams.get('apiKey')).toBe(KEY)
 		})
