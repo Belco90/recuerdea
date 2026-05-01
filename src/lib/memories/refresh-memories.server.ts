@@ -217,6 +217,15 @@ export type RefreshResult = {
 	// silently shrugged at every coord" from "everything worked, just empty."
 	geocodeNoPlace: number
 	geocodeCapped: number
+	// Per-skip-reason counters for runGeocodePass. Together with
+	// `geocoded + geocodeNoPlace + geocodeCapped + sum(geocodeFailures) + the
+	// four skip counters` they account for every alive uuid the pass iterated.
+	// Diagnostic-only — never include coordinates, place strings, or fileids.
+	geocodeAttempted: number
+	geocodeSkippedNoCached: number
+	geocodeSkippedNoLocation: number
+	geocodeSkippedAlreadyDone: number
+	geocodeSkippedAfterStop: number
 	geocodeFailures: Record<FailureReason, number>
 	geocodeStoppedReason: FailureReason | null
 }
@@ -255,6 +264,11 @@ export async function refreshMemories(
 				geocoded: 0,
 				noPlace: 0,
 				capped: 0,
+				attempted: 0,
+				skippedNoCached: 0,
+				skippedNoLocation: 0,
+				skippedAlreadyDone: 0,
+				skippedAfterStop: 0,
 				failures: { ...ZERO_FAILURES },
 				stoppedReason: null,
 			}
@@ -267,6 +281,11 @@ export async function refreshMemories(
 		geocoded: geocodeResult.geocoded,
 		geocodeNoPlace: geocodeResult.noPlace,
 		geocodeCapped: geocodeResult.capped,
+		geocodeAttempted: geocodeResult.attempted,
+		geocodeSkippedNoCached: geocodeResult.skippedNoCached,
+		geocodeSkippedNoLocation: geocodeResult.skippedNoLocation,
+		geocodeSkippedAlreadyDone: geocodeResult.skippedAlreadyDone,
+		geocodeSkippedAfterStop: geocodeResult.skippedAfterStop,
 		geocodeFailures: geocodeResult.failures,
 		geocodeStoppedReason: geocodeResult.stoppedReason,
 	}
@@ -280,6 +299,11 @@ async function runGeocodePass(
 	geocoded: number
 	noPlace: number
 	capped: number
+	attempted: number
+	skippedNoCached: number
+	skippedNoLocation: number
+	skippedAlreadyDone: number
+	skippedAfterStop: number
 	failures: Record<FailureReason, number>
 	stoppedReason: FailureReason | null
 }> {
@@ -293,6 +317,10 @@ async function runGeocodePass(
 	let noPlace = 0
 	let capped = 0
 	let attempts = 0
+	let skippedNoCached = 0
+	let skippedNoLocation = 0
+	let skippedAlreadyDone = 0
+	let skippedAfterStop = 0
 	let stopped: FailureReason | null = null
 
 	// Sequential by design: Geoapify's free tier caps at 5 req/s but we keep a
@@ -301,9 +329,23 @@ async function runGeocodePass(
 	/* eslint-disable no-await-in-loop */
 	for (const uuid of aliveUuids) {
 		const cached = await mediaCache.lookup(uuid)
-		if (!cached || cached.location === null || cached.place !== null) continue
+		if (!cached) {
+			skippedNoCached += 1
+			continue
+		}
+		if (cached.location === null) {
+			skippedNoLocation += 1
+			continue
+		}
+		if (cached.place !== null) {
+			skippedAlreadyDone += 1
+			continue
+		}
 
-		if (stopped !== null) continue
+		if (stopped !== null) {
+			skippedAfterStop += 1
+			continue
+		}
 		if (attempts >= cap) {
 			capped += 1
 			continue
@@ -334,7 +376,18 @@ async function runGeocodePass(
 	}
 	/* eslint-enable no-await-in-loop */
 
-	return { geocoded, noPlace, capped, failures, stoppedReason: stopped }
+	return {
+		geocoded,
+		noPlace,
+		capped,
+		attempted: attempts,
+		skippedNoCached,
+		skippedNoLocation,
+		skippedAlreadyDone,
+		skippedAfterStop,
+		failures,
+		stoppedReason: stopped,
+	}
 }
 
 function defaultSleep(ms: number): Promise<void> {

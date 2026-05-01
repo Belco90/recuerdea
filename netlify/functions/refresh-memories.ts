@@ -61,6 +61,14 @@ export const handler = schedule('0 4 * * *', async (event) => {
 			` vid=${e.videosWithLocation}/${e.videosNoLocation}/${e.videosExtractError} (gps/no-gps/err)` +
 			` geocoded=${result.geocoded} noPlace=${result.geocodeNoPlace} capped=${result.geocodeCapped} stopped=${result.geocodeStoppedReason ?? 'no'}`,
 	)
+	// eslint-disable-next-line no-console
+	console.log(
+		`[refresh-memories] geocode skip stats: attempted=${result.geocodeAttempted}` +
+			` noCached=${result.geocodeSkippedNoCached}` +
+			` noLocation=${result.geocodeSkippedNoLocation}` +
+			` alreadyDone=${result.geocodeSkippedAlreadyDone}` +
+			` afterStop=${result.geocodeSkippedAfterStop}`,
+	)
 	const f = result.geocodeFailures
 	if (f.auth || f.suspended || f.ratelimit || f.server || f.network || f.parse) {
 		// eslint-disable-next-line no-console

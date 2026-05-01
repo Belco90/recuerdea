@@ -1044,6 +1044,110 @@ describe('refreshMemories', () => {
 			expect(result.geocodeNoPlace).toBe(0)
 		})
 
+		it('reports skip-reason counters: alreadyDone for entries with place set, noLocation for entries without GPS, attempted for the rest', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			const jpegC = makeFile({
+				fileid: 102,
+				name: 'c.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-c',
+			})
+			// jpegA: existing entry with place already set → skipAlreadyDone
+			fileidStore.data.set(100, { uuid: 'uuid-A' })
+			mediaStore.data.set('uuid-A', {
+				fileid: 100,
+				hash: 'h-a',
+				code: 'code-100',
+				linkid: 1000,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'a.jpg',
+				captureDate: '2020-01-15T10:00:00.000Z',
+				width: 4032,
+				height: 3024,
+				location: MADRID,
+				place: 'Madrid, España',
+			})
+			// jpegB: no GPS → skipNoLocation
+			// jpegC: GPS, no place → attempted
+			mockedExtractImageMeta
+				.mockResolvedValueOnce({
+					captureDate: new Date('2020-01-15T10:00:00Z'),
+					width: 100,
+					height: 100,
+					location: null,
+				})
+				.mockResolvedValueOnce({
+					captureDate: new Date('2020-01-15T10:00:00Z'),
+					width: 100,
+					height: 100,
+					location: LISBON,
+				})
+			const client = fakeClient({ files: [jpegA, jpegB, jpegC] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'Lisboa, Portugal' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(result.geocodeAttempted).toBe(1)
+			expect(result.geocodeSkippedNoCached).toBe(0)
+			expect(result.geocodeSkippedNoLocation).toBe(1)
+			expect(result.geocodeSkippedAlreadyDone).toBe(1)
+			expect(result.geocodeSkippedAfterStop).toBe(0)
+		})
+
+		it('counts skipAfterStop for items iterated after a stop reason fires', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 100,
+				height: 100,
+				location: MADRID,
+			})
+			const client = fakeClient({ files: [jpegA, jpegB] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: false, reason: 'auth' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			// First entry: attempted, returns auth → stopped is set.
+			// Second entry: hits the `stopped !== null` continue → skipAfterStop bumps.
+			expect(result.geocodeAttempted).toBe(1)
+			expect(result.geocodeSkippedAfterStop).toBe(1)
+			warn.mockRestore()
+		})
+
 		it('aggregates geocodeNoPlace across multiple null-place responses', async () => {
 			const mediaStore = makeMediaStore()
 			const fileidStore = makeFileidStore()
