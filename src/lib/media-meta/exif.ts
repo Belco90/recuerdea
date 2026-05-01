@@ -6,6 +6,15 @@ import exifr from 'exifr'
 // eslint-disable-next-line import/no-named-as-default-member
 const { parse } = exifr
 
+// 10MB is enough for virtually every iPhone HEIC (typically 1-3MB) and is
+// deliberately not "the full file": when given the entire HEIC, exifr's iinf
+// walker iterates further into the box and can return the EXIF of a non-primary
+// item (thumbnail or auxiliary image like a depth/portrait map) instead of the
+// primary image's EXIF. That regressed both coverage ("less locations saved")
+// and accuracy ("those found are more inaccurate"). Capping the buffer keeps
+// exifr's iteration bounded to what's actually about the main image.
+const RANGE_HEADER = 'bytes=0-10485759'
+
 type ExifTags = {
 	DateTimeOriginal?: unknown
 	CreateDate?: unknown
@@ -58,7 +67,7 @@ export type ImageMeta = {
 const EMPTY: ImageMeta = { captureDate: null, width: null, height: null, location: null }
 
 export async function extractImageMeta(downloadUrl: string): Promise<ImageMeta> {
-	const res = await fetch(downloadUrl)
+	const res = await fetch(downloadUrl, { headers: { Range: RANGE_HEADER } })
 	if (!res.ok) return EMPTY
 	const buffer = await res.arrayBuffer()
 
