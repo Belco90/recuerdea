@@ -21,7 +21,8 @@ const STOP_REASONS = new Set<FailureReason>(['auth', 'suspended', 'ratelimit'])
 const WARN_REASONS = new Set<FailureReason>(['auth', 'suspended'])
 
 const DEFAULT_GEOCODE_CAP = 200
-const DEFAULT_GEOCODE_SLEEP_MS = 1100
+// 220ms ≈ 4.5 req/s, just under Geoapify free tier's 5 req/s ceiling.
+const DEFAULT_GEOCODE_SLEEP_MS = 220
 
 export type GeocodeOpts = {
 	apiKey: string
@@ -331,9 +332,9 @@ async function runGeocodePass(
 	let skippedAfterStop = 0
 	let stopped: FailureReason | null = null
 
-	// Sequential by design: Geoapify's free tier caps at 5 req/s but we keep a
-	// 1-req/s budget in software via `sleep`. Parallelizing would burn the
-	// daily quota in seconds and trip 429s.
+	// Sequential by design: Geoapify's free tier caps at 5 req/s and we pace
+	// just under that via `sleep`. Parallelizing would risk bursts past the
+	// ceiling and trip 429s; the cap (default 200) bounds total per-run cost.
 	/* eslint-disable no-await-in-loop */
 	for (const uuid of aliveUuids) {
 		const cached = aliveCached.get(uuid)
