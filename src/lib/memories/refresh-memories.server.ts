@@ -211,6 +211,11 @@ export type RefreshResult = {
 	removed: number
 	extractCounts: ExtractCounts
 	geocoded: number
+	// 200-OK responses where the picker returned null (not the same as a
+	// failure; the request succeeded, the response just had no usable place).
+	// Surfaced separately so the cron summary can distinguish "geocoder
+	// silently shrugged at every coord" from "everything worked, just empty."
+	geocodeNoPlace: number
 	geocodeCapped: number
 	geocodeFailures: Record<FailureReason, number>
 	geocodeStoppedReason: FailureReason | null
@@ -246,7 +251,13 @@ export async function refreshMemories(
 
 	const geocodeResult = geocodeOpts
 		? await runGeocodePass(aliveUuids, mediaCache, geocodeOpts)
-		: { geocoded: 0, capped: 0, failures: { ...ZERO_FAILURES }, stoppedReason: null }
+		: {
+				geocoded: 0,
+				noPlace: 0,
+				capped: 0,
+				failures: { ...ZERO_FAILURES },
+				stoppedReason: null,
+			}
 
 	return {
 		scanned: files.length,
@@ -254,6 +265,7 @@ export async function refreshMemories(
 		removed: staleUuids.length,
 		extractCounts,
 		geocoded: geocodeResult.geocoded,
+		geocodeNoPlace: geocodeResult.noPlace,
 		geocodeCapped: geocodeResult.capped,
 		geocodeFailures: geocodeResult.failures,
 		geocodeStoppedReason: geocodeResult.stoppedReason,
@@ -266,6 +278,7 @@ async function runGeocodePass(
 	opts: GeocodeOpts,
 ): Promise<{
 	geocoded: number
+	noPlace: number
 	capped: number
 	failures: Record<FailureReason, number>
 	stoppedReason: FailureReason | null
@@ -277,6 +290,7 @@ async function runGeocodePass(
 
 	const failures: Record<FailureReason, number> = { ...ZERO_FAILURES }
 	let geocoded = 0
+	let noPlace = 0
 	let capped = 0
 	let attempts = 0
 	let stopped: FailureReason | null = null
@@ -303,6 +317,8 @@ async function runGeocodePass(
 			if (result.place !== null) {
 				await mediaCache.remember(uuid, { ...cached, place: result.place })
 				geocoded += 1
+			} else {
+				noPlace += 1
 			}
 			continue
 		}
@@ -318,7 +334,7 @@ async function runGeocodePass(
 	}
 	/* eslint-enable no-await-in-loop */
 
-	return { geocoded, capped, failures, stoppedReason: stopped }
+	return { geocoded, noPlace, capped, failures, stoppedReason: stopped }
 }
 
 function defaultSleep(ms: number): Promise<void> {

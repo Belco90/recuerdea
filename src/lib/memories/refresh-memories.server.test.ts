@@ -1003,7 +1003,7 @@ describe('refreshMemories', () => {
 			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: null })
 			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
 
-			await refreshMemories(
+			const result = await refreshMemories(
 				client,
 				42,
 				createMediaCache(mediaStore),
@@ -1016,6 +1016,66 @@ describe('refreshMemories', () => {
 			expect(mediaStore.set).toHaveBeenCalledTimes(1)
 			const finalMeta = Array.from(mediaStore.data.values())[0]!
 			expect(finalMeta.place).toBeNull()
+			// The 200-OK-with-null-place path is no longer silent: it bumps
+			// geocodeNoPlace so the cron summary surfaces the count.
+			expect(result.geocodeNoPlace).toBe(1)
+			expect(result.geocoded).toBe(0)
+		})
+
+		it('does not bump geocodeNoPlace when the geocoder fills in a place', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			setupGpsImage()
+			const client = fakeClient({ files: [jpegA] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: 'Madrid, España' })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(result.geocoded).toBe(1)
+			expect(result.geocodeNoPlace).toBe(0)
+		})
+
+		it('aggregates geocodeNoPlace across multiple null-place responses', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegB = makeFile({
+				fileid: 101,
+				name: 'b.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-b',
+			})
+			mockedExtractImageMeta.mockResolvedValue({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 100,
+				height: 100,
+				location: MADRID,
+			})
+			const client = fakeClient({ files: [jpegA, jpegB] })
+			const geocoder = vi.fn<Geocoder>().mockResolvedValue({ ok: true, place: null })
+			const sleep = vi.fn<Sleeper>().mockResolvedValue(undefined)
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				{ apiKey: APIKEY, geocoder, sleep },
+			)
+
+			expect(geocoder).toHaveBeenCalledTimes(2)
+			expect(result.geocoded).toBe(0)
+			expect(result.geocodeNoPlace).toBe(2)
 		})
 
 		it('never logs coords, place, or response data on any path', async () => {

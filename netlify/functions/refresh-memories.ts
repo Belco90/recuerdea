@@ -59,7 +59,7 @@ export const handler = schedule('0 4 * * *', async (event) => {
 		`[refresh-memories] scanned=${result.scanned} alive=${result.alive} removed=${result.removed}` +
 			` img=${e.imagesWithLocation}/${e.imagesNoLocation}/${e.imagesExtractError} (gps/no-gps/err)` +
 			` vid=${e.videosWithLocation}/${e.videosNoLocation}/${e.videosExtractError} (gps/no-gps/err)` +
-			` geocoded=${result.geocoded} capped=${result.geocodeCapped} stopped=${result.geocodeStoppedReason ?? 'no'}`,
+			` geocoded=${result.geocoded} noPlace=${result.geocodeNoPlace} capped=${result.geocodeCapped} stopped=${result.geocodeStoppedReason ?? 'no'}`,
 	)
 	const f = result.geocodeFailures
 	if (f.auth || f.suspended || f.ratelimit || f.server || f.network || f.parse) {
