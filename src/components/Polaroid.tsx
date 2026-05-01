@@ -14,10 +14,7 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 	const rot = rotForKey(keyId)
 	const caption = item.place
 	const aspectRatio = item.width && item.height ? item.width / item.height : undefined
-	const photoSrc =
-		item.kind === 'video'
-			? `/api/memory/${item.uuid}?variant=poster`
-			: `/api/memory/${item.uuid}?variant=image`
+	const photoSrc = `/api/memory/${item.uuid}?variant=thumb`
 
 	return (
 		<Box
