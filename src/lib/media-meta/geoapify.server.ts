@@ -24,8 +24,6 @@ export type ReverseGeocodeOptions = {
 
 type Properties = {
 	city?: string
-	state?: string
-	country?: string
 	formatted?: string
 }
 
@@ -87,10 +85,5 @@ function classify(code: number): 'auth' | 'suspended' | 'ratelimit' | 'server' {
 }
 
 function pickPlace(props: Properties): string | null {
-	const head = props.city ?? props.state ?? null
-	if (head === null) return props.formatted ?? null
-
-	const country = props.country
-	if (!country || head.endsWith(country)) return head
-	return `${head}, ${country}`
+	return props.city ?? props.formatted ?? null
 }

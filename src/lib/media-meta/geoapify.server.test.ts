@@ -100,30 +100,18 @@ describe('reverseGeocode (Geoapify)', () => {
 	})
 
 	describe('success path — property preference', () => {
-		it('returns "City, Country" when both are present', async () => {
+		it('returns just the city when present (no country suffix)', async () => {
 			fetchSpy.mockResolvedValue(
 				jsonResponse(featuresBody([{ properties: { city: 'Madrid', country: 'España' } }])),
 			)
 
 			const result = await reverseGeocode({ lat: LAT, lng: LNG }, { apiKey: KEY })
 
-			expect(result).toEqual({ ok: true, place: 'Madrid, España' })
+			expect(result).toEqual({ ok: true, place: 'Madrid' })
 			assertNoSensitiveLogs()
 		})
 
-		it('prefers state when no city', async () => {
-			fetchSpy.mockResolvedValue(
-				jsonResponse(
-					featuresBody([{ properties: { state: 'Comunidad de Madrid', country: 'España' } }]),
-				),
-			)
-
-			const result = await reverseGeocode({ lat: LAT, lng: LNG }, { apiKey: KEY })
-
-			expect(result).toEqual({ ok: true, place: 'Comunidad de Madrid, España' })
-		})
-
-		it('returns city alone when no country is present', async () => {
+		it('returns the city when no country is present', async () => {
 			fetchSpy.mockResolvedValue(
 				jsonResponse(featuresBody([{ properties: { city: 'Albarracín' } }])),
 			)
@@ -133,7 +121,7 @@ describe('reverseGeocode (Geoapify)', () => {
 			expect(result).toEqual({ ok: true, place: 'Albarracín' })
 		})
 
-		it('falls back to formatted when no city/state', async () => {
+		it('falls back to formatted when no city is returned', async () => {
 			fetchSpy.mockResolvedValue(
 				jsonResponse(
 					featuresBody([
@@ -147,16 +135,6 @@ describe('reverseGeocode (Geoapify)', () => {
 			expect(result).toEqual({ ok: true, place: 'Algún sitio en mitad del mar' })
 		})
 
-		it('does not duplicate the country when the head already ends with it', async () => {
-			fetchSpy.mockResolvedValue(
-				jsonResponse(featuresBody([{ properties: { city: 'España', country: 'España' } }])),
-			)
-
-			const result = await reverseGeocode({ lat: LAT, lng: LNG }, { apiKey: KEY })
-
-			expect(result).toEqual({ ok: true, place: 'España' })
-		})
-
 		it('returns place: null when features is empty', async () => {
 			fetchSpy.mockResolvedValue(jsonResponse(featuresBody([])))
 
@@ -165,7 +143,7 @@ describe('reverseGeocode (Geoapify)', () => {
 			expect(result).toEqual({ ok: true, place: null })
 		})
 
-		it('returns place: null when no useful property AND no formatted', async () => {
+		it('returns place: null when no city AND no formatted', async () => {
 			fetchSpy.mockResolvedValue(
 				jsonResponse(featuresBody([{ properties: { country_code: 'es' } }])),
 			)
