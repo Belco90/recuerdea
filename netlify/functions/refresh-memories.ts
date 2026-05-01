@@ -53,9 +53,13 @@ export const handler = schedule('0 4 * * *', async (event) => {
 		apiKey ? { apiKey, cap } : undefined,
 	)
 
+	const e = result.extractCounts
 	// eslint-disable-next-line no-console
 	console.log(
-		`[refresh-memories] scanned=${result.scanned} alive=${result.alive} removed=${result.removed} geocoded=${result.geocoded} capped=${result.geocodeCapped} stopped=${result.geocodeStoppedReason ?? 'no'}`,
+		`[refresh-memories] scanned=${result.scanned} alive=${result.alive} removed=${result.removed}` +
+			` img=${e.imagesWithLocation}/${e.imagesNoLocation}/${e.imagesExtractError} (gps/no-gps/err)` +
+			` vid=${e.videosWithLocation}/${e.videosNoLocation}/${e.videosExtractError} (gps/no-gps/err)` +
+			` geocoded=${result.geocoded} capped=${result.geocodeCapped} stopped=${result.geocodeStoppedReason ?? 'no'}`,
 	)
 	const f = result.geocodeFailures
 	if (f.auth || f.suspended || f.ratelimit || f.server || f.network || f.parse) {

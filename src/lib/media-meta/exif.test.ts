@@ -254,27 +254,37 @@ describe('extractImageMeta', () => {
 			expect(meta.location).toBeNull()
 		})
 
-		it('requests latitude and longitude from exifr', async () => {
+		it('picks raw GPS tags so exifr enables the GPS block', async () => {
+			// exifr's `pick` shortcut auto-enables blocks based on which RAW tags
+			// you pass. The virtual `latitude`/`longitude` outputs are NOT in the
+			// tag dictionary, so picking them alone leaves the GPS block disabled
+			// and the result is always undefined. We must pick raw GPSLatitude /
+			// GPSLongitude (+ refs) to actually parse coords.
 			mockOkResponse()
 			mockedParse.mockResolvedValue({})
 
 			await extractImageMeta('https://x.test/a.jpg')
 
 			const tags = mockedParse.mock.calls[0]![1] as readonly string[]
-			expect(tags).toContain('latitude')
-			expect(tags).toContain('longitude')
+			expect(tags).toContain('GPSLatitude')
+			expect(tags).toContain('GPSLatitudeRef')
+			expect(tags).toContain('GPSLongitude')
+			expect(tags).toContain('GPSLongitudeRef')
+			// Anti-regression: virtual fields would silently no-op the GPS block.
+			expect(tags).not.toContain('latitude')
+			expect(tags).not.toContain('longitude')
 		})
 	})
 
 	describe('error handling', () => {
-		it('sends a Range header for the EXIF segment', async () => {
+		it('sends a 1MB Range header so HEIC EXIF past the first 64KB is reachable', async () => {
 			mockOkResponse()
 			mockedParse.mockResolvedValue({ DateTimeOriginal: new Date() })
 
 			await extractImageMeta('https://x.test/a.jpg')
 
 			expect(fetchSpy).toHaveBeenCalledWith('https://x.test/a.jpg', {
-				headers: { Range: 'bytes=0-65535' },
+				headers: { Range: 'bytes=0-1048575' },
 			})
 		})
 

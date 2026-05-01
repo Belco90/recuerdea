@@ -51,6 +51,52 @@ type FileMeta = {
 
 const EMPTY_META: FileMeta = { captureDate: null, width: null, height: null, location: null }
 
+// Per-file outcome of the extraction step. Aggregated into ExtractCounts so the
+// cron summary log can answer "is GPS extraction working?" without ever
+// emitting filenames, paths, or coordinates.
+type ExtractOutcome =
+	| 'image-with-location'
+	| 'image-no-location'
+	| 'image-error'
+	| 'video-with-location'
+	| 'video-no-location'
+	| 'video-error'
+
+export type ExtractCounts = {
+	imagesWithLocation: number
+	imagesNoLocation: number
+	imagesExtractError: number
+	videosWithLocation: number
+	videosNoLocation: number
+	videosExtractError: number
+}
+
+const ZERO_EXTRACT_COUNTS: ExtractCounts = {
+	imagesWithLocation: 0,
+	imagesNoLocation: 0,
+	imagesExtractError: 0,
+	videosWithLocation: 0,
+	videosNoLocation: 0,
+	videosExtractError: 0,
+}
+
+function bumpExtractCounts(counts: ExtractCounts, outcome: ExtractOutcome): ExtractCounts {
+	switch (outcome) {
+		case 'image-with-location':
+			return { ...counts, imagesWithLocation: counts.imagesWithLocation + 1 }
+		case 'image-no-location':
+			return { ...counts, imagesNoLocation: counts.imagesNoLocation + 1 }
+		case 'image-error':
+			return { ...counts, imagesExtractError: counts.imagesExtractError + 1 }
+		case 'video-with-location':
+			return { ...counts, videosWithLocation: counts.videosWithLocation + 1 }
+		case 'video-no-location':
+			return { ...counts, videosNoLocation: counts.videosNoLocation + 1 }
+		case 'video-error':
+			return { ...counts, videosExtractError: counts.videosExtractError + 1 }
+	}
+}
+
 function isMediaFile(item: FileMetadata | FolderMetadata): item is FileMetadata {
 	if (item.isfolder) return false
 	const ct = item.contenttype
@@ -62,20 +108,31 @@ async function listMediaFiles(client: Client, folderId: number): Promise<FileMet
 	return folder.contents?.filter(isMediaFile) ?? []
 }
 
-async function extractFileMeta(client: Client, file: FileMetadata): Promise<FileMeta> {
+async function extractFileMeta(
+	client: Client,
+	file: FileMetadata,
+): Promise<{ meta: FileMeta; outcome: ExtractOutcome }> {
+	const isVideo = file.contenttype.startsWith('video/')
 	try {
 		const downloadUrl = await client.getfilelink(file.fileid)
-		const meta = file.contenttype.startsWith('video/')
-			? await extractVideoMeta(downloadUrl)
-			: await extractImageMeta(downloadUrl)
-		return {
+		const meta = isVideo ? await extractVideoMeta(downloadUrl) : await extractImageMeta(downloadUrl)
+		const fileMeta: FileMeta = {
 			captureDate: meta.captureDate ?? parseFilenameCaptureDate(file.name) ?? null,
 			width: meta.width,
 			height: meta.height,
 			location: meta.location,
 		}
+		const hasLocation = meta.location !== null
+		const outcome: ExtractOutcome = isVideo
+			? hasLocation
+				? 'video-with-location'
+				: 'video-no-location'
+			: hasLocation
+				? 'image-with-location'
+				: 'image-no-location'
+		return { meta: fileMeta, outcome }
 	} catch {
-		return EMPTY_META
+		return { meta: EMPTY_META, outcome: isVideo ? 'video-error' : 'image-error' }
 	}
 }
 
@@ -115,18 +172,19 @@ async function processFile(
 	file: FileMetadata,
 	mediaCache: MediaCache,
 	fileidIndex: FileidIndex,
-): Promise<string> {
+): Promise<{ uuid: string; outcome: ExtractOutcome | null }> {
 	const existingUuid = await fileidIndex.lookup(file.fileid)
 	const uuid = existingUuid ?? crypto.randomUUID()
 	const cached = await mediaCache.lookup(uuid)
 	if (!cached || cached.hash !== file.hash) {
 		const publink = await ensurePublink(client, file.fileid, cached)
-		const meta = await extractFileMeta(client, file)
+		const { meta, outcome } = await extractFileMeta(client, file)
 		const next = fileToCachedMedia(file, publink, meta)
 		await mediaCache.remember(uuid, next)
 		if (!existingUuid) await fileidIndex.remember(file.fileid, uuid)
+		return { uuid, outcome }
 	}
-	return uuid
+	return { uuid, outcome: null }
 }
 
 async function sweepUuid(
@@ -151,6 +209,7 @@ export type RefreshResult = {
 	scanned: number
 	alive: number
 	removed: number
+	extractCounts: ExtractCounts
 	geocoded: number
 	geocodeCapped: number
 	geocodeFailures: Record<FailureReason, number>
@@ -166,8 +225,13 @@ export async function refreshMemories(
 	geocodeOpts?: GeocodeOpts,
 ): Promise<RefreshResult> {
 	const files = await listMediaFiles(client, folderId)
-	const aliveUuids = await Promise.all(
+	const processed = await Promise.all(
 		files.map((file) => processFile(client, file, mediaCache, fileidIndex)),
+	)
+	const aliveUuids = processed.map((p) => p.uuid)
+	const extractCounts = processed.reduce<ExtractCounts>(
+		(acc, p) => (p.outcome ? bumpExtractCounts(acc, p.outcome) : acc),
+		{ ...ZERO_EXTRACT_COUNTS },
 	)
 
 	const aliveSet = new Set(aliveUuids)
@@ -188,6 +252,7 @@ export async function refreshMemories(
 		scanned: files.length,
 		alive: aliveUuids.length,
 		removed: staleUuids.length,
+		extractCounts,
 		geocoded: geocodeResult.geocoded,
 		geocodeCapped: geocodeResult.capped,
 		geocodeFailures: geocodeResult.failures,

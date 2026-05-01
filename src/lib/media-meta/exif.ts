@@ -6,7 +6,10 @@ import exifr from 'exifr'
 // eslint-disable-next-line import/no-named-as-default-member
 const { parse } = exifr
 
-const RANGE_HEADER = 'bytes=0-65535'
+// 64KB is enough for JPEG EXIF (which sits in APP1 near the start), but iPhone
+// HEIC files often place the EXIF item bytes deeper in `mdat`. 1MB covers the
+// vast majority of real-world HEIC and is still cheap on the cron path.
+const RANGE_HEADER = 'bytes=0-1048575'
 
 type ExifTags = {
 	DateTimeOriginal?: unknown
@@ -22,6 +25,13 @@ type ExifTags = {
 	longitude?: unknown
 }
 
+// Important: pick RAW GPS tags, not the virtual `latitude`/`longitude`. exifr's
+// `pick` shortcut auto-enables blocks based on which tags are in its raw-tag
+// dictionary. The virtual outputs aren't in that dictionary, so picking them
+// alone leaves the GPS block disabled. Picking GPSLatitude/GPSLongitude (and
+// the refs, so the DMS-to-decimal conversion is signed correctly) enables GPS;
+// exifr's default `reviveValues: true` then surfaces the merged numeric
+// `latitude`/`longitude` we read in `pickLocation`.
 const TAG_NAMES = [
 	'DateTimeOriginal',
 	'CreateDate',
@@ -32,8 +42,10 @@ const TAG_NAMES = [
 	'PixelYDimension',
 	'ImageWidth',
 	'ImageHeight',
-	'latitude',
-	'longitude',
+	'GPSLatitude',
+	'GPSLatitudeRef',
+	'GPSLongitude',
+	'GPSLongitudeRef',
 ] as const
 
 export type GeoLocation = {

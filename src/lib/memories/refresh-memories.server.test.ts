@@ -458,6 +458,227 @@ describe('refreshMemories', () => {
 		expect(meta.height).toBe(1080)
 	})
 
+	describe('extract counts', () => {
+		const ZERO = {
+			imagesWithLocation: 0,
+			imagesNoLocation: 0,
+			imagesExtractError: 0,
+			videosWithLocation: 0,
+			videosNoLocation: 0,
+			videosExtractError: 0,
+		}
+
+		it('returns zeroed counts for an empty folder', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const client = fakeClient({ files: [] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual(ZERO)
+		})
+
+		it('counts a freshly-extracted image with GPS as imagesWithLocation', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			mockedExtractImageMeta.mockResolvedValueOnce({
+				captureDate: new Date('2020-01-15T10:00:00Z'),
+				width: 4032,
+				height: 3024,
+				location: { lat: 40.4168, lng: -3.7038 },
+			})
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual({ ...ZERO, imagesWithLocation: 1 })
+		})
+
+		it('counts a freshly-extracted image without GPS as imagesNoLocation', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			// default mock returns location: null
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual({ ...ZERO, imagesNoLocation: 1 })
+		})
+
+		it('counts an image extractor throw as imagesExtractError', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			mockedExtractImageMeta.mockRejectedValueOnce(new Error('boom'))
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual({ ...ZERO, imagesExtractError: 1 })
+		})
+
+		it('counts a video with GPS as videosWithLocation', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			mockedExtractVideoMeta.mockResolvedValueOnce({
+				captureDate: new Date('2018-04-27T10:00:00Z'),
+				width: 1920,
+				height: 1080,
+				location: { lat: 38.7169, lng: -9.1399 },
+			})
+			const client = fakeClient({ files: [mp4B] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual({ ...ZERO, videosWithLocation: 1 })
+		})
+
+		it('counts a video without GPS as videosNoLocation', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			// default mock returns location: null
+			const client = fakeClient({ files: [mp4B] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual({ ...ZERO, videosNoLocation: 1 })
+		})
+
+		it('counts a video extractor throw as videosExtractError', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			mockedExtractVideoMeta.mockRejectedValueOnce(new Error('boom'))
+			const client = fakeClient({ files: [mp4B] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual({ ...ZERO, videosExtractError: 1 })
+		})
+
+		it('does not count cache-hit (unchanged) entries', async () => {
+			// File already cached at the same hash → skip the extractor entirely.
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			fileidStore.data.set(100, { uuid: 'stable-uuid' })
+			mediaStore.data.set('stable-uuid', {
+				fileid: 100,
+				hash: 'h-a',
+				code: 'code-100',
+				linkid: 1000,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'a.jpg',
+				captureDate: '2020-01-15T10:00:00.000Z',
+				width: 4032,
+				height: 3024,
+				location: null,
+				place: null,
+			})
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual(ZERO)
+		})
+
+		it('aggregates mixed outcomes across files', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const jpegC = makeFile({
+				fileid: 102,
+				name: 'c.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-c',
+			})
+			mockedExtractImageMeta
+				.mockResolvedValueOnce({
+					captureDate: new Date('2020-01-15T10:00:00Z'),
+					width: 100,
+					height: 100,
+					location: { lat: 40, lng: -3 },
+				})
+				.mockResolvedValueOnce({
+					captureDate: new Date('2020-01-15T10:00:00Z'),
+					width: 100,
+					height: 100,
+					location: null,
+				})
+			mockedExtractVideoMeta.mockRejectedValueOnce(new Error('boom'))
+			const client = fakeClient({ files: [jpegA, jpegC, mp4B] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.extractCounts).toEqual({
+				...ZERO,
+				imagesWithLocation: 1,
+				imagesNoLocation: 1,
+				videosExtractError: 1,
+			})
+		})
+	})
+
 	describe('geocode pass', () => {
 		const APIKEY = 'test-key'
 		const MADRID = { lat: 40.4168, lng: -3.7038 }
