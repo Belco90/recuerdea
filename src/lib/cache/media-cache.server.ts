@@ -30,12 +30,7 @@ export function getMediaCacheStore(): MediaCacheStore {
 
 function createStore(): MediaCacheStore {
 	try {
-		// Strong consistency is required: the cron writes entries in processFile
-		// and re-reads them in runGeocodePass within the same invocation.
-		// Eventual reads can return undefined for keys that were just written,
-		// which silently skips every alive uuid (geocode pass attempted=0,
-		// noCached=N). See PR #8 v6 location work.
-		const blobs = getStore({ name: STORE_NAME, consistency: 'strong' })
+		const blobs = getStore({ name: STORE_NAME, consistency: 'eventual' })
 		return {
 			async get(uuid) {
 				const value = await blobs.get(`${KEY_PREFIX}${uuid}`, { type: 'json' })

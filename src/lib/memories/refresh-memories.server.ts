@@ -172,7 +172,7 @@ async function processFile(
 	file: FileMetadata,
 	mediaCache: MediaCache,
 	fileidIndex: FileidIndex,
-): Promise<{ uuid: string; outcome: ExtractOutcome | null }> {
+): Promise<{ uuid: string; outcome: ExtractOutcome | null; cached: CachedMedia }> {
 	const existingUuid = await fileidIndex.lookup(file.fileid)
 	const uuid = existingUuid ?? crypto.randomUUID()
 	const cached = await mediaCache.lookup(uuid)
@@ -182,9 +182,9 @@ async function processFile(
 		const next = fileToCachedMedia(file, publink, meta)
 		await mediaCache.remember(uuid, next)
 		if (!existingUuid) await fileidIndex.remember(file.fileid, uuid)
-		return { uuid, outcome }
+		return { uuid, outcome, cached: next }
 	}
-	return { uuid, outcome: null }
+	return { uuid, outcome: null, cached }
 }
 
 async function sweepUuid(
@@ -243,6 +243,13 @@ export async function refreshMemories(
 		files.map((file) => processFile(client, file, mediaCache, fileidIndex)),
 	)
 	const aliveUuids = processed.map((p) => p.uuid)
+	// In-memory snapshot of just-written entries. The geocode pass reads from
+	// here instead of round-tripping through the Blobs store, because the
+	// store uses eventual consistency (strong consistency requires
+	// `uncachedEdgeURL`, which Netlify scheduled functions don't get from
+	// `connectLambda`). Without this snapshot, lookup() returns undefined for
+	// every uuid and the geocode pass silently skips everything.
+	const aliveCached = new Map(processed.map((p) => [p.uuid, p.cached]))
 	const extractCounts = processed.reduce<ExtractCounts>(
 		(acc, p) => (p.outcome ? bumpExtractCounts(acc, p.outcome) : acc),
 		{ ...ZERO_EXTRACT_COUNTS },
@@ -259,7 +266,7 @@ export async function refreshMemories(
 	})
 
 	const geocodeResult = geocodeOpts
-		? await runGeocodePass(aliveUuids, mediaCache, geocodeOpts)
+		? await runGeocodePass(aliveUuids, aliveCached, mediaCache, geocodeOpts)
 		: {
 				geocoded: 0,
 				noPlace: 0,
@@ -293,6 +300,7 @@ export async function refreshMemories(
 
 async function runGeocodePass(
 	aliveUuids: readonly string[],
+	aliveCached: ReadonlyMap<string, CachedMedia>,
 	mediaCache: MediaCache,
 	opts: GeocodeOpts,
 ): Promise<{
@@ -328,7 +336,7 @@ async function runGeocodePass(
 	// daily quota in seconds and trip 429s.
 	/* eslint-disable no-await-in-loop */
 	for (const uuid of aliveUuids) {
-		const cached = await mediaCache.lookup(uuid)
+		const cached = aliveCached.get(uuid)
 		if (!cached) {
 			skippedNoCached += 1
 			continue
