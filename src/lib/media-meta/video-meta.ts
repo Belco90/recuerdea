@@ -3,22 +3,30 @@
 //
 //   - creation_time from the `mvhd` (movie header) atom
 //   - width / height from the first `tkhd` (track header) with non-zero dims
+//   - GPS coordinates from `udta.©xyz` (Apple QuickTime; ISO 6709 string)
 //
 // Best-effort: every field independently degrades to `null`.
 
 const MP4_EPOCH_OFFSET = 2_082_844_800
 const RANGE_HEADER_START = 'bytes=0-65535'
 const TAIL_SIZE = 1_048_576
+const ISO6709_PATTERN = /^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)(?:[+-]\d+(?:\.\d+)?)?\/?$/
 
 type BoxLocation = { start: number; end: number }
+
+export type GeoLocation = {
+	lat: number
+	lng: number
+}
 
 export type VideoMeta = {
 	captureDate: Date | null
 	width: number | null
 	height: number | null
+	location: GeoLocation | null
 }
 
-const EMPTY: VideoMeta = { captureDate: null, width: null, height: null }
+const EMPTY: VideoMeta = { captureDate: null, width: null, height: null, location: null }
 
 export async function extractVideoMeta(downloadUrl: string): Promise<VideoMeta> {
 	const startBuffer = await rangeFetch(downloadUrl, RANGE_HEADER_START)
@@ -66,7 +74,59 @@ function parseMoov(view: DataView, start: number, end: number): VideoMeta {
 	const mvhd = walkForBox(view, start, end, 'mvhd')
 	const captureDate = mvhd ? parseMvhd(view, mvhd.start, mvhd.end) : null
 	const dims = findTkhdDimensions(view, start, end)
-	return { captureDate, width: dims.width, height: dims.height }
+	const location = findUdtaXyz(view, start, end)
+	return { captureDate, width: dims.width, height: dims.height, location }
+}
+
+function findUdtaXyz(view: DataView, moovStart: number, moovEnd: number): GeoLocation | null {
+	const udta = walkForBox(view, moovStart, moovEnd, 'udta')
+	if (!udta) return null
+	const xyz = walkForCopyrightBox(view, udta.start, udta.end, 'xyz')
+	if (!xyz) return null
+	// Body: 2-byte length + 2-byte language code + UTF-8 text. Skip the 4-byte
+	// header and decode the rest; the ISO 6709 regex rejects anything malformed.
+	if (xyz.end - xyz.start < 4) return null
+	const textBytes = new Uint8Array(
+		view.buffer,
+		view.byteOffset + xyz.start + 4,
+		xyz.end - xyz.start - 4,
+	)
+	const text = new TextDecoder('utf-8', { fatal: false }).decode(textBytes).trim()
+	return parseIso6709(text)
+}
+
+function walkForCopyrightBox(
+	view: DataView,
+	start: number,
+	end: number,
+	suffix: string,
+): BoxLocation | null {
+	if (suffix.length !== 3) return null
+	let pos = start
+	while (pos + 8 <= end) {
+		const sized = readBoxHeader(view, pos, end)
+		if (!sized) return null
+		if (
+			view.getUint8(pos + 4) === 0xa9 &&
+			view.getUint8(pos + 5) === suffix.charCodeAt(0) &&
+			view.getUint8(pos + 6) === suffix.charCodeAt(1) &&
+			view.getUint8(pos + 7) === suffix.charCodeAt(2)
+		) {
+			return { start: sized.bodyStart, end: sized.boxEnd }
+		}
+		pos = sized.boxEnd
+	}
+	return null
+}
+
+function parseIso6709(text: string): GeoLocation | null {
+	const match = ISO6709_PATTERN.exec(text)
+	if (!match) return null
+	const lat = Number(match[1])
+	const lng = Number(match[2])
+	if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null
+	if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null
+	return { lat, lng }
 }
 
 // Walk all top-level children of `moov` looking for `trak` boxes; pick the

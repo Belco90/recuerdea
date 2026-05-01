@@ -36,11 +36,45 @@ export const handler = schedule('0 4 * * *', async (event) => {
 	const fileidIndex = createFileidIndex(getFileidIndexStore())
 	const folderCache = createFolderCache(getFolderCacheStore())
 
-	const result = await refreshMemories(client, folderId, mediaCache, fileidIndex, folderCache)
+	const apiKey = process.env.GEOAPIFY_API_KEY
+	const capRaw = process.env.RECUERDEA_GEOCODE_MAX_PER_RUN
+	const cap = capRaw && Number.isInteger(Number(capRaw)) ? Number(capRaw) : undefined
+	if (!apiKey) {
+		// eslint-disable-next-line no-console
+		console.warn('[refresh] geocode skipped: no api key')
+	}
 
+	const result = await refreshMemories(
+		client,
+		folderId,
+		mediaCache,
+		fileidIndex,
+		folderCache,
+		apiKey ? { apiKey, cap } : undefined,
+	)
+
+	const e = result.extractCounts
 	// eslint-disable-next-line no-console
 	console.log(
-		`[refresh-memories] scanned=${result.scanned} alive=${result.alive} removed=${result.removed}`,
+		`[refresh-memories] scanned=${result.scanned} alive=${result.alive} removed=${result.removed}` +
+			` img=${e.imagesWithLocation}/${e.imagesNoLocation}/${e.imagesExtractError} (gps/no-gps/err)` +
+			` vid=${e.videosWithLocation}/${e.videosNoLocation}/${e.videosExtractError} (gps/no-gps/err)` +
+			` geocoded=${result.geocoded} noPlace=${result.geocodeNoPlace} capped=${result.geocodeCapped} stopped=${result.geocodeStoppedReason ?? 'no'}`,
 	)
+	// eslint-disable-next-line no-console
+	console.log(
+		`[refresh-memories] geocode skip stats: attempted=${result.geocodeAttempted}` +
+			` noCached=${result.geocodeSkippedNoCached}` +
+			` noLocation=${result.geocodeSkippedNoLocation}` +
+			` alreadyDone=${result.geocodeSkippedAlreadyDone}` +
+			` afterStop=${result.geocodeSkippedAfterStop}`,
+	)
+	const f = result.geocodeFailures
+	if (f.auth || f.suspended || f.ratelimit || f.server || f.network || f.parse) {
+		// eslint-disable-next-line no-console
+		console.log(
+			`[refresh-memories] geocode failures: auth=${f.auth} suspended=${f.suspended} ratelimit=${f.ratelimit} server=${f.server} network=${f.network} parse=${f.parse}`,
+		)
+	}
 	return { statusCode: 200 }
 })

@@ -30,6 +30,8 @@ const sampleImage: CachedMedia = {
 	captureDate: '2019-04-28T12:00:00.000Z',
 	width: 4032,
 	height: 3024,
+	location: { lat: 40.4168, lng: -3.7038 },
+	place: 'Madrid, España',
 }
 
 const sampleVideo: CachedMedia = {
@@ -43,6 +45,8 @@ const sampleVideo: CachedMedia = {
 	captureDate: null,
 	width: null,
 	height: null,
+	location: null,
+	place: null,
 }
 
 describe('createMediaCache', () => {

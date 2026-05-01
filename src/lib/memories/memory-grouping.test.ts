@@ -12,6 +12,7 @@ function image(year: number, name: string): MemoryItem {
 		captureDate: `${year}-04-27T12:00:00.000Z`,
 		width: null,
 		height: null,
+		place: null,
 	}
 }
 
@@ -69,6 +70,7 @@ describe('groupMemoriesByYear', () => {
 				captureDate: 'not-a-date',
 				width: null,
 				height: null,
+				place: null,
 			},
 		]
 		const groups = groupMemoriesByYear(items, TODAY)
