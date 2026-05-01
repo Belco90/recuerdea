@@ -68,6 +68,11 @@ function buildUrl({ lat, lng, apiKey }: { lat: number; lng: number; apiKey: stri
 	const params = new URLSearchParams({
 		lat: String(lat),
 		lon: String(lng),
+		// `type=city` constrains Geoapify to a city-level result regardless of
+		// how specific the input coord is (default is the most specific match,
+		// often `result_type: building`). Picker fallbacks remain for edges
+		// where the API returns no city.
+		type: 'city',
 		lang: 'es',
 		apiKey,
 	})
