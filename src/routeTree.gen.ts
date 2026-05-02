@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ApiMemoryUuidRouteImport } from './routes/api/memory/$uuid'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -23,40 +22,31 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiMemoryUuidRoute = ApiMemoryUuidRouteImport.update({
-  id: '/api/memory/$uuid',
-  path: '/api/memory/$uuid',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/api/memory/$uuid': typeof ApiMemoryUuidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/api/memory/$uuid': typeof ApiMemoryUuidRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/api/memory/$uuid': typeof ApiMemoryUuidRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/api/memory/$uuid'
+  fullPaths: '/' | '/login'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/api/memory/$uuid'
-  id: '__root__' | '/' | '/login' | '/api/memory/$uuid'
+  to: '/' | '/login'
+  id: '__root__' | '/' | '/login'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
-  ApiMemoryUuidRoute: typeof ApiMemoryUuidRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,20 +65,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/memory/$uuid': {
-      id: '/api/memory/$uuid'
-      path: '/api/memory/$uuid'
-      fullPath: '/api/memory/$uuid'
-      preLoaderRoute: typeof ApiMemoryUuidRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
-  ApiMemoryUuidRoute: ApiMemoryUuidRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

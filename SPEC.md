@@ -138,7 +138,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - Colocate tests with source under `src/lib/` for any new pure logic.
 - Use the existing path alias `#/*` for `src/` imports.
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
-- **Resolve media URLs through `/api/memory/<uuid>?variant=...`.** The route is auth-gated and byte-streams the upstream public-link response so the public-link `code` (and the eapi/CDN host) never reach the browser. Public links are not IP-bound and not Referer-gated, so the function-side `fetch` works (unlike `getfilelink` / `getthumblink`, which are IP-bound and would fail across the function-IP / browser-IP boundary). Image and poster variants fetch `https://eapi.pcloud.com/getpubthumb?code=…&size=2048x1024` and pipe its body. Stream variant calls `getpublinkdownload({ code })` server-side, derives `https://${hosts[0]}${path}`, fetches that with the browser's `Range` header forwarded, and pipes the response (preserving `206` + `content-range` for video seek).
+- **Resolve media URLs server-side in the loader (v9).** The home loader builds direct `https://eapi.pcloud.com/getpubthumb?code=${code}&size=${size}` URLs per item — `640x640` → `MemoryItem.thumbUrl`, `1025x1025` → `MemoryItem.lightboxUrl`. The `getpubthumb` endpoint serves bytes statelessly (no signed URL, no IP binding), so the browser can render `<img src>` directly. Per-file public-link `code` reaches the browser via the URL — explicitly relaxed from earlier versions; see "Never do" below. For videos the loader calls `getpublinkdownload({ code })` server-side and embeds the resolved `https://${hosts[0]}${path}` CDN URL in `MemoryItem.mediaUrl`; downloads use a separate `getMediaDownloadUrl({ uuid })` server-fn that resolves the same way and the client `fetch`es the URL into a `Blob` saved via `<a download>`. The previous `/api/memory/<uuid>?variant=...` byte-streaming proxy was removed in v9 — the double-hop was the latency bottleneck. (`getpubthumblink`'s CDN URLs are signed against the calling IP and break when the browser fetches from a different IP, which is why thumbs use the stateless URL build instead.)
 - **The cron is the only writer for `media/<uuid>`, `fileid-index/<fileid>`, and `folder/v1`.** Loader and route handlers are read-only. Pre-prod, the cron must be triggered manually via the Netlify dashboard so the snapshot exists before users hit the page.
 - **Public-link lifecycle is owned by the cron.** When the cron sees a fileid disappear from `listfolder`, it calls `deletepublink(linkid)` and clears `media/<uuid>` + `fileid-index/<fileid>`. No abandoned public links accumulate in pCloud's "Public Links" panel.
 - **The home page HTML is `Cache-Control: private` (or `no-store`).** Per-user content; never publicly cached. Verify with `curl -I` on the deploy preview after any change to the home loader.
@@ -165,7 +165,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - Re-introduce the random fallback — explicitly retired in v2.
 - **Sign an IP-bound pCloud URL on the server and pass it to the browser.** `getfilelink` / `getthumblink` / `getvideolink` URLs are bound to the calling function's IP — the browser's IP won't match, the request gets rejected with "another IP address". v4 sidesteps this by using public-link URLs, which are not IP-bound. The IP-bound endpoints are only allowed when the URL is consumed in the same handler (e.g. EXIF range fetch from the cron).
 - **Sign pCloud URLs from the browser.** pCloud rejects `getfilelink` / `getthumblink` calls from browser origins with code 7010 "Invalid link referer", regardless of the page's HTTPS scheme. The pCloud token must stay server-only.
-- **Embed `fileid`, `code`, `linkid`, or the pCloud token in HTML / JSON / loader cache.** Only `uuid` reaches the browser. The cron writes the mapping to Netlify Blobs; the route handler resolves it.
+- **Embed the pCloud token or public-link `linkid` in HTML / JSON / loader cache.** The token and `linkid` are server-only. v9 relaxes this for `uuid`, the per-file public-link `code` (embedded in thumb URLs as `?code=…`), and the resolved video CDN URLs (`mediaUrl`). The trade-off on `code` exposure: anyone who can read the page HTML can fetch the underlying file from pCloud directly. Acceptable for this single-user app; documented in §15.
 - **Public-cache the home page HTML.** Per-user content. `Cache-Control` must be `private` / `no-store` / absent — never `public, s-maxage=...`.
 - Push directly to `main` — open a PR from the version branch instead.
 
@@ -174,10 +174,10 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 1. **MP4/MOV metadata parser library** — resolved in v2 (hand-rolled mvhd reader, no dep).
 2. **Range-fetch strategy for video EXIF** — resolved in v2 (two-step start/tail fetch).
 3. **Metadata store** — Netlify Blobs is shipped for the v4 cache: `media/<uuid>` (`{ fileid, hash, code, linkid, kind, contenttype, name, captureDate }`), `fileid-index/<fileid>` (`{ uuid }`), and `folder/v1` (`{ refreshedAt, uuids }`). `consistency: 'eventual'`, with a no-op fallback when the Blobs runtime isn't reachable (plain `pnpm dev`). Tagging/upload metadata stores remain future work. v3's per-fileid `capture-cache` is folded into `media/<uuid>` and removed.
-4. **Media URL signing (v4)** — resolved: pCloud **public links**, fetched server-side and byte-streamed through `/api/memory/<uuid>?variant=...`. The cron creates one public link per file via `getfilepublink` and caches the `code`. The route fetches `getpubthumb` (image/poster) or the `getpublinkdownload`-derived CDN URL (stream) and pipes the body so the public-link URL never appears in the browser. Public links are not IP-bound or Referer-gated, so the server-side fetch succeeds (unlike `getfilelink`).
+4. **Media URL signing (v4 → v9)** — v4 shipped a server-side proxy at `/api/memory/<uuid>?variant=...` that byte-streamed pCloud public-link responses. **Superseded by v9**: the loader builds `https://eapi.pcloud.com/getpubthumb?code=${code}&size=…` synchronously for thumbs (stateless direct-bytes endpoint, no per-request signing) and calls `getpublinkdownload({ code })` server-side for video stream + downloads. The browser renders direct `*.pcloud.com` URLs; the proxy is deleted. Trade-off: per-file public-link `code` reaches the browser via the thumb URL `?code=…`. Trade-off documented in §7 ("Never do") and §15 (Boundary). `getpubthumblink`'s JSON variant was tried first but its CDN URLs are signed against the calling IP and break in the browser, which is why thumbs use the URL build instead.
 5. **Cron schedule (v4)** — daily at 04:00 UTC (`0 4 * * *`). **Cron is the only writer.** No on-demand fallback; missing snapshot ⇒ home renders empty + warn. Manual first-run trigger required pre-prod.
 6. **Cache invalidation (v4)** — pCloud's content-derived `hash` invalidates per-uuid entries on content change (rename ≠ content change; same fileid + same hash = noop). When a fileid disappears from `listfolder`, the cron deletes the public link via `deletepublink(linkid)` and clears both `media/<uuid>` and `fileid-index/<fileid>`.
-7. **Scalability budget (v4)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path on the server: 1 `folder/v1` snapshot read + N `media/<uuid>` reads (where N = files in folder). **Zero pCloud API calls on the loader path** when warm. Per matched-item route hit: 0 pCloud API calls for image/poster (function fetches `getpubthumb` and pipes bytes); 1 lightweight `getpublinkdownload` call for stream, then the function pipes bytes from the CDN (every Range request, including video seek, goes through the function). User's pCloud premium plan has plenty of public-link traffic quota; Netlify bandwidth is the constraint to watch.
+7. **Scalability budget (v4 → v9)** — design for ~1000 files in the folder, ~30 matched-day items per visit. Hot path on the server **(v9)**: 1 `folder/v1` snapshot read + N `media/<uuid>` reads + **V parallel pCloud calls** (V = videos in today's set × `getpublinkdownload`). Thumb URLs are built synchronously from the cached `code` — zero API calls for image items. Per-video resolution runs via `Promise.all` with try/catch in the per-item path; a `getpublinkdownload` failure drops only that video with a `console.warn`. **Zero pCloud API calls on the route-hit path** since browser fetches CDN URLs directly; Netlify bandwidth drops to near zero on the media path (only the loader response + the lazy download server-fn).
 8. **Reverse-geocoding provider (v6)** — resolved: **Geoapify** (`https://api.geoapify.com/v1/geocode/reverse`). Free tier 3,000 req/day, 5 req/sec; cron throttles to 1 req/sec via software sleep + a per-run cap (default 200, env-overridable via `RECUERDEA_GEOCODE_MAX_PER_RUN`). API key in `GEOAPIFY_API_KEY` (server-only). Spanish output via `lang=es`. History: started with OpenCage in Slices 4–7, swapped to Geoapify mid-build for project-account reasons.
 
 ## 9. v1 → v2 changes summary
@@ -296,3 +296,42 @@ For readers diffing this spec against v5:
 **v6 build history (chronological):** Slices 1–2 added GPS extraction to the EXIF and MP4 pipelines. Slice 3 extended `CachedMedia` with `location` + `place`. Slices 4–5 wired up the OpenCage client + sequential cron geocode pass. Slices 6–7 plumbed `place` through `MemoryItem` to the polaroid + lightbox UI. Slice 8 swapped the geocoder from OpenCage to Geoapify under the same `reverseGeocode` interface (the user pivoted providers mid-build for project-account reasons; `quota` reason was dropped from the failure union since Geoapify uses 429 for both rate limit and daily quota).
 
 **Post-merge fix (commit `<TBD>`):** the first deploy-preview cron run produced `location: null` on every cached entry. Two distinct bugs surfaced: (a) `exifr.parse(buffer, ['latitude', 'longitude', ...])` doesn't enable the GPS block — the virtual `latitude`/`longitude` outputs aren't in exifr's raw-tag dictionary, so the GPS block stays disabled. Switched to picking the raw `GPSLatitude` / `GPSLatitudeRef` / `GPSLongitude` / `GPSLongitudeRef` tags. (b) iPhone HEIC EXIF often sits past the first 64KB; bumped the range fetch to 1MB. Also added per-extractor outcome counters to `RefreshResult` so the cron summary log surfaces extraction success/failure rates without leaking content.
+
+## 15. v9 Acceptance Criteria
+
+Cumulative on top of §11 (v4) and §13 (v6). v9 demolishes the `/api/memory/<uuid>` byte-streaming proxy: the home loader resolves CDN URLs server-side and the browser fetches `*.pcloud.com` directly. Cache shape and cron are unchanged.
+
+**Loader shape**
+
+- `MemoryItem` carries `thumbUrl: string` (640×640) + `lightboxUrl: string` (1025×1025) for every item; videos additionally carry `mediaUrl: string` (resolved `getpublinkdownload`).
+- Thumb URLs are built synchronously from `https://eapi.pcloud.com/getpubthumb?code=${code}&size=…`. The `getpubthumblink` JSON endpoint was tried first but its returned CDN URLs are signed against the calling IP and break when the browser fetches from a different IP. Direct-bytes `getpubthumb` works because pCloud serves the image statelessly (no per-request signing).
+- `fetchTodayMemories(today, client)` takes a `Client` argument; the `pcloud.ts` server-fn wrapper reads `PCLOUD_TOKEN` and instantiates the client. Missing token → server-fn returns `[]` + warn (parity with the existing missing-snapshot path).
+- Per-video `mediaUrl` resolution runs in parallel via `Promise.all`; a `getpublinkdownload` failure drops only that video with a `console.warn` (no fileid / no code in the log line). Image items can't fail at the URL stage — `buildThumbUrl` is pure.
+
+**Frontend**
+
+- `Polaroid` renders `<img src={item.thumbUrl}>`.
+- `Lightbox` image slide renders `<img src={item.lightboxUrl}>`. Video slide renders `<video src={item.mediaUrl} poster={item.thumbUrl}>`.
+- Download button calls `getMediaDownloadUrl({ uuid })` server-fn → `{ url, name, contenttype }` → client-side `fetch` → `Blob` → `URL.createObjectURL` → `<a download={name}>` click → revoke. Chakra `Spinner` + disabled while pending; icon turns red on error.
+
+**Demolition**
+
+- `src/routes/api/memory/$uuid.ts`, `src/lib/memories/memory-route.server.ts`, `memory-route.server.test.ts` deleted. `routeTree.gen.ts` regenerated.
+- Zero `/api/memory/<uuid>` requests anywhere in the running app.
+
+**Boundary**
+
+- pCloud token still server-only.
+- Public-link `linkid` stays in `CachedMedia` (server-only); does **not** reach the browser.
+- Per-file public-link `code` reaches the browser via thumb URLs (`?code=${code}`). Trade-off: anyone with the page HTML can fetch the file from pCloud. Acceptable for this single-user app; SPEC §7 "Never do" updated accordingly.
+- The CDN URLs returned by `getpublinkdownload` (`https://${hosts[0]}${path}`) carry their own time-limited tokens and reach the browser via `mediaUrl` (videos) and the `getMediaDownloadUrl` server-fn (downloads).
+
+## 16. v8 → v9 changes summary
+
+For readers diffing this spec against v8:
+
+- §1 Objective and §2 Acceptance Criteria: unchanged.
+- §4 Project Structure: adds `src/lib/memories/pcloud-urls.server.ts` (URL resolvers), `src/lib/memories/get-download-url.server.ts` + `get-download-url.ts` (lazy download URL server-fn), `src/lib/memories/download.ts` (client-side blob helper). Deletes `src/routes/api/memory/$uuid.ts` and `src/lib/memories/memory-route.server.ts`. `MemoryItem` gains `thumbUrl` + `lightboxUrl` + (videos) `mediaUrl`.
+- §7 Boundaries: "Always do" replaces the proxy-route bullet with the v9 server-side resolution rule. "Never do" relaxes the no-embed rule to allow `uuid` + the resolved CDN URLs (but not `code` / `linkid` / token).
+- §8 Open Questions: §8.4 (media URL signing) closed with the v9 design. §8.7 (scalability budget) updated for the new loader cost (2N+V parallel calls).
+- §13 (v6) and earlier sections: unchanged.

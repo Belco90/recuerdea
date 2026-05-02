@@ -1,6 +1,19 @@
 import type { YearGroup } from '#/lib/memories/memory-grouping'
+import type { MemoryItem } from '#/lib/memories/pcloud.server'
 
-import { Box, Carousel, Dialog, HStack, IconButton, Image, Portal, VStack } from '@chakra-ui/react'
+import { downloadAs } from '#/lib/memories/download'
+import { getMediaDownloadUrl } from '#/lib/memories/get-download-url'
+import {
+	Box,
+	Carousel,
+	Dialog,
+	HStack,
+	IconButton,
+	Image,
+	Portal,
+	Spinner,
+	VStack,
+} from '@chakra-ui/react'
 import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
@@ -17,8 +30,45 @@ function yearsAgoLowercase(n: number): string {
 	return `hace ${n} años`
 }
 
-function getDownloadHref(itemId: string): string {
-	return `/api/memory/${itemId}?variant=download`
+type DownloadStatus = 'idle' | 'pending' | 'error'
+
+function DownloadButton({ item }: { item: MemoryItem }) {
+	const [status, setStatus] = useState<DownloadStatus>('idle')
+
+	const handleClick = async () => {
+		setStatus('pending')
+		try {
+			const info = await getMediaDownloadUrl({ data: { uuid: item.uuid } })
+			await downloadAs({ url: info.url, name: info.name })
+			setStatus('idle')
+		} catch (err) {
+			// eslint-disable-next-line no-console
+			console.warn('[lightbox] download failed:', err)
+			setStatus('error')
+		}
+	}
+
+	return (
+		<IconButton
+			variant="ghost"
+			size="2xs"
+			color="white"
+			shadow="md"
+			aria-label={status === 'error' ? 'Error al descargar' : 'Descargar'}
+			disabled={status === 'pending'}
+			onClick={handleClick}
+		>
+			{status === 'pending' ? (
+				<Spinner size="xs" aria-hidden />
+			) : (
+				<Download
+					size={18}
+					aria-hidden
+					style={status === 'error' ? { color: 'var(--chakra-colors-red-400)' } : undefined}
+				/>
+			)}
+		</IconButton>
+	)
 }
 
 export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
@@ -78,23 +128,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 										</Box>
 									</>
 								)}
-								<IconButton
-									asChild
-									variant="ghost"
-									size="2xs"
-									aria-label="Descargar"
-									color="white"
-									shadow="md"
-								>
-									<a
-										href={getDownloadHref(item.uuid)}
-										download
-										target="_blank"
-										rel="noopener noreferrer"
-									>
-										<Download size={18} aria-hidden />
-									</a>
-								</IconButton>
+								<DownloadButton item={item} />
 							</HStack>
 							<HStack gap="2" flex="1" justify="center">
 								<Box
@@ -140,8 +174,8 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 									>
 										{it.kind === 'video' ? (
 											<video
-												src={`/api/memory/${it.uuid}?variant=stream`}
-												poster={`/api/memory/${it.uuid}?variant=thumb`}
+												src={it.mediaUrl}
+												poster={it.thumbUrl}
 												controls
 												autoPlay={i === idx}
 												preload={i === idx ? 'metadata' : 'none'}
@@ -157,7 +191,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 											</video>
 										) : (
 											<Image
-												src={`/api/memory/${it.uuid}?variant=thumb`}
+												src={it.lightboxUrl}
 												alt={it.name || 'Recuerdo'}
 												maxW="full"
 												maxH="full"

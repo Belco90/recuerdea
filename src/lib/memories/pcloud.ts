@@ -29,6 +29,14 @@ export const getTodayMemories = createServerFn({ method: 'GET' })
 
 		const target = data && user.isAdmin ? data : realToday()
 
+		const token = process.env.PCLOUD_TOKEN
+		if (!token) {
+			// eslint-disable-next-line no-console
+			console.warn('[pcloud] PCLOUD_TOKEN not set — returning empty memories')
+			return []
+		}
+
+		const { createClient } = await import('pcloud-kit')
 		const { fetchTodayMemories } = await import('./pcloud.server')
-		return fetchTodayMemories(target)
+		return fetchTodayMemories(target, createClient({ token }))
 	})

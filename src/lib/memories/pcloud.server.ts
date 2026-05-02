@@ -1,9 +1,12 @@
+import type { Client } from 'pcloud-kit'
+
 import type { CachedMedia } from '../cache/media-cache'
 
 import { createFolderCache } from '../cache/folder-cache'
 import { getFolderCacheStore } from '../cache/folder-cache.server'
 import { createMediaCache } from '../cache/media-cache'
 import { getMediaCacheStore } from '../cache/media-cache.server'
+import { buildThumbUrl, resolveMediaUrl } from './pcloud-urls.server'
 
 export type MemoryItem =
 	| {
@@ -14,6 +17,8 @@ export type MemoryItem =
 			width: number | null
 			height: number | null
 			place: string | null
+			thumbUrl: string
+			lightboxUrl: string
 	  }
 	| {
 			kind: 'video'
@@ -24,6 +29,9 @@ export type MemoryItem =
 			width: number | null
 			height: number | null
 			place: string | null
+			thumbUrl: string
+			lightboxUrl: string
+			mediaUrl: string
 	  }
 
 type Match = { uuid: string; meta: CachedMedia; capture: Date }
@@ -34,36 +42,51 @@ function tryParseDate(iso: string | null): Date | null {
 	return Number.isNaN(d.getTime()) ? null : d
 }
 
-function buildMemoryItem({ uuid, meta, capture }: Match): MemoryItem {
-	const captureDate = capture.toISOString()
-	if (meta.kind === 'video') {
-		return {
-			kind: 'video',
-			uuid,
-			contenttype: meta.contenttype,
-			name: meta.name,
-			captureDate,
-			width: meta.width,
-			height: meta.height,
-			place: meta.place,
+async function buildOrDrop(client: Client, match: Match): Promise<MemoryItem | null> {
+	const captureDate = match.capture.toISOString()
+	const thumbUrl = buildThumbUrl(match.meta.code, '640x640')
+	const lightboxUrl = buildThumbUrl(match.meta.code, '1025x1025')
+
+	if (match.meta.kind === 'video') {
+		try {
+			const mediaUrl = await resolveMediaUrl(client, match.meta.code)
+			return {
+				kind: 'video',
+				uuid: match.uuid,
+				contenttype: match.meta.contenttype,
+				name: match.meta.name,
+				captureDate,
+				width: match.meta.width,
+				height: match.meta.height,
+				place: match.meta.place,
+				thumbUrl,
+				lightboxUrl,
+				mediaUrl,
+			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'unknown error'
+			// eslint-disable-next-line no-console
+			console.warn(`[pcloud] dropping video memory: ${message}`)
+			return null
 		}
 	}
 	return {
 		kind: 'image',
-		uuid,
-		name: meta.name,
+		uuid: match.uuid,
+		name: match.meta.name,
 		captureDate,
-		width: meta.width,
-		height: meta.height,
-		place: meta.place,
+		width: match.meta.width,
+		height: match.meta.height,
+		place: match.meta.place,
+		thumbUrl,
+		lightboxUrl,
 	}
 }
 
-export async function fetchTodayMemories(today: {
-	month: number
-	day: number
-}): Promise<MemoryItem[]> {
-	// Cache-only: zero pCloud API calls when warm. The cron is the sole writer.
+export async function fetchTodayMemories(
+	today: { month: number; day: number },
+	client: Client,
+): Promise<MemoryItem[]> {
 	const folderCache = createFolderCache(getFolderCacheStore())
 	const mediaCache = createMediaCache(getMediaCacheStore())
 
@@ -91,5 +114,8 @@ export async function fetchTodayMemories(today: {
 		(a, b) => a.capture.getFullYear() - b.capture.getFullYear() || a.meta.fileid - b.meta.fileid,
 	)
 
-	return matches.map(buildMemoryItem)
+	if (matches.length === 0) return []
+
+	const items = await Promise.all(matches.map((match) => buildOrDrop(client, match)))
+	return items.filter((m): m is MemoryItem => m !== null)
 }
