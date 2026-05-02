@@ -13,6 +13,8 @@ function image(year: number, name: string): MemoryItem {
 		width: null,
 		height: null,
 		place: null,
+		thumbUrl: `https://thumb/${name}`,
+		lightboxUrl: `https://lightbox/${name}`,
 	}
 }
 
@@ -71,6 +73,8 @@ describe('groupMemoriesByYear', () => {
 				width: null,
 				height: null,
 				place: null,
+				thumbUrl: 'https://thumb/bad.jpg',
+				lightboxUrl: 'https://lightbox/bad.jpg',
 			},
 		]
 		const groups = groupMemoriesByYear(items, TODAY)
