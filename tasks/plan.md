@@ -1,237 +1,133 @@
-# Recuerdea v8 — Switch pCloud auth from session token (`?auth=`) to OAuth2 access token (`?access_token=`)
+# Recuerdea v9 — Server-resolved pCloud URLs in the route loader; demolish `/api/memory/<uuid>` proxy
 
-## Overview
+## Where we are
 
-Recuerdea currently authenticates against pCloud with a **session token** taken from the `userinfo` response, sent as `?auth=…` on every API call. The SDK calls in `netlify/functions/refresh-memories.ts:34` and `src/routes/api/memory/$uuid.ts:15` pass `type: 'pcloud'` to opt into that mode.
+- **v8 shipped** at `2d84386` — `PCLOUD_TOKEN` is an OAuth access token; both server call sites use `createClient({ token })`.
+- **A prior v9 plan (browser-side public-link calls) is abandoned.** pCloud blocks the browser-origin pubthumb variants in practice; URLs must be minted server-side.
+- **Today's hot path is slow.** `<img src="/api/memory/<uuid>?variant=thumb">` → Netlify function reads cache → fetches `eapi.pcloud.com/getpubthumb` → byte-streams the response back. The double-hop is the bottleneck.
 
-The user has now provisioned an OAuth2 app in pCloud (client ID + client secret, redirect URI empty). This plan flips both server call sites to OAuth mode (`type: 'oauth'`, the SDK default — sends `?access_token=`) and replaces the value in `PCLOUD_TOKEN` with a real OAuth access token obtained via the authorization-code flow.
+## Goal — single end state
 
-**v8 is a pre-requirement for v9 (browser-side pCloud calls).** OAuth is the format `pcloud-kit/oauth-browser` produces, and `?access_token=` is the credential shape the browser SDK uses. v8 picks the credential model that works on both sides; v9 will then design the browser distribution / sign-in flow on top of that foundation. **v8 itself does not introduce browser-side pCloud calls** — that is explicitly out of scope and will need a SPEC update (see "Forward to v9" below).
+- **Loader** resolves URLs server-side, **per item** via `getpubthumblink` (no batching, no folder publink). Each `MemoryItem` carries `thumbUrl` (640×640) + `lightboxUrl` (1025×1025) + (videos) `mediaUrl` (stream/download). All URLs point at `*.pcloud.com` CDN; none carry the public-link `code`.
+- **Polaroid** renders `<img src={item.thumbUrl}>`.
+- **Lightbox image slide** renders `<img src={item.lightboxUrl}>`. **Video slide** renders `<video src={item.mediaUrl} poster={item.thumbUrl}>`.
+- **Download** button calls `getMediaDownloadUrl({ uuid })` server-fn → resolved CDN URL → client-side `fetch` → `Blob` → `URL.createObjectURL` → `<a download={name}>` click → revoke.
+- `/api/memory/<uuid>` route + `memory-route.server.ts` deleted.
+- pCloud token still server-only. Per-file `code` + `linkid` stay in the cache, never reach the browser.
+- **Cache shape unchanged.** **Cron unchanged.** Per-file public links keep working as-is.
 
-**Scope for this PR is minimal:** two one-line code changes, an env-var rotation, and a one-time token-provisioning chore. No browser-side change in v8, no architecture change. This is a credential-mode swap that unblocks v9.
+Branch: `v9-server-thumbs` (cut from `main`). PR target: `main`. Light SPEC update.
 
-Branch: `v8-oauth` (cut from `main`). PR target: `main`.
+---
 
-## Direct answers to the original questions
+## Architecture decisions
 
-### Q1. Should I change it server-side and client-side, or just client-side?
+1. **Cache shape unchanged.** `CachedMedia` keeps per-file `code` + `linkid`. `FolderSnapshot` keeps `uuids`. Cron keeps minting per-file publinks via `getfilepublink`. Minimum churn.
+2. **Loader resolves URLs server-side per item, per page-load.**
+   - `resolveThumbUrl(client, code, '640x640')` → `getpubthumblink` (callRaw) → `https://${hosts[0]}${path}`.
+   - `resolveThumbUrl(client, code, '1025x1025')` → same, larger size.
+   - `resolveMediaUrl(client, code)` → `getpublinkdownload` (callRaw) → `https://${hosts[0]}${path}`.
+   - All calls dispatched in parallel via `Promise.allSettled`; per-item failures drop the offending item with a single warn (no fileid in log).
+   - Per-loader API cost: 2N + V (N = today's items, V = videos in today's set). Latency ≈ max-of-parallel ≈ 100–200 ms on a warm function. Acceptable; profile during Task 2.
+3. **Per-file `code` never reaches the browser.** CDN URLs returned by `getpubthumblink` / `getpublinkdownload` carry their own time-limited tokens — they do not expose the public-link `code`. SPEC §7 boundary preserved (modulo wording: media URLs reach the browser, but the `code` does not).
+4. **Image originals (download URLs) lazy.** `MemoryItem` does not ship a download URL for images; resolved on click via `getMediaDownloadUrl({ uuid })`. Saves N extra calls per page-load. Videos still ship `mediaUrl` because `<video src>` needs it eagerly for stream playback; the download button reuses it.
+5. **Lightbox image size: 1025×1025.** Per user direction. Phase 0 verifies pCloud accepts the size; if rejected, picks the closest grid value (likely `1024x1024`).
+6. **No URL caching across loader invocations.** Resolved CDN URLs expire (~6 h). Caching would need a TTL store; defer until profiling demands it.
+7. **No batching.** `getpubthumbslinks` is the batched variant but requires a folder publink — and adopting that triggers a cache + cron migration that's out of scope for this change. Per-call latency is parallelizable; user has approved staying with `getpubthumblink` per item.
 
-**Server-side only — for v8.** Recuerdea has zero browser-side pCloud code today by deliberate design (SPEC §7: "Never sign pCloud URLs from the browser"). The pCloud SDK is invoked in exactly two server files:
+## Spike-gated assumptions
 
-- `netlify/functions/refresh-memories.ts:34` — `createClient({ token, type: 'pcloud' })`
-- `src/routes/api/memory/$uuid.ts:15` — `createClient({ token, type: 'pcloud' })`
+| Spike check                                                                                                                                      | If it fails                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server-side `client.callRaw('getpubthumblink', { code, size: '640x640' })` for an existing per-file `code` returns `{ result: 0, hosts, path }`. | Per-tile direct URL build (`https://eapi.pcloud.com/getpubthumb?code=…&size=640x640`) — exposes per-file `code` in browser; SPEC §7 needs a wider relaxation. |
+| Server-side `client.callRaw('getpubthumblink', { code, size: '1025x1025' })` accepts `1025x1025`.                                                | Pick the closest accepted size from pCloud's grid (likely `1024x1024`); update the plan to that size.                                                         |
+| Server-side `client.callRaw('getpublinkdownload', { code })` returns `{ result: 0, hosts, path }`.                                               | Already in production use today via `$uuid.ts`; sanity check only.                                                                                            |
+| `https://${hosts[0]}${path}` for a video supports HTTP Range (206) from the browser.                                                             | Already verified by today's proxy; sanity check.                                                                                                              |
+| Browser-side `fetch(cdnUrl).blob()` succeeds (CORS-permissive).                                                                                  | Fall back to `<a href={cdnUrl} download>` — may navigate inline. Worst case: keep the proxy for downloads only.                                               |
 
-Both literally pass `type: 'pcloud'`, which is pcloud-kit's switch for session-token mode. Drop that property (default is `'oauth'`) and the SDK sends the same token as `?access_token=` instead of `?auth=`. That's the entire v8 code change.
+Phase 0 verifies these in ~10 minutes against the prod token.
 
-> v9 (deferred): browser-side calls. The OAuth swap in v8 is what makes v9 possible — `pcloud-kit/oauth-browser` produces OAuth tokens; the browser SDK uses `?access_token=`. v8 picks the right format. v9 designs the distribution flow.
+---
 
-### Q2. Do I need to set the redirection URI?
+## Loader shape
 
-**Yes, for the authorization-code flow you need to register one in pCloud's app settings.** Reasons:
+```ts
+type MemoryItem =
+	| {
+			kind: 'image'
+			uuid: string
+			name: string
+			captureDate: string
+			width: number | null
+			height: number | null
+			place: string | null
+			thumbUrl: string // 640×640
+			lightboxUrl: string // 1025×1025
+	  }
+	| {
+			kind: 'video'
+			uuid: string
+			contenttype: string
+			name: string
+			captureDate: string
+			width: number | null
+			height: number | null
+			place: string | null
+			thumbUrl: string // 640×640 — also used as <video poster>
+			lightboxUrl: string // 1025×1025 — kept for shape parity; not currently rendered for video
+			mediaUrl: string // resolved getpublinkdownload — <video src> + download
+	  }
 
-- pcloud-kit's `buildAuthorizeUrl` asserts `redirectUri` is required (`oauth.js:5`).
-- pCloud's authorize endpoint verifies the callback URL matches what is registered on the app.
-
-For v8 (server-token provisioning), you only execute this flow **once** locally:
-
-- Pick any URL you can read the `?code=…` query string back from. `http://localhost:8787/oauth/callback` works and avoids needing a public web server.
-- Register that exact URL in the pCloud app config.
-- After you have the access token, the redirect URI is never used again at runtime.
-
-For v9 (browser per-session token), the redirect URI must be a **real, deployed page** in Recuerdea (e.g. `https://recuerdea.netlify.app/oauth/pcloud-callback`). That's a v9 decision; do not register that one yet — keep v8's localhost callback registered until v9 lands.
-
-## Resolved decisions
-
-| #   | Decision                            | Outcome                                                                                                                                                                                                                                                                                          |
-| --- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Q1  | Server-side or client-side (in v8)? | **Server-side only.** Drop `type: 'pcloud'` in two SDK call sites. Browser-side wiring is v9.                                                                                                                                                                                                    |
-| Q2  | Redirect URI?                       | **Register a localhost URL** for v8 (e.g. `http://localhost:8787/oauth/callback`). Used once locally; not at runtime. v9 will register a separate prod callback for the browser flow.                                                                                                            |
-| Q3  | OAuth flow choice                   | **Authorization code flow** (`response_type=code` + `getTokenFromCode`). Simplest path with `pcloud-kit/oauth`, runs locally as a one-off Node script. Poll-token flow rejected — more code, no benefit for a single-owner provisioning step.                                                    |
-| Q4  | Env var name                        | **Keep `PCLOUD_TOKEN`.** Renaming churns Netlify config + `.env.local` + `env.d.ts` + two source files for no functional gain. The variable's _meaning_ stays "the bearer credential the server sends to pCloud." Document the format change in the PR description.                              |
-| Q5  | Provisioning script location        | **`scripts/oauth-provision.mjs`** — outside `src/` so it is not bundled. Plain Node, reads `PCLOUD_CLIENT_ID` + `PCLOUD_APP_SECRET` + `PCLOUD_REDIRECT_URI` from env, prints the token. **User confirmed: keep long-term.** Useful for future server-token rotation.                             |
-| Q6  | Pre-existing tests                  | **No changes needed.** Tests in `src/lib/memories/*.test.ts` inject mock pcloud-kit clients; none of them constructs a real client or asserts on `type`. Verified: `grep -n "type: 'pcloud'\|createClient" src/lib/memories/*.test.ts` → 0 matches.                                              |
-| Q7  | API server (EU vs US)               | **EU.** User confirmed account is on the EU data center → `locationid === 2` → use `eapi.pcloud.com` (the SDK default). No `apiServer` override needed in either `createClient` call.                                                                                                            |
-| Q8  | Token rotation / refresh            | **No refresh-token flow needed.** pCloud OAuth2 access tokens are long-lived (single-token model — `getTokenFromCode` returns no `refresh_token`). If revoked or expired, run `scripts/oauth-provision.mjs` again and update Netlify env. Document this fallback in the PR.                      |
-| Q9  | Old session token revocation timing | **After 1 week of stable runs.** Gives a rollback window. Track the deadline in the PR description; revoke via pCloud Console → Sessions / Active tokens.                                                                                                                                        |
-| Q10 | Browser-side use (forward-looking)  | **v8 stays server-only.** OAuth is chosen specifically because it survives the v9 browser move. Token-distribution model (single shared token vs server + per-session browser tokens) is a v9 decision; v8 must not lock it in. Recommendation in v8 risks section: lean toward separate tokens. |
-
-## Forward to v9 — browser-side pCloud calls (out of scope here, but constrains v8)
-
-The user's stated direction: after v8 ships, v9 will make pCloud requests from the browser. v8 must not paint v9 into a corner. Captured here so v8 reviewers know what we are protecting.
-
-### What v9 will need
-
-1. **A SPEC §7 update.** The boundary list explicitly forbids:
-   - "Sign pCloud URLs from the browser" (Never do)
-   - "Embed `fileid` / `code` / `linkid` / token in HTML / JSON / loader cache" (Never do)
-   - Sign IP-bound URLs server-side and pass to the browser (Never do)
-     v9 must rewrite this list. Specifically: which endpoints are safe to call from the browser, and how the token reaches the browser. Without this rewrite, v9 violates the project's own contract.
-2. **A token-distribution model.** Two coherent shapes; v9 must pick:
-   - **(A) Same token everywhere.** Server stores it; browser fetches it from a Netlify-Identity-gated route. Simple, but: full account scope reaches JS execution context (XSS surface ⇒ full pCloud compromise); revocation breaks cron and browser together.
-   - **(B) Separate tokens.** Server keeps the long-lived `PCLOUD_TOKEN` (cron + `/api/memory/...`). Browser mints its own per-session token via `pcloud-kit/oauth-browser` `initOauthToken` (popup) or `initOauthPollToken`. User signs into pCloud separately from Netlify Identity. **Recommended.** Compromise scope is isolated; matches pcloud-kit's documented browser flow; revoking the browser session never touches the cron.
-3. **An endpoint allow-list.** pCloud rejects browser-origin calls on certain endpoints with code 7010 ("Invalid link referer") — `getfilelink`, `getthumblink`, `getvideolink` are known-bad. `userinfo`, `listfolder` (basic), `getpublinkdownload`, `getpubthumb` are likely OK but each must be smoke-tested before relying on it.
-4. **Re-evaluation of `/api/memory/<uuid>`.** Today the route exists because the server has to byte-stream pCloud responses (browser couldn't). If v9 enables direct browser fetches against safe pCloud endpoints, parts of that route may become redundant — or stay as a fallback for the unsafe-endpoint set. v9 will decide; v8 keeps it untouched.
-
-### What v8 deliberately does NOT do
-
-- Does **not** rename `PCLOUD_TOKEN`. v9 may want to split into `PCLOUD_SERVER_TOKEN` + a separate browser flow; renaming twice is worse than once.
-- Does **not** expose any token to the browser, even via authenticated routes.
-- Does **not** add browser-side pCloud SDK code. Adding a `pcloud-kit/oauth-browser` import in v8 would also drag in browser bundle weight before any caller benefits from it.
-- Does **not** modify SPEC §7. The "never do" list still applies; v9 owns that update.
-
-### Cheap forward-leaning moves v8 DOES make
-
-- Picks OAuth (not session token). Aligns the server credential format with what pcloud-kit's browser SDK produces, so v9 doesn't have to re-architect the cron.
-- Keeps the provisioning script (`scripts/oauth-provision.mjs`) committed, so v9 can reuse it for any server-side token rotation independent of the browser flow.
-- Adds a one-time CORS smoke during Task 3 (Phase 1) — fetch `userinfo` from a localhost browser console using the freshly-minted token — to confirm the OAuth token format authenticates a browser-origin request before we declare v8 done. Cheap viability check; saves a v9 surprise.
-
-## Confirmed assumptions
-
-1. The user has the pCloud OAuth app's `client_id` and `client_secret` to hand and can paste them into a local shell. They will not commit either to the repo.
-2. The user can run the consent step in a browser they control (i.e. they are the pCloud account owner) — this is a single-owner app.
-3. Netlify's Site → Environment variables UI lets us update `PCLOUD_TOKEN` for both Production and Deploy-preview scopes without redeploying through code.
-4. Existing folder snapshot + media cache (`folder/v1`, `media/<uuid>`, `fileid-index/<fileid>`) survive the credential swap unchanged. The cache is keyed on `fileid` / `uuid` / `hash`, none of which depend on auth mode.
-5. The cron's `getfilelink` / `getfilepublink` / `deletepublink` / `getpublinkdownload` calls all accept OAuth tokens (they are auth-required `auth: true` methods in the SDK's method registry — auth mode is irrelevant, only the value of the auth parameter changes).
-6. SDK behaviour is identical between modes: same endpoints, same JSON shapes, same error classes. Only the query-string parameter name differs (`?access_token=…` vs `?auth=…`).
-7. **EU data center.** User confirmed `locationid === 2`. SDK default (`eapi.pcloud.com`) is correct; no `apiServer` override needed.
-8. **OAuth tokens authenticate browser-origin `userinfo` calls.** Verified via Task 3.5 smoke. (If this fails, we re-think v9 immediately — but v8 still ships, since the cron + route only hit pCloud server-side.)
-
-## Architecture
-
-### Code change (the entire diff for v8)
-
-```diff
- // netlify/functions/refresh-memories.ts
--  const client = createClient({ token, type: 'pcloud' })
-+  const client = createClient({ token })
+type HomeLoaderData = {
+	memories: MemoryItem[]
+	isAdmin: boolean
+}
 ```
 
-```diff
- // src/routes/api/memory/$uuid.ts
--  const client = createClient({ token, type: 'pcloud' })
-+  const client = createClient({ token })
-```
-
-That is the only v8 source change. Default `type` is `'oauth'` per `pcloud-kit` `CreateClientOptions`. EU server is the SDK default.
-
-### Provisioning script (kept long-term per Q5)
-
-`scripts/oauth-provision.mjs`:
-
-- Read `PCLOUD_CLIENT_ID`, `PCLOUD_APP_SECRET`, `PCLOUD_REDIRECT_URI` from env.
-- Print `buildAuthorizeUrl({ clientId, redirectUri, responseType: 'code' })`. User opens it in a browser, signs in, lands on the redirect URI with `?code=…`.
-- User pastes the code back into the script (stdin or CLI arg).
-- Script calls `getTokenFromCode(code, clientId, appSecret)` and prints `access_token` + `locationid` to stdout.
-- User copies the access token into `.env.local` (for local) and Netlify env (for Production / Deploy-preview).
-
-This stays out of the deployed app entirely. It is a developer chore, not runtime code. The script itself doesn't import anything that would pull pCloud-kit into the production bundle.
-
-### Boundaries unchanged in v8
-
-- `PCLOUD_TOKEN` stays server-only (read in `*.server.ts` + the netlify function only). Per SPEC §7.
-- The token still never leaves the server: `/api/memory/<uuid>` continues to byte-stream and the public-link `code` continues to live in Blobs.
-- Cache invalidation, public-link lifecycle, cron schedule, and auth gate are untouched.
-
-> v9 will revisit these boundaries. v8 leaves them intact.
-
-## Task list
-
-### Phase 1 — Provision the access token (one-off chore)
-
-#### Task 1: Configure the pCloud OAuth app and register a redirect URI
-
-**Description:** Set the redirect URI on the pCloud app to `http://localhost:8787/oauth/callback` (or any localhost URL). pCloud Console setting, not a code change.
-
-**Acceptance criteria:**
-
-- [ ] pCloud app shows a redirect URI registered, exactly matching what the script will use.
-- [ ] `PCLOUD_CLIENT_ID`, `PCLOUD_APP_SECRET`, and `PCLOUD_REDIRECT_URI` are exported in the user's local shell (or in a non-committed `.env.oauth` file). None of them is committed.
-
-**Verification:**
-
-- [ ] Visiting `https://my.pcloud.com/oauth2/authorize?client_id=<id>&redirect_uri=<encoded>&response_type=code` shows the consent screen for the right account (no "invalid redirect_uri" error).
-
-**Dependencies:** None.
-
-**Files likely touched:** none (pCloud Console + local shell).
-
-**Estimated scope:** XS.
+`HomeLoaderData` shape unchanged — all the new fields live on `MemoryItem`.
 
 ---
 
-#### Task 2: Add `scripts/oauth-provision.mjs` to mint the access token
+## File map
 
-**Description:** Tiny Node script wrapping `pcloud-kit/oauth`. (a) Prints the authorize URL, (b) reads the `code` from stdin, (c) calls `getTokenFromCode`, (d) prints `access_token` + `locationid`. No new deps. Committed long-term per Q5 — useful for future server-token rotation.
+| Action     | File                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------ |
+| **New**    | `src/lib/memories/pcloud-urls.server.ts` + test (`resolveThumbUrl`, `resolveMediaUrl`)           |
+| **Modify** | `src/lib/memories/pcloud.server.ts` + test (loader resolves URLs; new `MemoryItem` shape)        |
+| **Modify** | `src/lib/memories/pcloud.ts` (server-fn wrapper carries new shape)                               |
+| **New**    | `src/lib/memories/get-download-url.ts` + test (server-fn for lazy download URL)                  |
+| **New**    | `src/lib/memories/download.ts` + test (client-side blob-download helper)                         |
+| **Modify** | `src/components/Polaroid.tsx` (use `item.thumbUrl`)                                              |
+| **Modify** | `src/components/Lightbox.tsx` (use `item.lightboxUrl` + `item.mediaUrl`; rewire download button) |
+| **Delete** | `src/routes/api/memory/$uuid.ts`                                                                 |
+| **Delete** | `src/lib/memories/memory-route.server.ts` + test                                                 |
+| **Modify** | `src/routeTree.gen.ts` (regenerated, never hand-edit)                                            |
+| **Modify** | `SPEC.md` (§7 boundary touch-up; §17 v9 acceptance criteria; §18 v8→v9 diff)                     |
 
-**Acceptance criteria:**
-
-- [ ] `scripts/oauth-provision.mjs` exists and is executable (`node scripts/oauth-provision.mjs`).
-- [ ] Reads `PCLOUD_CLIENT_ID`, `PCLOUD_APP_SECRET`, `PCLOUD_REDIRECT_URI` from `process.env`. Errors clearly if any is missing.
-- [ ] Prints the authorize URL and the input prompt on stderr (keeps stdout clean for redirection).
-- [ ] Reads the code from stdin (one line, trimmed). Accepts either a bare code or the full callback URL.
-- [ ] Prints the access token and `locationid` to stdout, nothing else (`access_token=...\nlocationid=...\n`).
-- [ ] Does not write the token to any file; the user copies it manually.
-- [ ] Does not log secrets to anywhere other than stdout (no `console.error`-with-secret on failure).
-
-**Verification:**
-
-- [ ] `node scripts/oauth-provision.mjs` with valid env + a fresh code prints a non-empty access token and a `locationid`.
-- [ ] Running it without `PCLOUD_CLIENT_ID` exits non-zero with a clear message.
-- [ ] `grep -E "console\.(log|error)" scripts/oauth-provision.mjs` shows the script only emits secrets via stdout, never error or log channels that could trip CI capture.
-
-**Dependencies:** Task 1.
-
-**Files likely touched:**
-
-- `scripts/oauth-provision.mjs` (new).
-
-**Estimated scope:** XS.
+Untouched: `src/lib/auth/*`, `src/lib/cache/*`, `src/lib/cache/fileid-index*`, `src/lib/media-meta/*`, `src/lib/utils/*`, `src/lib/memories/refresh-memories.server.ts`, `netlify/functions/refresh-memories.ts`, `src/components/{AppShell,Topbar,Hero,EmptyState,Wordmark,Timeline,YearSection,AdminDateOverride}`, theme, fonts, cron schedule.
 
 ---
 
-#### Task 3: Mint the access token and confirm it works server-side
+## Task list — vertical slices
 
-**Description:** Run the script end-to-end. Save the access token in `.env.local` (replacing the current `PCLOUD_TOKEN` value).
+### Phase 0 — Spike (10 min, no code changes)
 
-**Acceptance criteria:**
+#### Task 0: Confirm the pCloud calls work as needed
 
-- [ ] `.env.local` `PCLOUD_TOKEN` value is now an OAuth access token (different shape from the old session token).
-- [ ] Script's reported `locationid` is `2` (EU). If it returns `1` (US), pause and revisit Q7 — assumption was EU.
-- [ ] The previous session token is **not** archived in any committed file.
-
-**Verification:**
-
-- [ ] `curl -fsS "https://eapi.pcloud.com/userinfo?access_token=$PCLOUD_TOKEN" | jq -e '.result == 0'` returns success — token authenticates server-side.
-- [ ] Same `curl` with the **old** session-token value returns a non-zero `result` (sanity: confirms you actually swapped).
-
-**Dependencies:** Task 2.
-
-**Files likely touched:** `.env.local` (uncommitted).
-
-**Estimated scope:** XS.
-
----
-
-#### Task 3.5: Browser-CORS smoke (v9 viability check)
-
-**Description:** One-time browser-origin sanity check. From any HTTPS page's DevTools console (or a `localhost:5173` dev page), `fetch` `userinfo` with the new OAuth token. Confirms the credential format authenticates a browser-origin request — without this, v9 is dead on arrival under option (A) AND option (B) of the token-distribution model.
+**Description:** From a Node REPL (or `pnpm tsx` script) with `PCLOUD_TOKEN`, plus a browser devtools console on the deploy preview, confirm the contracts the loader and download flow rely on.
 
 **Acceptance criteria:**
 
-- [ ] `fetch('https://eapi.pcloud.com/userinfo?access_token=<TOKEN>').then(r => r.json())` from a browser console returns `{ result: 0, ... }` with the expected account `email`.
-- [ ] No CORS error in the browser console (`Access-Control-Allow-Origin` is set on the response, or the request is treated as simple/CORS-safelisted).
+- [ ] Server-side: `client.callRaw('getpubthumblink', { code: <existing per-file code>, size: '640x640' })` → `{ result: 0, hosts, path }`.
+- [ ] Server-side: `client.callRaw('getpubthumblink', { code: <existing per-file code>, size: '1025x1025' })` → `{ result: 0, hosts, path }`. **If `1025x1025` is rejected**, capture the closest accepted size from pCloud's grid and update the plan to that size before code lands.
+- [ ] Server-side: `client.callRaw('getpublinkdownload', { code: <existing per-file code> })` → `{ result: 0, hosts, path }`. (Sanity check; same call already in `$uuid.ts`.)
+- [ ] Browser devtools (preview): `fetch('https://${hosts[0]}${path}', { headers: { Range: 'bytes=0-1023' } })` → 206 (video stream sanity).
+- [ ] Browser devtools: `fetch('https://${hosts[0]}${path}').then(r => r.blob())` succeeds (CORS-permissive — confirms client-side download path).
+- [ ] All results captured in PR description (including the final lightbox size).
 
-**Verification:**
+**Verification:** by inspection.
 
-- [ ] DevTools → Network: the `userinfo` request shows status 200 and JSON body.
-- [ ] Result captured in the PR description for v9 reference. (One-line note is enough; we are not gating v8 on v9 viability.)
-
-**Notes:**
-
-- If this fails (CORS blocked), v8 still ships — the server uses node-side `fetch`, which doesn't care about CORS. But it changes v9's design space materially. Document the failure in the PR and open a v9 question.
-- This is a smoke, not a comprehensive endpoint sweep. v9 will systematically test the endpoints it actually needs.
-
-**Dependencies:** Task 3.
+**Dependencies:** v8 merged (it is); a few existing per-file `code`s pulled from Blobs.
 
 **Files likely touched:** none.
 
@@ -239,154 +135,265 @@ This stays out of the deployed app entirely. It is a developer chore, not runtim
 
 ---
 
-### Checkpoint A — Token works against pCloud (server + browser smoke)
+### ✅ Checkpoint 0 — Architecture viable
 
-- [ ] `userinfo` over OAuth (server-side `curl`) returns the expected account.
-- [ ] `userinfo` over OAuth (browser-side `fetch`) returns the expected account, no CORS error.
-- [ ] `locationid` recorded as `2` in PR notes.
+- [ ] All checks pass. **If any fails, stop** and pivot per "Spike-gated assumptions" above.
 
 ---
 
-### Phase 2 — Code change
+### Phase 1 — Server-side URL resolution
 
-#### Task 4: Drop `type: 'pcloud'` in both `createClient` calls
+#### Task 1: Pure URL-resolution helpers + tests
 
-**Description:** Two-line edit: remove the `type: 'pcloud'` property from both `createClient` calls so the SDK uses its OAuth + EU default.
+**Description:** New module `src/lib/memories/pcloud-urls.server.ts` exporting:
+
+- `resolveThumbUrl(client, code, size)` — calls `client.callRaw('getpubthumblink', { code, size })`; returns `https://${hosts[0]}${path}`. Throws on `result !== 0` (tagged with the pCloud `error` field) or missing/empty `hosts`.
+- `resolveMediaUrl(client, code)` — calls `client.callRaw('getpublinkdownload', { code })`; returns `https://${hosts[0]}${path}`. Same error handling.
+
+`size` is typed as a literal union (`'640x640' | '1025x1025'`).
 
 **Acceptance criteria:**
 
-- [ ] `netlify/functions/refresh-memories.ts:34` calls `createClient({ token })`.
-- [ ] `src/routes/api/memory/$uuid.ts:15` calls `createClient({ token })`.
-- [ ] No other source file references `type: 'pcloud'` (`grep -rn "type: 'pcloud'" src netlify` → 0 matches).
-- [ ] `env.d.ts` `PCLOUD_TOKEN` typing is unchanged (still `string`).
-- [ ] No `apiServer` override is added (EU is the SDK default; user confirmed `locationid === 2`).
+- [ ] Both helpers implemented and unit-tested with a mocked `client.callRaw`.
+- [ ] Throws on `result !== 0`.
+- [ ] Throws on missing/empty `hosts`.
+- [ ] No imports from `pcloud-kit` beyond the `Client` type.
 
 **Verification:**
 
-- [ ] `pnpm type-check` — passes.
-- [ ] `pnpm lint` — passes.
-- [ ] `pnpm test` — passes. (Tests inject mock clients; no test asserts on `type`. Pre-verified.)
-- [ ] `pnpm build`, then delete `dist/` + `.netlify/` cache (per SPEC §7 boundary).
-- [ ] Local smoke (`pnpm dev`):
-  - [ ] Visit `/`, log in via Identity, see a memory row render. Network panel: `/api/memory/<uuid>?variant=thumb` returns 200 with image bytes.
-  - [ ] Click a video: `?variant=stream` returns 206 with playable bytes.
-  - [ ] Click download: `?variant=download` returns 200 with `Content-Disposition: attachment`.
+- [ ] `pnpm test src/lib/memories/pcloud-urls.server.test.ts`.
+- [ ] `pnpm type-check`.
 
-**Dependencies:** Task 3.
+**Dependencies:** Task 0.
+
+**Files likely touched:** `src/lib/memories/pcloud-urls.server.ts` 🆕 + test.
+
+**Estimated scope:** S.
+
+---
+
+#### Task 2: Loader resolves URLs; `MemoryItem` gains `thumbUrl` + `lightboxUrl` + (videos) `mediaUrl`
+
+**Description:** `pcloud.server.ts` instantiates a pCloud client (`createClient({ token: process.env.PCLOUD_TOKEN })` — same pattern as `refresh-memories` and the existing `$uuid.ts`) and resolves three URLs per match:
+
+- Always: `thumbUrl` via `resolveThumbUrl(client, meta.code, '640x640')`.
+- Always: `lightboxUrl` via `resolveThumbUrl(client, meta.code, '1025x1025')`.
+- Videos only: `mediaUrl` via `resolveMediaUrl(client, meta.code)`.
+
+All calls run in parallel via `Promise.allSettled`. Per-item failures: drop the item with a single `console.warn` (no fileid, no code, no place). User-visible: that one memory doesn't show today; reload re-mints.
+
+If `PCLOUD_TOKEN` is unset, return `[]` and warn — same shape as the existing missing-snapshot path.
+
+**Acceptance criteria:**
+
+- [ ] Returned `MemoryItem`s match the shape under "Loader shape" above.
+- [ ] All resolutions parallel: total loader latency ≈ max-of-individual, not sum.
+- [ ] Per-item resolution failure drops only that item with a warn (no thrown error from the loader).
+- [ ] Missing-token path returns `[]` + warn (no crash).
+- [ ] `pcloud.server.test.ts` updated: covers happy path, partial failure (one item fails to resolve), missing token, and (for videos) missing `mediaUrl` on video resolution failure.
+
+**Verification:**
+
+- [ ] `pnpm test src/lib/memories/pcloud.server.test.ts`.
+- [ ] `pnpm test src/lib/memories/memory-grouping.test.ts` (touched only if `MemoryItem` import changes).
+- [ ] `pnpm type-check`.
+- [ ] `pnpm dev`, log in, visit `/`, inspect React DevTools → loader response shows `thumbUrl` + `lightboxUrl` on every item, `mediaUrl` on every video.
+
+**Dependencies:** Task 1.
 
 **Files likely touched:**
 
-- `netlify/functions/refresh-memories.ts`
-- `src/routes/api/memory/$uuid.ts`
+- `src/lib/memories/pcloud.server.ts` + test
+- `src/lib/memories/pcloud.ts` (server-fn wrapper — type-only follow-on)
 
-**Estimated scope:** XS (≈ 2 lines diff).
-
----
-
-### Checkpoint B — Local works end-to-end
-
-- [ ] Home route renders memories from cache as before.
-- [ ] No console errors / no `PcloudApiError` from any of the three variant paths.
-- [ ] `git diff main` shows ONLY the two `createClient` lines + the new `scripts/oauth-provision.mjs`. No incidental edits.
+**Estimated scope:** M (test churn dominates).
 
 ---
 
-### Phase 3 — Deploy + cron under OAuth
+### ✅ Checkpoint A — Loader returns CDN URLs
 
-#### Task 5: Update Netlify env vars (Deploy-preview + Production)
+- [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm build` all pass.
+- [ ] React DevTools shows `thumbUrl` + `lightboxUrl` (all items) and `mediaUrl` (videos) on the loader response.
+- [ ] Frontend still works (proxy URLs in `<img src>` are still valid; new fields are unused at this point — wired in Phase 2).
 
-**Description:** Replace `PCLOUD_TOKEN` in **both** Netlify env scopes with the new OAuth access token. Do this _before_ pushing the branch so the deploy preview picks up the new value.
+---
+
+### Phase 2 — Frontend uses direct CDN URLs
+
+#### Task 3: `Polaroid` + `Lightbox` render direct pCloud URLs
+
+**Description:** Swap proxy URLs for the loader-resolved fields:
+
+- `Polaroid`: `<Image src={item.thumbUrl}>`.
+- `Lightbox` image slide: `<Image src={item.lightboxUrl}>`.
+- `Lightbox` video slide: `<video src={item.mediaUrl} poster={item.thumbUrl}>`.
+
+Download button still hits `/api/memory/<uuid>?variant=download` — Task 5 swaps it.
 
 **Acceptance criteria:**
 
-- [ ] Netlify Site → Environment variables → `PCLOUD_TOKEN` updated for **Deploy-preview** context to the OAuth access token.
-- [ ] Same for **Production** context.
-- [ ] All other env vars (`PCLOUD_MEMORIES_FOLDER_ID`, `GEOAPIFY_API_KEY`, `RECUERDEA_GEOCODE_MAX_PER_RUN` if set) untouched.
+- [ ] Timeline + lightbox playback: zero `/api/memory/<uuid>?variant=thumb` / `?variant=stream` requests in DevTools Network.
+- [ ] Lightbox image renders at 1025×1025 (verify natural width via DevTools).
+- [ ] Lightbox video plays from `*.pcloud.com`; range seeks work; poster shows the cached 640 URL with no extra request.
+- [ ] No regression in image rotation, badge, caption, layout.
 
 **Verification:**
 
-- [ ] Netlify env panel shows two distinct scopes set, last-modified timestamp is fresh.
-- [ ] No copy-paste error: the value length matches what the script printed (eyeball test).
+- [ ] `pnpm dev`: scroll the home page, open lightbox image, open lightbox video, scrub. Network panel: zero proxy requests for thumb/stream.
+- [ ] `pnpm test`: existing component snapshot/render tests pass.
 
-**Dependencies:** Task 3.
+**Dependencies:** Task 2.
 
-**Files likely touched:** none (Netlify dashboard only).
+**Files likely touched:**
+
+- `src/components/Polaroid.tsx`
+- `src/components/Lightbox.tsx`
+
+**Estimated scope:** S.
+
+---
+
+### ✅ Checkpoint B — Display path off the proxy
+
+- [ ] DevTools Network on `/`: `*.pcloud.com` for all `<img>` and `<video>`; zero proxy requests for thumb/stream.
+- [ ] Proxy is used by the download button only.
+
+---
+
+### Phase 3 — Client-side downloads
+
+#### Task 4: `getMediaDownloadUrl` server-fn + `download.ts` blob helper
+
+**Description:** Two new modules:
+
+- `src/lib/memories/get-download-url.ts` — `createServerFn({ method: 'GET' }).inputValidator({ uuid }).handler(...)`: auth-gates, reads media-cache, calls `resolveMediaUrl(client, meta.code)`, returns `{ url, name, contenttype }`. Errors: 401 unauth, 404 cache miss.
+- `src/lib/memories/download.ts` — pure helper `downloadAs({ url, name }): Promise<void>`: `fetch(url) → r.blob() → URL.createObjectURL(blob) → click anchor → URL.revokeObjectURL`. Browser-safe; testable with mocked fetch + DOM stubs.
+
+**Acceptance criteria:**
+
+- [ ] Server-fn rejects unauthenticated calls.
+- [ ] Server-fn returns a structured error on cache miss (loader-friendly; not a thrown 500).
+- [ ] `downloadAs` revokes the Object URL after click (no leaked URLs in DevTools Memory).
+- [ ] Both modules tested.
+
+**Verification:**
+
+- [ ] `pnpm test src/lib/memories/get-download-url.test.ts src/lib/memories/download.test.ts`.
+
+**Dependencies:** Task 1.
+
+**Files likely touched:**
+
+- `src/lib/memories/get-download-url.ts` 🆕 + test
+- `src/lib/memories/download.ts` 🆕 + test
+
+**Estimated scope:** S.
+
+---
+
+#### Task 5: Lightbox download button → blob download
+
+**Description:** Replace the `<a href="/api/memory/<uuid>?variant=download" download>` anchor in `Lightbox.tsx` with a button that:
+
+1. Calls `getMediaDownloadUrl({ uuid: item.uuid })`.
+2. Calls `downloadAs({ url, name })`.
+3. Shows Chakra `Spinner` + `disabled` state during the operation.
+4. Surfaces errors visibly (toast or inline — pick the lighter option in the existing UI; no new toast lib).
+
+**Acceptance criteria:**
+
+- [ ] Clicking download saves the original file with the correct filename, including names with accents/emoji.
+- [ ] Spinner + disabled during download; reset on success and on error.
+- [ ] Errors visible (not silently swallowed).
+- [ ] Zero `/api/memory/<uuid>?variant=download` requests anywhere.
+
+**Verification:**
+
+- [ ] `pnpm dev`: download an image and a video. Both land on disk with correct name + bytes.
+- [ ] Network panel: one request to the server-fn endpoint, then one `fetch` against `*.pcloud.com`.
+- [ ] Memory panel: no leaked Object URLs after a few downloads.
+
+**Dependencies:** Tasks 2, 3, 4.
+
+**Files likely touched:** `src/components/Lightbox.tsx`.
+
+**Estimated scope:** S.
+
+---
+
+### ✅ Checkpoint C — Proxy unused
+
+- [ ] Network panel on `/` and inside the lightbox: zero `/api/memory/<uuid>` requests across timeline render, lightbox open, image swipe, video play, video scrub, download.
+- [ ] `curl -I https://<preview>.netlify.app/` → still `Cache-Control: private`.
+
+---
+
+### Phase 4 — Demolition
+
+#### Task 6: Delete `/api/memory/$uuid` route + `memory-route.server.ts`
+
+**Description:** With nothing using the proxy, drop it.
+
+**Acceptance criteria:**
+
+- [ ] Deleted: `src/routes/api/memory/$uuid.ts`, `src/lib/memories/memory-route.server.ts`, `src/lib/memories/memory-route.server.test.ts`.
+- [ ] `src/routeTree.gen.ts` regenerated by the dev server.
+- [ ] `grep -r 'api/memory' src/ netlify/` → empty (or generated-only).
+- [ ] `pnpm test`, `pnpm type-check`, `pnpm lint`, `pnpm build` all green.
+
+**Dependencies:** Tasks 3, 5 + Checkpoint C.
+
+**Files likely touched:** deletes only (+ regenerated route tree).
 
 **Estimated scope:** XS.
 
 ---
 
-#### Task 6: Push `v8-oauth` branch, smoke the deploy preview, manually trigger the cron once
+### Phase 5 — SPEC + ship
 
-**Description:** Open a PR from `v8-oauth` to `main`. Netlify spins a deploy preview using the new env. Trigger the scheduled function once via the dashboard so the cron exercises OAuth against `listfolder` / `getfilepublink` / `getfilelink`. Verify the cron summary log looks normal.
+#### Task 7: `SPEC.md` update
+
+**Description:** Reflect the v9 architecture.
 
 **Acceptance criteria:**
 
-- [ ] PR open from `v8-oauth` → `main`.
-- [ ] Manual cron invocation via Netlify Functions panel completes with `statusCode: 200`.
-- [ ] Cron summary log shows `scanned=N alive=N removed=…` — i.e. `listfolder` succeeded and `processFile` got through every file.
-- [ ] No `PcloudApiError result=2000` ("invalid token") or `result=1000` ("log in required") in the function logs.
-- [ ] Deploy preview `/` renders memories under the new token.
-- [ ] `curl -I https://<preview>.netlify.app/` still returns `Cache-Control: private` (per SPEC §7 — sanity check, no expected change).
+- [ ] §17 v9 Acceptance Criteria covers: server-side URL resolution in the loader (per-item `getpubthumblink`), `MemoryItem.thumbUrl` (640) + `lightboxUrl` (1025) + videos' `mediaUrl`, lazy download URL via server-fn, client-side blob download, deletion of the `/api/memory/<uuid>` proxy + `memory-route.server.ts`. Cache shape + cron unchanged.
+- [ ] §18 v8 → v9 changes summary lists deleted modules + the loader's new responsibility.
+- [ ] §7 boundaries:
+  - **Always do:** unchanged. Token still server-only. Auth gate still on `beforeLoad`.
+  - **Ask first:** unchanged.
+  - **Never do:** keep "pCloud token in browser" (still true). Replace "Sign IP-bound URL on server, pass to browser" with: "**Always** mint public-link CDN URLs server-side via `getpubthumblink` / `getpublinkdownload` and embed `https://${hosts[0]}${path}` in the loader response. Never embed the public-link `code` in browser-visible HTML/JSON/loader."
+- [ ] §8.4 (or equivalent open-question section) closed with the v9 design; new §8.X records the spike result + the loader latency profile.
 
 **Verification:**
 
-- [ ] All four boundary checks above.
-- [ ] `/api/memory/<uuid>?variant=thumb` returns 200 on the preview (logged in).
-- [ ] `/api/memory/<uuid>?variant=stream` returns 206 on the preview (logged in, `Range` header set).
-- [ ] `/api/memory/<uuid>?variant=download` returns 200 with attachment disposition.
+- [ ] Walk every §7 bullet against the v9 codebase. Where stale, edit. Where the diff broke a rule, fix the diff.
 
-**Dependencies:** Tasks 4, 5.
+**Dependencies:** Tasks 1–6.
 
-**Files likely touched:** none (process step).
+**Files likely touched:** `SPEC.md`.
 
-**Estimated scope:** XS.
+**Estimated scope:** S.
 
 ---
 
-#### Task 7: Merge + production cutover
+#### Task 8: Merge + prod smoke
 
-**Description:** Merge to `main` → Netlify deploys production. Trigger the production cron once via the dashboard and smoke the production home page.
-
-**Acceptance criteria:**
-
-- [ ] CI green (`type-check`, `test`, `lint`, `format-check`).
-- [ ] `main` deploy succeeds.
-- [ ] Manual cron run on production logs `statusCode: 200` and a normal summary line.
-- [ ] Production `/` renders memories under the OAuth token.
-
-**Verification:**
-
-- [ ] Repeat the three-variant URL check from Task 6 against production.
-- [ ] Set a calendar reminder for 1 week from merge to revoke the old session token (Task 8).
-
-**Dependencies:** Task 6.
-
-**Files likely touched:** none (process step).
-
-**Estimated scope:** XS.
-
----
-
-#### Task 8: Revoke the old session token (≥ 1 week after Task 7)
-
-**Description:** After 1 week of stable cron runs and home-page hits under the OAuth token, revoke the previous session token via pCloud Console → Sessions / Active tokens.
+**Description:** Standard merge.
 
 **Acceptance criteria:**
 
-- [ ] At least 7 days have passed since Task 7.
-- [ ] Cron has run successfully on at least 5 of those days (Netlify Functions log).
-- [ ] No `result=2000` / `result=1000` errors in the function logs in that window.
-- [ ] Old session token is revoked in pCloud Console.
+- [ ] PR description bundles: Phase 0 spike output (incl. final lightbox size), before/after HAR weight, Lighthouse delta on `/`, SPEC §17/§18 diff, list of deleted files.
+- [ ] CI green.
+- [ ] Reviewer signs off on visual diff (lightbox at 1025) + SPEC §7 update.
+- [ ] After merge: smoke `/` on prod. Verify zero `/api/memory/...` traffic.
+- [ ] Watch Netlify bandwidth dashboard 24 h — expect proxy traffic to flatline.
 
-**Verification:**
+**Verification:** repeat Checkpoint C against the prod URL.
 
-- [ ] Re-running `curl -fsS "https://eapi.pcloud.com/userinfo?auth=<old-session-token>"` returns a non-zero `result`, confirming the old token is dead.
-- [ ] OAuth `PCLOUD_TOKEN` (now the only credential) continues to work.
+**Dependencies:** Tasks 1–7.
 
-**Dependencies:** Task 7 + a 7-day soak.
-
-**Files likely touched:** none (pCloud Console).
+**Files likely touched:** none.
 
 **Estimated scope:** XS.
 
@@ -394,25 +401,16 @@ This stays out of the deployed app entirely. It is a developer chore, not runtim
 
 ## Risks and mitigations
 
-| Risk                                                                                                                                  | Impact       | Mitigation                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Forgetting to update Netlify env before pushing → deploy preview hits pCloud with a stale session token AND new code (mode mismatch). | Med          | Task 5 runs **before** Task 6's push. If the order slips, the cron + route logs `result=2000` immediately; revert by re-pasting the previous session token into Netlify env and re-running the cron.                                |
-| Provisioning script accidentally checks the secret into git.                                                                          | High         | `.env.local` is already in `.gitignore`; new env vars (`PCLOUD_CLIENT_ID`, `PCLOUD_APP_SECRET`) are exported in the shell only. The script reads from `process.env` and never writes a file. Verify with `git status` after Task 2. |
-| Token rotation causes a cron run to fail mid-rollout.                                                                                 | Low          | Cron is idempotent and runs daily. A single failed run leaves the cache untouched (the cron is the sole writer; missing snapshot ⇒ home renders empty + warn). Just re-run after env is fixed. No data loss possible.               |
-| Browser-CORS smoke (Task 3.5) fails — pCloud doesn't allow browser-origin `userinfo` calls.                                           | Med          | v8 still ships (server-side fetches don't go through CORS). v9's design space narrows to "server proxies the call" — i.e. token still never leaves the server. Document in PR; defer architecture rewrite to v9.                    |
-| **v9 reuses `PCLOUD_TOKEN` naively and ships it to the browser.** Same token compromised via XSS = full pCloud account takeover.      | High (in v9) | Plan v9 around **separate tokens** (option B in "Forward to v9"): server keeps `PCLOUD_TOKEN`; browser mints its own per-session token via `pcloud-kit/oauth-browser`. Block v9's PR if it bundles the cron token into HTML.        |
-| `Authorization` header behaviour differs between modes and breaks something subtle.                                                   | Low          | pcloud-kit puts both `auth=` and `access_token=` in the **query string**, not the `Authorization` header. The HTTP shape across the wire is identical except for that one parameter name. Low surprise risk.                        |
-| OAuth access token is shorter-lived than the user expects and silently expires mid-quarter.                                           | Low          | pCloud access tokens are long-lived (no refresh token issued); revocation is the only invalidation vector. Mitigation: re-running `scripts/oauth-provision.mjs` regenerates a fresh token in <1 minute.                             |
+| Risk                                                                                                        | Impact | Mitigation                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `getpubthumblink` rejects `1025x1025` (off-grid).                                                           | Med    | Phase 0 verifies and surfaces the closest accepted size; plan + tasks updated to that size before code lands.                                                                                                                                                               |
+| Loader latency increases due to 2N+V parallel pCloud calls per page-load.                                   | Med    | Profile in Task 2. Typical day < 20 items, parallel calls ≈ 100–200 ms. If p50 > 500 ms, add per-loader memoization (in-process Map keyed by `code+size`) or short-TTL Blobs cache, or pivot to the folder-publink `getpubthumbslinks` batch path (cache + cron migration). |
+| `getpubthumblink` / `getpublinkdownload` URLs go stale during a long lightbox idle (`expires` field, ~6 h). | Low    | Reload re-mints. If frequent enough to matter, refetch on a 4xx in Lightbox (out of scope for v9).                                                                                                                                                                          |
+| Browser-side `fetch(cdnUrl).blob()` fails CORS for the download path.                                       | Low    | Phase 0 verifies. Fallback: `<a href={cdnUrl} download>` (may navigate inline). Worst case: keep the proxy for downloads only.                                                                                                                                              |
+| One item's resolution fails and crashes the whole loader.                                                   | Low    | `Promise.allSettled` per item; failed items dropped with a single warn. The page is never blocked by a single bad code.                                                                                                                                                     |
+| `pcloud.server.ts` instantiating a pCloud client breaks the "loader is cache-only" invariant from v6/v7.    | Low    | Intentional relaxation; documented in SPEC §17. Cache stays the source of metadata; URLs are now resolved on demand.                                                                                                                                                        |
+| pCloud rate-limits the loader under burst load.                                                             | Low    | Single-user app, low traffic. If it ever matters, the per-loader memoization above fixes it.                                                                                                                                                                                |
 
 ## Open questions
 
-**v8 has none open** — all decisions resolved, see "Resolved decisions" table.
-
-### Open questions for v9 (deferred — DO NOT resolve in v8)
-
-1. **Token-distribution model** — same OAuth token reused on the browser (option A) or separate per-session browser token (option B)? Recommendation: B. Needs a security review before the v9 PR opens.
-2. **Browser endpoint allow-list** — which pCloud endpoints will v9 actually call from the browser, and does each return successfully under CORS? Smoke each one before committing to a design.
-3. **SPEC §7 update** — v9 must rewrite the "never do" entries that currently forbid browser-side pCloud activity. Identify the exact wording change in the v9 plan-mode review, before any code lands.
-4. **`/api/memory/<uuid>` future** — keep as fallback, deprecate, or expand? Depends on how many endpoints v9 can call directly from the browser.
-5. **Per-session browser token UX** — if option B: where does the user click "Sign in to pCloud"? Is it a separate button next to the Identity login, or chained automatically after Identity login? Affects login.tsx layout.
-6. **Browser pCloud sign-in callback URL** — needs a real deployed page (not localhost). Decide on the path (e.g. `/oauth/pcloud-callback`) and register it on the pCloud app alongside the existing localhost URL.
+None blocking. Phase 0 closes the only spike-gated assumptions (chiefly: confirm `1025x1025` is accepted; if not, pick the closest grid size).
