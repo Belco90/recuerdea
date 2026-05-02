@@ -1,5 +1,9 @@
 import type { Client } from 'pcloud-kit'
 
+// pcloud-kit's callRaw throws PcloudApiError automatically on result !== 0,
+// so the helpers below only need to handle the "success but no hosts in the
+// response" edge case explicitly.
+
 export type ThumbSize = '640x640' | '1025x1025'
 
 type PublinkLink = {
