@@ -140,8 +140,8 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 									>
 										{it.kind === 'video' ? (
 											<video
-												src={`/api/memory/${it.uuid}?variant=stream`}
-												poster={`/api/memory/${it.uuid}?variant=thumb`}
+												src={it.mediaUrl}
+												poster={it.thumbUrl}
 												controls
 												autoPlay={i === idx}
 												preload={i === idx ? 'metadata' : 'none'}
@@ -157,7 +157,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 											</video>
 										) : (
 											<Image
-												src={`/api/memory/${it.uuid}?variant=thumb`}
+												src={it.lightboxUrl}
 												alt={it.name || 'Recuerdo'}
 												maxW="full"
 												maxH="full"

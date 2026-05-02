@@ -14,7 +14,6 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 	const rot = rotForKey(keyId)
 	const caption = item.place
 	const aspectRatio = item.width && item.height ? item.width / item.height : undefined
-	const photoSrc = `/api/memory/${item.uuid}?variant=thumb`
 
 	return (
 		<Box
@@ -49,7 +48,7 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 			>
 				<Box position="relative" bg="bg.muted" overflow="hidden" w="full" aspectRatio={aspectRatio}>
 					<Image
-						src={photoSrc}
+						src={item.thumbUrl}
 						alt=""
 						loading="lazy"
 						w="full"
