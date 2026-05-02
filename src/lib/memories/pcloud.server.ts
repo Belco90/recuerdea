@@ -109,9 +109,9 @@ export async function fetchTodayMemories(
 	)
 	const matches = lookups.filter((m): m is Match => m !== null)
 
-	// Oldest year first; tiebreak by fileid asc. Deterministic per (folder, day).
+	// Newest year first; tiebreak by fileid asc. Deterministic per (folder, day).
 	matches.sort(
-		(a, b) => a.capture.getFullYear() - b.capture.getFullYear() || a.meta.fileid - b.meta.fileid,
+		(a, b) => b.capture.getFullYear() - a.capture.getFullYear() || b.meta.fileid - a.meta.fileid,
 	)
 
 	if (matches.length === 0) return []
