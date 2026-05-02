@@ -22,6 +22,10 @@ export const getMediaDownloadUrl = createServerFn({ method: 'GET' })
 		const { resolveDownloadUrl } = await import('./get-download-url.server')
 
 		const token = process.env.PCLOUD_TOKEN
+		// Asymmetric vs `pcloud.ts`'s loader (warn + return []): the loader
+		// degrades gracefully to an empty home page; downloads are a deliberate
+		// user action so a missing token surfaces as a thrown error the
+		// Lightbox `DownloadButton` catches and displays.
 		if (!token) throw new Error('PCLOUD_TOKEN is not set')
 
 		const { createClient } = await import('pcloud-kit')

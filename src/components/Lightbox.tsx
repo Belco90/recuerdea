@@ -41,7 +41,9 @@ function DownloadButton({ item }: { item: MemoryItem }) {
 			const info = await getMediaDownloadUrl({ data: { uuid: item.uuid } })
 			await downloadAs({ url: info.url, name: info.name })
 			setStatus('idle')
-		} catch {
+		} catch (err) {
+			// eslint-disable-next-line no-console
+			console.warn('[lightbox] download failed:', err)
 			setStatus('error')
 		}
 	}
