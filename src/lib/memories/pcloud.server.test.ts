@@ -7,19 +7,32 @@ import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
 
 import { getFolderCacheStore } from '../cache/folder-cache.server'
 import { getMediaCacheStore } from '../cache/media-cache.server'
-import { resolveMediaUrl, resolveThumbUrl } from './pcloud-urls.server'
+import { resolveMediaUrl } from './pcloud-urls.server'
 import { fetchTodayMemories } from './pcloud.server'
 
 vi.mock('../cache/folder-cache.server')
 vi.mock('../cache/media-cache.server')
-vi.mock('./pcloud-urls.server')
+vi.mock('./pcloud-urls.server', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./pcloud-urls.server')>()
+	return {
+		...actual,
+		// `buildThumbUrl` is a pure URL builder — let the real one run so tests
+		// pin the URL shape. Only `resolveMediaUrl` (the actual pCloud call) is
+		// mocked.
+		resolveMediaUrl: vi.fn<typeof actual.resolveMediaUrl>(),
+	}
+})
 
 const mockedGetFolderCacheStore = vi.mocked(getFolderCacheStore)
 const mockedGetMediaCacheStore = vi.mocked(getMediaCacheStore)
-const mockedResolveThumbUrl = vi.mocked(resolveThumbUrl)
 const mockedResolveMediaUrl = vi.mocked(resolveMediaUrl)
 
 const fakeClient = {} as Client
+
+const thumb640 = (code: string) =>
+	`https://eapi.pcloud.com/getpubthumb?code=${encodeURIComponent(code)}&size=640x640`
+const thumb1025 = (code: string) =>
+	`https://eapi.pcloud.com/getpubthumb?code=${encodeURIComponent(code)}&size=1025x1025`
 
 function makeMediaStore(entries: Record<string, CachedMedia> = {}) {
 	const data = new Map(Object.entries(entries))
@@ -110,9 +123,6 @@ const undatedD: CachedMedia = {
 beforeEach(() => {
 	mockedGetFolderCacheStore.mockReset()
 	mockedGetMediaCacheStore.mockReset()
-	mockedResolveThumbUrl.mockImplementation(
-		async (_client, code, size) => `https://thumb.${size}.${code}`,
-	)
 	mockedResolveMediaUrl.mockImplementation(async (_client, code) => `https://media.${code}`)
 })
 
@@ -132,7 +142,7 @@ describe('fetchTodayMemories', () => {
 		expect(warn).toHaveBeenCalledOnce()
 	})
 
-	it('attaches thumbUrl + lightboxUrl on images and additionally mediaUrl on videos', async () => {
+	it('attaches direct getpubthumb URLs on images and additionally mediaUrl on videos', async () => {
 		mockedGetFolderCacheStore.mockReturnValue(
 			makeFolderStore({
 				refreshedAt: '2026-04-29T04:00:00.000Z',
@@ -159,8 +169,8 @@ describe('fetchTodayMemories', () => {
 				width: 1920,
 				height: 1080,
 				place: null,
-				thumbUrl: 'https://thumb.640x640.CODE-C',
-				lightboxUrl: 'https://thumb.1025x1025.CODE-C',
+				thumbUrl: thumb640('CODE-C'),
+				lightboxUrl: thumb1025('CODE-C'),
 				mediaUrl: 'https://media.CODE-C',
 			},
 			{
@@ -171,8 +181,8 @@ describe('fetchTodayMemories', () => {
 				width: 4032,
 				height: 3024,
 				place: null,
-				thumbUrl: 'https://thumb.640x640.CODE-A',
-				lightboxUrl: 'https://thumb.1025x1025.CODE-A',
+				thumbUrl: thumb640('CODE-A'),
+				lightboxUrl: thumb1025('CODE-A'),
 			},
 		])
 	})
@@ -188,24 +198,7 @@ describe('fetchTodayMemories', () => {
 		expect(mockedResolveMediaUrl).not.toHaveBeenCalled()
 	})
 
-	it('drops items whose URL resolution fails and keeps the rest', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({ refreshedAt: '2026-04-29T04:00:00.000Z', uuids: ['uuid-a', 'uuid-c'] }),
-		)
-		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageA, 'uuid-c': videoC }))
-		mockedResolveThumbUrl.mockImplementation(async (_client, code, size) => {
-			if (code === 'CODE-A' && size === '1025x1025') throw new Error('1025 rejected')
-			return `https://thumb.${size}.${code}`
-		})
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, fakeClient)
-
-		expect(result.map((m) => m.uuid)).toEqual(['uuid-c'])
-		expect(warn).toHaveBeenCalled()
-	})
-
-	it('drops a video whose mediaUrl resolution fails', async () => {
+	it('drops a video whose mediaUrl resolution fails and keeps image matches', async () => {
 		mockedGetFolderCacheStore.mockReturnValue(
 			makeFolderStore({ refreshedAt: '2026-04-29T04:00:00.000Z', uuids: ['uuid-a', 'uuid-c'] }),
 		)
@@ -236,8 +229,8 @@ describe('fetchTodayMemories', () => {
 				width: null,
 				height: null,
 				place: null,
-				thumbUrl: 'https://thumb.640x640.CODE-B',
-				lightboxUrl: 'https://thumb.1025x1025.CODE-B',
+				thumbUrl: thumb640('CODE-B'),
+				lightboxUrl: thumb1025('CODE-B'),
 			},
 		])
 	})

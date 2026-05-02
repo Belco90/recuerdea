@@ -1,8 +1,16 @@
 import type { Client } from 'pcloud-kit'
 
-// pcloud-kit's callRaw throws PcloudApiError automatically on result !== 0,
-// so the helpers below only need to handle the "success but no hosts in the
-// response" edge case explicitly.
+// `getpubthumblink` returns CDN URLs that are signed against the calling IP —
+// they break when the browser fetches them from a different IP. Stick with the
+// stateless `getpubthumb?code=…&size=…` endpoint instead: pCloud serves bytes
+// directly there, no per-request signing, no IP binding. Trade-off: the
+// per-file public-link `code` reaches the browser via the URL (acknowledged
+// in SPEC §7).
+//
+// `getpublinkdownload` (used for video stream + downloads) does have to mint
+// a signed URL — pcloud-kit's callRaw throws PcloudApiError automatically on
+// `result !== 0`, so resolveMediaUrl only handles the "success but empty
+// hosts" edge case.
 
 export type ThumbSize = '640x640' | '1025x1025'
 
@@ -11,22 +19,13 @@ type PublinkLink = {
 	path: string
 }
 
-function buildUrl(res: PublinkLink, method: string): string {
-	const host = res.hosts[0]
-	if (!host) throw new TypeError(`${method}: no hosts returned`)
-	return `https://${host}${res.path}`
-}
-
-export async function resolveThumbUrl(
-	client: Client,
-	code: string,
-	size: ThumbSize,
-): Promise<string> {
-	const res = await client.callRaw<PublinkLink>('getpubthumblink', { code, size })
-	return buildUrl(res, 'getpubthumblink')
+export function buildThumbUrl(code: string, size: ThumbSize): string {
+	return `https://eapi.pcloud.com/getpubthumb?code=${encodeURIComponent(code)}&size=${size}`
 }
 
 export async function resolveMediaUrl(client: Client, code: string): Promise<string> {
 	const res = await client.callRaw<PublinkLink>('getpublinkdownload', { code })
-	return buildUrl(res, 'getpublinkdownload')
+	const host = res.hosts[0]
+	if (!host) throw new TypeError('getpublinkdownload: no hosts returned')
+	return `https://${host}${res.path}`
 }

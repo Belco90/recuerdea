@@ -2,7 +2,7 @@ import type { Client } from 'pcloud-kit'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { resolveMediaUrl, resolveThumbUrl } from './pcloud-urls.server'
+import { buildThumbUrl, resolveMediaUrl } from './pcloud-urls.server'
 
 type FakeCallRaw = (method: string, params: Record<string, unknown>) => Promise<unknown>
 
@@ -10,49 +10,29 @@ function makeClient(callRaw: Client['callRaw']): Client {
 	return { callRaw } as Client
 }
 
-describe('resolveThumbUrl', () => {
-	it('returns https://${hosts[0]}${path} for getpubthumblink at 640x640', async () => {
-		const callRaw = vi.fn<FakeCallRaw>().mockResolvedValue({
-			result: 0,
-			hosts: ['c123.pcloud.com', 'c456.pcloud.com'],
-			path: '/cBE/thumb.jpg',
-		})
-		const client = makeClient(callRaw as unknown as Client['callRaw'])
-
-		const url = await resolveThumbUrl(client, 'CODE-A', '640x640')
-
-		expect(url).toBe('https://c123.pcloud.com/cBE/thumb.jpg')
-		expect(callRaw).toHaveBeenCalledWith('getpubthumblink', { code: 'CODE-A', size: '640x640' })
-	})
-
-	it('returns the resolved URL at 1025x1025', async () => {
-		const callRaw = vi.fn<FakeCallRaw>().mockResolvedValue({
-			result: 0,
-			hosts: ['c789.pcloud.com'],
-			path: '/cBE/big.jpg',
-		})
-		const client = makeClient(callRaw as unknown as Client['callRaw'])
-
-		const url = await resolveThumbUrl(client, 'CODE-B', '1025x1025')
-
-		expect(url).toBe('https://c789.pcloud.com/cBE/big.jpg')
-		expect(callRaw).toHaveBeenCalledWith('getpubthumblink', { code: 'CODE-B', size: '1025x1025' })
-	})
-
-	it('throws when hosts is empty', async () => {
-		const callRaw = vi.fn<FakeCallRaw>().mockResolvedValue({ result: 0, hosts: [], path: '/foo' })
-		const client = makeClient(callRaw as unknown as Client['callRaw'])
-
-		await expect(resolveThumbUrl(client, 'CODE-A', '640x640')).rejects.toThrow(/hosts/)
-	})
-
-	it('propagates errors thrown by callRaw (e.g. PcloudApiError on result !== 0)', async () => {
-		const callRaw = vi.fn<FakeCallRaw>().mockRejectedValue(new Error('result=2009 invalid file'))
-		const client = makeClient(callRaw as unknown as Client['callRaw'])
-
-		await expect(resolveThumbUrl(client, 'BAD', '640x640')).rejects.toThrow(
-			'result=2009 invalid file',
+describe('buildThumbUrl', () => {
+	it('returns the direct eapi.pcloud.com getpubthumb URL at 640x640', () => {
+		expect(buildThumbUrl('CODE-A', '640x640')).toBe(
+			'https://eapi.pcloud.com/getpubthumb?code=CODE-A&size=640x640',
 		)
+	})
+
+	it('returns the direct eapi.pcloud.com getpubthumb URL at 1025x1025', () => {
+		expect(buildThumbUrl('CODE-B', '1025x1025')).toBe(
+			'https://eapi.pcloud.com/getpubthumb?code=CODE-B&size=1025x1025',
+		)
+	})
+
+	it('URL-encodes the code parameter', () => {
+		expect(buildThumbUrl('a/b c', '640x640')).toBe(
+			'https://eapi.pcloud.com/getpubthumb?code=a%2Fb%20c&size=640x640',
+		)
+	})
+
+	it('does not produce a CDN-host URL — those are IP-bound and break browser fetches', () => {
+		const url = buildThumbUrl('CODE-A', '640x640')
+		expect(url.startsWith('https://eapi.pcloud.com/')).toBe(true)
+		expect(url).not.toContain('c123.pcloud.com')
 	})
 })
 

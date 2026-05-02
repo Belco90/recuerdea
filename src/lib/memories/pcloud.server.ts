@@ -6,7 +6,7 @@ import { createFolderCache } from '../cache/folder-cache'
 import { getFolderCacheStore } from '../cache/folder-cache.server'
 import { createMediaCache } from '../cache/media-cache'
 import { getMediaCacheStore } from '../cache/media-cache.server'
-import { resolveMediaUrl, resolveThumbUrl } from './pcloud-urls.server'
+import { buildThumbUrl, resolveMediaUrl } from './pcloud-urls.server'
 
 export type MemoryItem =
 	| {
@@ -43,14 +43,13 @@ function tryParseDate(iso: string | null): Date | null {
 }
 
 async function buildOrDrop(client: Client, match: Match): Promise<MemoryItem | null> {
-	try {
-		const captureDate = match.capture.toISOString()
-		if (match.meta.kind === 'video') {
-			const [thumbUrl, lightboxUrl, mediaUrl] = await Promise.all([
-				resolveThumbUrl(client, match.meta.code, '640x640'),
-				resolveThumbUrl(client, match.meta.code, '1025x1025'),
-				resolveMediaUrl(client, match.meta.code),
-			])
+	const captureDate = match.capture.toISOString()
+	const thumbUrl = buildThumbUrl(match.meta.code, '640x640')
+	const lightboxUrl = buildThumbUrl(match.meta.code, '1025x1025')
+
+	if (match.meta.kind === 'video') {
+		try {
+			const mediaUrl = await resolveMediaUrl(client, match.meta.code)
 			return {
 				kind: 'video',
 				uuid: match.uuid,
@@ -64,27 +63,23 @@ async function buildOrDrop(client: Client, match: Match): Promise<MemoryItem | n
 				lightboxUrl,
 				mediaUrl,
 			}
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'unknown error'
+			// eslint-disable-next-line no-console
+			console.warn(`[pcloud] dropping video memory: ${message}`)
+			return null
 		}
-		const [thumbUrl, lightboxUrl] = await Promise.all([
-			resolveThumbUrl(client, match.meta.code, '640x640'),
-			resolveThumbUrl(client, match.meta.code, '1025x1025'),
-		])
-		return {
-			kind: 'image',
-			uuid: match.uuid,
-			name: match.meta.name,
-			captureDate,
-			width: match.meta.width,
-			height: match.meta.height,
-			place: match.meta.place,
-			thumbUrl,
-			lightboxUrl,
-		}
-	} catch (err) {
-		const message = err instanceof Error ? err.message : 'unknown error'
-		// eslint-disable-next-line no-console
-		console.warn(`[pcloud] dropping memory: ${message}`)
-		return null
+	}
+	return {
+		kind: 'image',
+		uuid: match.uuid,
+		name: match.meta.name,
+		captureDate,
+		width: match.meta.width,
+		height: match.meta.height,
+		place: match.meta.place,
+		thumbUrl,
+		lightboxUrl,
 	}
 }
 
