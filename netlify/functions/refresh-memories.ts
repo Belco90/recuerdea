@@ -31,7 +31,7 @@ export const handler = schedule('0 4 * * *', async (event) => {
 	connectLambda(event as unknown as Parameters<typeof connectLambda>[0])
 
 	const { token, folderId } = getEnvConfig()
-	const client = createClient({ token, type: 'pcloud' })
+	const client = createClient({ token })
 	const mediaCache = createMediaCache(getMediaCacheStore())
 	const fileidIndex = createFileidIndex(getFileidIndexStore())
 	const folderCache = createFolderCache(getFolderCacheStore())

@@ -12,7 +12,7 @@ type PublinkDownload = { hosts: readonly string[]; path: string }
 async function resolveStreamUrl(code: string): Promise<string> {
 	const token = process.env.PCLOUD_TOKEN
 	if (!token) throw new Error('PCLOUD_TOKEN is not set')
-	const client = createClient({ token, type: 'pcloud' })
+	const client = createClient({ token })
 	// `getpublinkdownload` is not in pcloud-kit's typed method registry, so use
 	// `callRaw` (which accepts any method name) instead of `call`.
 	const res = await client.callRaw<PublinkDownload>('getpublinkdownload', { code })
