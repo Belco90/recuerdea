@@ -71,8 +71,8 @@ afterEach(() => {
 	vi.clearAllMocks()
 })
 
-function makeRequest(headers: Record<string, string> = {}): Request {
-	return new Request('https://app.test/api/video/' + VALID_UUID, { headers })
+function makeRequest(headers: Record<string, string> = {}, search: string = ''): Request {
+	return new Request('https://app.test/api/video/' + VALID_UUID + search, { headers })
 }
 
 describe('handleVideoStreamRequest', () => {
@@ -200,5 +200,93 @@ describe('handleVideoStreamRequest', () => {
 		expect(res.status).toBe(502)
 		const body = await res.text()
 		expect(body).toContain('upstream socket reset')
+	})
+
+	describe('?download=1', () => {
+		it('returns 200 + Content-Disposition: attachment + no-store cache', async () => {
+			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
+				loadServerUser: async () => adminUser,
+				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
+				resolveStreamUrl,
+				fetchBytes,
+			})
+
+			expect(res.status).toBe(200)
+			expect(res.headers.get('content-type')).toBe('video/mp4')
+			expect(res.headers.get('cache-control')).toBe('private, max-age=0, no-store')
+			expect(res.headers.get('accept-ranges')).toBeNull()
+			const disposition = res.headers.get('content-disposition')!
+			expect(disposition).toContain('attachment')
+			expect(disposition).toContain('filename="c.mp4"')
+			expect(disposition).toContain("filename*=UTF-8''c.mp4")
+		})
+
+		it('refuses to forward Range headers in download mode (always full file)', async () => {
+			await handleVideoStreamRequest(
+				makeRequest({ range: 'bytes=0-99' }, '?download=1'),
+				VALID_UUID,
+				{
+					loadServerUser: async () => adminUser,
+					mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
+					resolveStreamUrl,
+					fetchBytes,
+				},
+			)
+
+			expect(fetchBytes).toHaveBeenCalledWith('https://cdn.test/v?code=CODE-C', null)
+		})
+
+		it('forces status 200 even if upstream returns 206', async () => {
+			fetchBytes = vi.fn<FetchBytes>(
+				async () =>
+					new Response(new Uint8Array([1]), {
+						status: 206,
+						headers: { 'content-range': 'bytes 0-0/1' },
+					}),
+			)
+
+			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
+				loadServerUser: async () => adminUser,
+				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
+				resolveStreamUrl,
+				fetchBytes,
+			})
+
+			expect(res.status).toBe(200)
+			expect(res.headers.get('content-range')).toBeNull()
+		})
+
+		it('UTF-8 filename: ASCII fallback strips non-printables, RFC 5987 encodes the original', async () => {
+			const utf8Meta: CachedMedia = { ...videoMeta, name: 'recuérdame año.mp4' }
+
+			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
+				loadServerUser: async () => adminUser,
+				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: utf8Meta })),
+				resolveStreamUrl,
+				fetchBytes,
+			})
+
+			const disposition = res.headers.get('content-disposition')!
+			expect(disposition).toMatch(/filename="recurdame ao\.mp4"/)
+			expect(disposition).toContain("filename*=UTF-8''" + encodeURIComponent('recuérdame año.mp4'))
+		})
+
+		it('still 401 unauth and 404 missing in download mode', async () => {
+			const unauth = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
+				loadServerUser: async () => null,
+				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
+				resolveStreamUrl,
+				fetchBytes,
+			})
+			expect(unauth.status).toBe(401)
+
+			const missing = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
+				loadServerUser: async () => adminUser,
+				mediaCache: createMediaCache(makeMediaStore()),
+				resolveStreamUrl,
+				fetchBytes,
+			})
+			expect(missing.status).toBe(404)
+		})
 	})
 })
