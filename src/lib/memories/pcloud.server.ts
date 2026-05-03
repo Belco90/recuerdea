@@ -111,7 +111,7 @@ export async function fetchTodayMemories(
 
 	// Newest year first; tiebreak by fileid asc. Deterministic per (folder, day).
 	matches.sort(
-		(a, b) => b.capture.getFullYear() - a.capture.getFullYear() || b.meta.fileid - a.meta.fileid,
+		(a, b) => b.capture.getFullYear() - a.capture.getFullYear() || a.meta.fileid - b.meta.fileid,
 	)
 
 	if (matches.length === 0) return []

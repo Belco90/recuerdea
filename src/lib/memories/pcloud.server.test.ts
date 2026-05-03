@@ -161,6 +161,17 @@ describe('fetchTodayMemories', () => {
 
 		expect(result).toEqual([
 			{
+				kind: 'image',
+				uuid: 'uuid-a',
+				name: 'a.jpg',
+				captureDate: '2024-04-27T14:30:00.000Z',
+				width: 4032,
+				height: 3024,
+				place: null,
+				thumbUrl: thumb640('CODE-A'),
+				lightboxUrl: thumb1025('CODE-A'),
+			},
+			{
 				kind: 'video',
 				uuid: 'uuid-c',
 				contenttype: 'video/mp4',
@@ -172,17 +183,6 @@ describe('fetchTodayMemories', () => {
 				thumbUrl: thumb640('CODE-C'),
 				lightboxUrl: thumb1025('CODE-C'),
 				mediaUrl: 'https://media.CODE-C',
-			},
-			{
-				kind: 'image',
-				uuid: 'uuid-a',
-				name: 'a.jpg',
-				captureDate: '2024-04-27T14:30:00.000Z',
-				width: 4032,
-				height: 3024,
-				place: null,
-				thumbUrl: thumb640('CODE-A'),
-				lightboxUrl: thumb1025('CODE-A'),
 			},
 		])
 	})
