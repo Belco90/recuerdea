@@ -1,12 +1,10 @@
-import type { Client } from 'pcloud-kit'
-
 import type { CachedMedia } from '../cache/media-cache'
 
 import { createFolderCache } from '../cache/folder-cache'
 import { getFolderCacheStore } from '../cache/folder-cache.server'
 import { createMediaCache } from '../cache/media-cache'
 import { getMediaCacheStore } from '../cache/media-cache.server'
-import { buildThumbUrl, resolveMediaUrl } from './pcloud-urls.server'
+import { buildThumbUrl } from './pcloud-urls.server'
 
 export type MemoryItem =
 	| {
@@ -42,32 +40,28 @@ function tryParseDate(iso: string | null): Date | null {
 	return Number.isNaN(d.getTime()) ? null : d
 }
 
-async function buildOrDrop(client: Client, match: Match): Promise<MemoryItem | null> {
+function buildMemoryItem(match: Match): MemoryItem {
 	const captureDate = match.capture.toISOString()
 	const thumbUrl = buildThumbUrl(match.meta.code, '640x640')
 	const lightboxUrl = buildThumbUrl(match.meta.code, '1025x1025')
 
 	if (match.meta.kind === 'video') {
-		try {
-			const mediaUrl = await resolveMediaUrl(client, match.meta.code)
-			return {
-				kind: 'video',
-				uuid: match.uuid,
-				contenttype: match.meta.contenttype,
-				name: match.meta.name,
-				captureDate,
-				width: match.meta.width,
-				height: match.meta.height,
-				place: match.meta.place,
-				thumbUrl,
-				lightboxUrl,
-				mediaUrl,
-			}
-		} catch (err) {
-			const message = err instanceof Error ? err.message : 'unknown error'
-			// eslint-disable-next-line no-console
-			console.warn(`[pcloud] dropping video memory: ${message}`)
-			return null
+		return {
+			kind: 'video',
+			uuid: match.uuid,
+			contenttype: match.meta.contenttype,
+			name: match.meta.name,
+			captureDate,
+			width: match.meta.width,
+			height: match.meta.height,
+			place: match.meta.place,
+			thumbUrl,
+			lightboxUrl,
+			// Auth-gated proxy route: resolves the pCloud signed URL on the server
+			// (where it was minted) and pipes bytes back. Direct CDN URLs from
+			// `getpublinkdownload` are signed against the calling IP and break
+			// when fetched from a different IP — see video-stream.server.ts.
+			mediaUrl: `/api/video/${match.uuid}`,
 		}
 	}
 	return {
@@ -83,10 +77,10 @@ async function buildOrDrop(client: Client, match: Match): Promise<MemoryItem | n
 	}
 }
 
-export async function fetchTodayMemories(
-	today: { month: number; day: number },
-	client: Client,
-): Promise<MemoryItem[]> {
+export async function fetchTodayMemories(today: {
+	month: number
+	day: number
+}): Promise<MemoryItem[]> {
 	const folderCache = createFolderCache(getFolderCacheStore())
 	const mediaCache = createMediaCache(getMediaCacheStore())
 
@@ -114,8 +108,5 @@ export async function fetchTodayMemories(
 		(a, b) => b.capture.getFullYear() - a.capture.getFullYear() || a.meta.fileid - b.meta.fileid,
 	)
 
-	if (matches.length === 0) return []
-
-	const items = await Promise.all(matches.map((match) => buildOrDrop(client, match)))
-	return items.filter((m): m is MemoryItem => m !== null)
+	return matches.map(buildMemoryItem)
 }
