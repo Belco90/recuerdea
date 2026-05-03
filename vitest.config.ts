@@ -9,6 +9,8 @@ import { defineConfig } from 'vitest/config'
 // that, so these have to be redirected at the resolver level.
 const stub = (path: string) => fileURLToPath(new URL(`./test/stubs/${path}`, import.meta.url))
 
+const BROWSER_TESTS = ['src/**/*.browser.test.{ts,tsx}']
+
 export default defineConfig({
 	plugins: [viteReact()],
 	resolve: {
@@ -21,11 +23,29 @@ export default defineConfig({
 		clearMocks: true,
 		mockReset: true,
 		setupFiles: ['./test/setup.ts'],
-		browser: {
-			enabled: true,
-			provider: playwright(),
-			headless: true,
-			instances: [{ browser: 'chromium' }],
-		},
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: 'unit',
+					environment: 'node',
+					include: ['src/**/*.test.{ts,tsx}'],
+					exclude: BROWSER_TESTS,
+				},
+			},
+			{
+				extends: true,
+				test: {
+					name: 'browser',
+					include: BROWSER_TESTS,
+					browser: {
+						enabled: true,
+						provider: playwright(),
+						headless: true,
+						instances: [{ browser: 'chromium' }],
+					},
+				},
+			},
+		],
 	},
 })
