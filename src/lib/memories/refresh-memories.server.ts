@@ -117,8 +117,18 @@ async function extractFileMeta(
 	try {
 		const downloadUrl = await client.getfilelink(file.fileid)
 		const meta = isVideo ? await extractVideoMeta(downloadUrl) : await extractImageMeta(downloadUrl)
+		// Capture-date fallback chain. Videos get an upload-date last resort
+		// (pCloud `file.created`) so a video without any extractable metadata
+		// still appears in the timeline — anchored to upload day, which is the
+		// least-bad option vs. silently dropping it. Images don't get this
+		// fallback because EXIF is reliable enough that a quiet upload-date
+		// degrade would obscure real EXIF-extraction bugs.
+		const captureDate =
+			meta.captureDate ??
+			parseFilenameCaptureDate(file.name) ??
+			(isVideo ? parseUploadDate(file.created) : null)
 		const fileMeta: FileMeta = {
-			captureDate: meta.captureDate ?? parseFilenameCaptureDate(file.name) ?? null,
+			captureDate,
 			width: meta.width,
 			height: meta.height,
 			location: meta.location,
@@ -135,6 +145,11 @@ async function extractFileMeta(
 	} catch {
 		return { meta: EMPTY_META, outcome: isVideo ? 'video-error' : 'image-error' }
 	}
+}
+
+function parseUploadDate(iso: string): Date | null {
+	const ms = Date.parse(iso)
+	return Number.isNaN(ms) ? null : new Date(ms)
 }
 
 async function ensurePublink(

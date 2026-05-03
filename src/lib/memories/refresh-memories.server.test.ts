@@ -458,6 +458,116 @@ describe('refreshMemories', () => {
 		expect(meta.height).toBe(1080)
 	})
 
+	describe('captureDate fallback chain', () => {
+		const NULL_META = { captureDate: null, width: null, height: null, location: null }
+
+		it('falls back to filename date for a video with no extractable metadata', async () => {
+			mockedExtractVideoMeta.mockResolvedValue(NULL_META)
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const file = makeFile({
+				fileid: 300,
+				name: '2024-03-15 12-00-00.mp4',
+				contenttype: 'video/mp4',
+				hash: 'h-c',
+				created: 'Mon, 21 Apr 2025 09:00:00 +0000',
+			})
+			const client = fakeClient({ files: [file] })
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			const [, meta] = mediaStore.set.mock.calls[0]!
+			// Filename "2024-03-15 12-00-00" beats the upload-date fallback.
+			expect(meta.captureDate).toBe(new Date(2024, 2, 15, 12, 0, 0).toISOString())
+		})
+
+		it('falls back to pCloud upload date for a video with generic name + no metadata', async () => {
+			mockedExtractVideoMeta.mockResolvedValue(NULL_META)
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const uploadIso = 'Mon, 21 Apr 2025 09:00:00 +0000'
+			const file = makeFile({
+				fileid: 301,
+				name: 'IMG_1234.mp4',
+				contenttype: 'video/mp4',
+				hash: 'h-d',
+				created: uploadIso,
+			})
+			const client = fakeClient({ files: [file] })
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			const [, meta] = mediaStore.set.mock.calls[0]!
+			expect(meta.captureDate).toBe(new Date(uploadIso).toISOString())
+		})
+
+		it('does not apply the upload-date fallback to images', async () => {
+			mockedExtractImageMeta.mockResolvedValue(NULL_META)
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const file = makeFile({
+				fileid: 302,
+				name: 'random.jpg',
+				contenttype: 'image/jpeg',
+				hash: 'h-e',
+				created: 'Mon, 21 Apr 2025 09:00:00 +0000',
+			})
+			const client = fakeClient({ files: [file] })
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			const [, meta] = mediaStore.set.mock.calls[0]!
+			expect(meta.captureDate).toBeNull()
+		})
+
+		it('leaves video captureDate null when both extractor and upload-date fail', async () => {
+			mockedExtractVideoMeta.mockResolvedValue(NULL_META)
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const file = makeFile({
+				fileid: 303,
+				name: 'VID_001.mov',
+				contenttype: 'video/quicktime',
+				hash: 'h-f',
+				created: 'not a date',
+			})
+			const client = fakeClient({ files: [file] })
+
+			await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			const [, meta] = mediaStore.set.mock.calls[0]!
+			expect(meta.captureDate).toBeNull()
+		})
+	})
+
 	describe('extract counts', () => {
 		const ZERO = {
 			imagesWithLocation: 0,
