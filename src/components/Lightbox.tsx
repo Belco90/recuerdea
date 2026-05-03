@@ -12,9 +12,10 @@ import {
 	Image,
 	Portal,
 	Spinner,
+	Text,
 	VStack,
 } from '@chakra-ui/react'
-import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 type LightboxProps = {
@@ -28,6 +29,64 @@ function yearsAgoLowercase(n: number): string {
 	if (n === 0) return 'hoy mismo'
 	if (n === 1) return 'hace un año'
 	return `hace ${n} años`
+}
+
+type VideoMemoryItem = Extract<MemoryItem, { kind: 'video' }>
+
+// Some videos surface with codecs the current browser can't decode (HEVC in
+// .mp4 from iPhones is the common case — Safari plays it, desktop Chrome and
+// Firefox don't). Show a friendly fallback instead of a broken player; the
+// header's download button stays usable so the user can grab the file.
+function VideoSlide({ item, active }: { item: VideoMemoryItem; active: boolean }) {
+	const [hasError, setHasError] = useState(false)
+
+	useEffect(() => {
+		setHasError(false)
+	}, [item.uuid])
+
+	if (hasError) {
+		return (
+			<VStack gap={3} color="whiteAlpha.85" textAlign="center" px={6} maxW="400px">
+				<AlertTriangle size={32} aria-hidden style={{ opacity: 0.7 }} />
+				<Text fontFamily="mono" fontSize="13px" letterSpacing="0.04em">
+					Tu navegador no puede reproducir este vídeo.
+				</Text>
+				<Text fontSize="sm" opacity={0.65}>
+					Pulsa el botón de descarga de arriba para verlo en tu reproductor.
+				</Text>
+			</VStack>
+		)
+	}
+
+	return (
+		<video
+			src={item.mediaUrl}
+			poster={item.thumbUrl}
+			controls
+			autoPlay={active}
+			preload={active ? 'metadata' : 'none'}
+			onError={(event) => {
+				const target = event.currentTarget
+				// eslint-disable-next-line no-console
+				console.warn('[lightbox] video failed to load', {
+					code: target.error?.code,
+					message: target.error?.message,
+					name: item.name,
+					contenttype: item.contenttype,
+				})
+				setHasError(true)
+			}}
+			style={{
+				maxWidth: '100%',
+				maxHeight: '100%',
+				objectFit: 'contain',
+				borderRadius: '2px',
+				background: '#000',
+			}}
+		>
+			<track kind="captions" />
+		</video>
+	)
 }
 
 type DownloadStatus = 'idle' | 'pending' | 'error'
@@ -173,22 +232,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 										h="full"
 									>
 										{it.kind === 'video' ? (
-											<video
-												src={it.mediaUrl}
-												poster={it.thumbUrl}
-												controls
-												autoPlay={i === idx}
-												preload={i === idx ? 'metadata' : 'none'}
-												style={{
-													maxWidth: '100%',
-													maxHeight: '100%',
-													objectFit: 'contain',
-													borderRadius: '2px',
-													background: '#000',
-												}}
-											>
-												<track kind="captions" />
-											</video>
+											<VideoSlide item={it} active={i === idx} />
 										) : (
 											<Image
 												src={it.lightboxUrl}
