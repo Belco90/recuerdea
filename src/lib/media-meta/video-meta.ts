@@ -1,7 +1,12 @@
 // Hand-rolled MP4/MOV ISO Base Media File Format reader. Both formats share
 // the same atom layout, so the same walker works for either. We extract:
 //
-//   - creation_time from the `mvhd` (movie header) atom
+//   - capture date from (in preference order):
+//       1. moov.meta keys/ilst `com.apple.quicktime.creationdate` (timezone-aware)
+//       2. moov.udta.©day (QuickTime user-data ISO string)
+//       3. moov.mvhd.creation_time (rejecting the 0 = 1904-01-01 sentinel)
+//       4. any moov.trak.mdia.mdhd.creation_time (same epoch + sentinel)
+//     Each candidate runs through `sanityGate` (1990 ≤ date ≤ now+24h).
 //   - width / height from the first `tkhd` (track header) with non-zero dims
 //   - GPS coordinates from `udta.©xyz` (Apple QuickTime; ISO 6709 string)
 //
@@ -11,6 +16,13 @@ const MP4_EPOCH_OFFSET = 2_082_844_800
 const RANGE_HEADER_START = 'bytes=0-65535'
 const TAIL_SIZE = 1_048_576
 const ISO6709_PATTERN = /^([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)(?:[+-]\d+(?:\.\d+)?)?\/?$/
+// Sanity bounds for any atom-derived capture date. Anything older than 1990 or
+// more than 24h in the future is almost certainly a sentinel, an encoder bug,
+// or a clock-set-to-zero device — better to drop it than to claim it's real.
+const MIN_PLAUSIBLE_MS = Date.UTC(1990, 0, 1)
+const FUTURE_TOLERANCE_MS = 86_400_000
+const MDTA_NAMESPACE = 0x6d_64_74_61 // 'mdta'
+const QT_CREATION_DATE_KEY = 'com.apple.quicktime.creationdate'
 
 type BoxLocation = { start: number; end: number }
 
@@ -71,11 +83,22 @@ function parseFromBufferStart(buffer: ArrayBuffer): VideoMeta | null {
 }
 
 function parseMoov(view: DataView, start: number, end: number): VideoMeta {
-	const mvhd = walkForBox(view, start, end, 'mvhd')
-	const captureDate = mvhd ? parseMvhd(view, mvhd.start, mvhd.end) : null
+	const captureDate =
+		sanityGate(parseKeysCreationDate(view, start, end)) ??
+		sanityGate(parseUdtaCopyrightDay(view, start, end)) ??
+		sanityGate(parseMvhdDate(view, start, end)) ??
+		sanityGate(parseMdhdFromTraks(view, start, end))
 	const dims = findTkhdDimensions(view, start, end)
 	const location = findUdtaXyz(view, start, end)
 	return { captureDate, width: dims.width, height: dims.height, location }
+}
+
+function sanityGate(date: Date | null): Date | null {
+	if (!date) return null
+	const ms = date.getTime()
+	if (ms < MIN_PLAUSIBLE_MS) return null
+	if (ms > Date.now() + FUTURE_TOLERANCE_MS) return null
+	return date
 }
 
 function findUdtaXyz(view: DataView, moovStart: number, moovEnd: number): GeoLocation | null {
@@ -83,16 +106,32 @@ function findUdtaXyz(view: DataView, moovStart: number, moovEnd: number): GeoLoc
 	if (!udta) return null
 	const xyz = walkForCopyrightBox(view, udta.start, udta.end, 'xyz')
 	if (!xyz) return null
-	// Body: 2-byte length + 2-byte language code + UTF-8 text. Skip the 4-byte
-	// header and decode the rest; the ISO 6709 regex rejects anything malformed.
-	if (xyz.end - xyz.start < 4) return null
+	const text = readCopyrightBoxText(view, xyz)
+	if (text === null) return null
+	return parseIso6709(text)
+}
+
+// `©day` body matches `©xyz`: 2-byte length + 2-byte language + UTF-8 text.
+// QuickTime ships a date string here that's usually ISO 8601 with timezone
+// (`"2017-08-14T18:30:00+0200"`), sometimes date-only (`"2017-08-14"`).
+function parseUdtaCopyrightDay(view: DataView, moovStart: number, moovEnd: number): Date | null {
+	const udta = walkForBox(view, moovStart, moovEnd, 'udta')
+	if (!udta) return null
+	const day = walkForCopyrightBox(view, udta.start, udta.end, 'day')
+	if (!day) return null
+	const text = readCopyrightBoxText(view, day)
+	if (text === null) return null
+	return parseDateString(text)
+}
+
+function readCopyrightBoxText(view: DataView, box: BoxLocation): string | null {
+	if (box.end - box.start < 4) return null
 	const textBytes = new Uint8Array(
 		view.buffer,
-		view.byteOffset + xyz.start + 4,
-		xyz.end - xyz.start - 4,
+		view.byteOffset + box.start + 4,
+		box.end - box.start - 4,
 	)
-	const text = new TextDecoder('utf-8', { fatal: false }).decode(textBytes).trim()
-	return parseIso6709(text)
+	return new TextDecoder('utf-8', { fatal: false }).decode(textBytes).trim()
 }
 
 function walkForCopyrightBox(
@@ -127,6 +166,83 @@ function parseIso6709(text: string): GeoLocation | null {
 	if (!Number.isFinite(lat) || lat < -90 || lat > 90) return null
 	if (!Number.isFinite(lng) || lng < -180 || lng > 180) return null
 	return { lat, lng }
+}
+
+// QuickTime metadata via `moov.meta` keys+ilst. Apple stores the timezone-aware
+// capture date under the key `com.apple.quicktime.creationdate`. Layout:
+//
+//   moov.meta (FullBox: 4-byte version+flags, then children)
+//     keys (FullBox: 4-byte v+f, 4-byte entry_count, then [size, namespace, name]*)
+//     ilst (container: children typed by uint32 = 1-based key index)
+//       <item>
+//         data (4-byte type-code | 4-byte locale | UTF-8 text body)
+//
+// QuickTime files (.mov) sometimes ship `meta` as a plain container (no v+f
+// prefix) instead of a FullBox; we try both layouts.
+function parseKeysCreationDate(view: DataView, moovStart: number, moovEnd: number): Date | null {
+	const meta = walkForBox(view, moovStart, moovEnd, 'meta')
+	if (!meta) return null
+	return (
+		readMetaCreationDate(view, meta.start + 4, meta.end) ??
+		readMetaCreationDate(view, meta.start, meta.end)
+	)
+}
+
+function readMetaCreationDate(view: DataView, start: number, end: number): Date | null {
+	if (start > end) return null
+	const keys = walkForBox(view, start, end, 'keys')
+	const ilst = walkForBox(view, start, end, 'ilst')
+	if (!keys || !ilst) return null
+	const keyIndex = findKeyIndex(view, keys, QT_CREATION_DATE_KEY)
+	if (keyIndex === null) return null
+	const item = walkForFourCC(view, ilst.start, ilst.end, keyIndex)
+	if (!item) return null
+	const data = walkForBox(view, item.start, item.end, 'data')
+	if (!data) return null
+	return parseDataAtomString(view, data.start, data.end)
+}
+
+function findKeyIndex(view: DataView, keys: BoxLocation, targetKey: string): number | null {
+	if (keys.end - keys.start < 8) return null
+	const entryCount = view.getUint32(keys.start + 4)
+	if (entryCount === 0) return null
+	let pos = keys.start + 8
+	for (let i = 1; i <= entryCount; i++) {
+		if (pos + 8 > keys.end) return null
+		const size = view.getUint32(pos)
+		if (size < 8 || pos + size > keys.end) return null
+		// Each entry: [4-byte size][4-byte namespace][key_value bytes]. Apple uses
+		// the `mdta` namespace for keys it owns, including QT creationdate.
+		if (view.getUint32(pos + 4) === MDTA_NAMESPACE) {
+			const keyBytes = new Uint8Array(view.buffer, view.byteOffset + pos + 8, size - 8)
+			const name = new TextDecoder('utf-8', { fatal: false }).decode(keyBytes)
+			if (name === targetKey) return i
+		}
+		pos += size
+	}
+	return null
+}
+
+function parseDataAtomString(view: DataView, bodyStart: number, bodyEnd: number): Date | null {
+	if (bodyEnd - bodyStart < 8) return null
+	// Body header: 1-byte version + 3-byte flags (= type code, low 24 bits) +
+	// 4-byte locale. Type code 1 = UTF-8 text; we ignore other encodings.
+	const typeCode = view.getUint32(bodyStart) & 0x00_ff_ff_ff
+	if (typeCode !== 1) return null
+	const textBytes = new Uint8Array(
+		view.buffer,
+		view.byteOffset + bodyStart + 8,
+		bodyEnd - bodyStart - 8,
+	)
+	const text = new TextDecoder('utf-8', { fatal: false }).decode(textBytes).trim()
+	return parseDateString(text)
+}
+
+function parseDateString(text: string): Date | null {
+	if (!text) return null
+	const ms = Date.parse(text)
+	if (Number.isNaN(ms)) return null
+	return new Date(ms)
 }
 
 // Walk all top-level children of `moov` looking for `trak` boxes; pick the
@@ -180,6 +296,27 @@ function walkForBox(view: DataView, start: number, end: number, type: string): B
 	return null
 }
 
+// Like `walkForBox` but matches the type field as a raw uint32. Needed for
+// `ilst` children, whose four-byte type is the 1-based index into `keys`
+// rather than an ASCII fourcc.
+function walkForFourCC(
+	view: DataView,
+	start: number,
+	end: number,
+	fourCC: number,
+): BoxLocation | null {
+	let pos = start
+	while (pos + 8 <= end) {
+		const sized = readBoxHeader(view, pos, end)
+		if (!sized) return null
+		if (view.getUint32(pos + 4) === fourCC) {
+			return { start: sized.bodyStart, end: sized.boxEnd }
+		}
+		pos = sized.boxEnd
+	}
+	return null
+}
+
 function readBoxHeader(
 	view: DataView,
 	pos: number,
@@ -210,7 +347,37 @@ function readType(view: DataView, offset: number): string {
 	)
 }
 
-function parseMvhd(view: DataView, bodyStart: number, bodyEnd: number): Date | null {
+function parseMvhdDate(view: DataView, moovStart: number, moovEnd: number): Date | null {
+	const mvhd = walkForBox(view, moovStart, moovEnd, 'mvhd')
+	if (!mvhd) return null
+	return readMvhdLikeDate(view, mvhd.start, mvhd.end)
+}
+
+// `mdhd` may exist on every `trak`. Some cameras leave `mvhd.creation_time`
+// at 0 but populate `mdhd.creation_time` correctly; walk every track and
+// take the first non-zero one. The bit layout for the version/flags/
+// creation_time prefix is identical to `mvhd`, so we share the parser.
+function parseMdhdFromTraks(view: DataView, moovStart: number, moovEnd: number): Date | null {
+	let pos = moovStart
+	while (pos + 8 <= moovEnd) {
+		const sized = readBoxHeader(view, pos, moovEnd)
+		if (!sized) return null
+		if (readType(view, pos + 4) === 'trak') {
+			const mdia = walkForBox(view, sized.bodyStart, sized.boxEnd, 'mdia')
+			if (mdia) {
+				const mdhd = walkForBox(view, mdia.start, mdia.end, 'mdhd')
+				if (mdhd) {
+					const date = readMvhdLikeDate(view, mdhd.start, mdhd.end)
+					if (date) return date
+				}
+			}
+		}
+		pos = sized.boxEnd
+	}
+	return null
+}
+
+function readMvhdLikeDate(view: DataView, bodyStart: number, bodyEnd: number): Date | null {
 	if (bodyEnd - bodyStart < 8) return null
 	const version = view.getUint8(bodyStart)
 	let creationTime: number
@@ -226,6 +393,10 @@ function parseMvhd(view: DataView, bodyStart: number, bodyEnd: number): Date | n
 	} else {
 		return null
 	}
+	// 0 is the well-known "encoder didn't bother" sentinel — would decode to
+	// 1904-01-01. The sanity gate at the call site catches it too, but rejecting
+	// here keeps the intent explicit and short-circuits the conversion.
+	if (creationTime === 0) return null
 	const unixSeconds = creationTime - MP4_EPOCH_OFFSET
 	const date = new Date(unixSeconds * 1000)
 	return Number.isNaN(date.getTime()) ? null : date

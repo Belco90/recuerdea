@@ -98,6 +98,76 @@ function makeXyz(text: string): Uint8Array {
 	return makeAtomCopyright('xyz', makeXyzBody(text))
 }
 
+// `©day` body is identical to `©xyz`: 2-byte length + 2-byte language + UTF-8.
+function makeDay(text: string): Uint8Array {
+	return makeAtomCopyright('day', makeXyzBody(text))
+}
+
+// v0 mdhd is 24 bytes: 4-byte version+flags, 4-byte creation_time,
+// 4-byte modification_time, 4-byte timescale, 4-byte duration,
+// 2-byte language, 2-byte pre_defined.
+function makeMdhdV0Body(creationTime: number): Uint8Array {
+	const body = new Uint8Array(24)
+	const view = new DataView(body.buffer)
+	view.setUint32(0, 0)
+	view.setUint32(4, creationTime >>> 0)
+	return body
+}
+
+function makeMdia(mdhdBody: Uint8Array): Uint8Array {
+	return makeAtom('mdia', makeAtom('mdhd', mdhdBody))
+}
+
+function makeTrakWithMdhd(mdhdBody: Uint8Array): Uint8Array {
+	return makeAtom('trak', makeMdia(mdhdBody))
+}
+
+// Apple QuickTime metadata blob: moov.meta wrapping keys + ilst.
+//
+//   meta (FullBox: 4-byte version+flags prefix)
+//     keys: 4-byte v+f, 4-byte entry_count, then [size, namespace='mdta', name]*
+//     ilst: children typed by uint32 = 1-based key index. Each contains a
+//           `data` atom: 4-byte type-code (1 = UTF-8) + 4-byte locale + bytes.
+function makeQuicktimeKeysMeta(entries: { key: string; value: string }[]): Uint8Array {
+	const encoder = new TextEncoder()
+
+	const keyEntries = entries.map(({ key }) => {
+		const nameBytes = encoder.encode(key)
+		const entry = new Uint8Array(8 + nameBytes.length)
+		const view = new DataView(entry.buffer)
+		view.setUint32(0, entry.length)
+		view.setUint32(4, 0x6d_64_74_61) // 'mdta'
+		entry.set(nameBytes, 8)
+		return entry
+	})
+	const keysHeader = new Uint8Array(8)
+	new DataView(keysHeader.buffer).setUint32(4, entries.length)
+	const keysBody = concat(keysHeader, ...keyEntries)
+	const keysAtom = makeAtom('keys', keysBody)
+
+	const ilstChildren = entries.map((e, i) => {
+		const valueBytes = encoder.encode(e.value)
+		const dataBody = new Uint8Array(8 + valueBytes.length)
+		const dview = new DataView(dataBody.buffer)
+		dview.setUint32(0, 1) // version=0, flags=type-code=1 (UTF-8)
+		dview.setUint32(4, 0) // locale
+		dataBody.set(valueBytes, 8)
+		const dataAtom = makeAtom('data', dataBody)
+		// Container atom whose four-byte type is the 1-based key index.
+		const out = new Uint8Array(8 + dataAtom.length)
+		const ov = new DataView(out.buffer)
+		ov.setUint32(0, out.length)
+		ov.setUint32(4, i + 1)
+		out.set(dataAtom, 8)
+		return out
+	})
+	const ilstAtom = makeAtom('ilst', concat(...ilstChildren))
+
+	const versionFlags = new Uint8Array(4)
+	const metaBody = concat(versionFlags, keysAtom, ilstAtom)
+	return makeAtom('meta', metaBody)
+}
+
 function concat(...parts: Uint8Array[]): Uint8Array {
 	const total = parts.reduce((n, p) => n + p.length, 0)
 	const out = new Uint8Array(total)
@@ -233,6 +303,202 @@ describe('extractVideoMeta', () => {
 
 			const meta = await extractVideoMeta('https://x.test/v.mp4')
 			expect(meta.captureDate).toBeNull()
+		})
+	})
+
+	describe('captureDate sentinels and sanity gate', () => {
+		it('rejects mvhd creation_time = 0 (1904-01-01 sentinel)', async () => {
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(makeAtom('mvhd', makeMvhdV0Body(0))),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
+		})
+
+		it('rejects an mvhd date earlier than 1990-01-01', async () => {
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(new Date('1985-06-01T00:00:00Z')))),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
+		})
+
+		it('rejects an mvhd date more than 24h in the future', async () => {
+			const future = new Date(Date.now() + 1000 * 60 * 60 * 48)
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(future)))),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
+		})
+	})
+
+	describe('captureDate from udta.©day', () => {
+		it('parses an ISO+timezone string', async () => {
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(0)),
+					makeUdta(makeDay('2017-08-14T18:30:00+0200')),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(new Date('2017-08-14T18:30:00+0200'))
+		})
+
+		it('parses a date-only string as UTC midnight', async () => {
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(makeAtom('mvhd', makeMvhdV0Body(0)), makeUdta(makeDay('2017-08-14'))),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(new Date('2017-08-14T00:00:00Z'))
+		})
+
+		it('returns null when ©day payload is unparseable', async () => {
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(makeAtom('mvhd', makeMvhdV0Body(0)), makeUdta(makeDay('not a date string'))),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
+		})
+	})
+
+	describe('captureDate from moov.meta keys/ilst', () => {
+		it('parses com.apple.quicktime.creationdate from keys+ilst', async () => {
+			const expected = new Date('2023-04-15T14:32:00+0200')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(0)),
+					makeQuicktimeKeysMeta([
+						{ key: 'com.apple.quicktime.make', value: 'Apple' },
+						{ key: 'com.apple.quicktime.creationdate', value: '2023-04-15T14:32:00+0200' },
+					]),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(expected)
+		})
+
+		it('returns null when keys has no com.apple.quicktime.creationdate entry', async () => {
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(0)),
+					makeQuicktimeKeysMeta([{ key: 'com.apple.quicktime.make', value: 'Apple' }]),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
+		})
+	})
+
+	describe('captureDate from mdhd', () => {
+		it('reads mdhd.creation_time from a trak when mvhd is 0', async () => {
+			const expected = new Date('2022-09-10T08:15:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(0)),
+					makeTrakWithMdhd(makeMdhdV0Body(dateToMp4Seconds(expected))),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(expected)
+		})
+
+		it('rejects mdhd creation_time = 0', async () => {
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(makeAtom('mvhd', makeMvhdV0Body(0)), makeTrakWithMdhd(makeMdhdV0Body(0))),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toBeNull()
+		})
+	})
+
+	describe('captureDate source preference', () => {
+		it('prefers keys creationdate over udta.©day, mvhd, and mdhd', async () => {
+			const keysDate = new Date('2023-04-15T14:32:00+0200')
+			const udtaDate = new Date('2020-01-01T00:00:00Z')
+			const mvhdDate = new Date('2019-04-27T14:30:00Z')
+			const mdhdDate = new Date('2018-04-27T14:30:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeQuicktimeKeysMeta([
+						{ key: 'com.apple.quicktime.creationdate', value: '2023-04-15T14:32:00+0200' },
+					]),
+					makeUdta(makeDay(udtaDate.toISOString())),
+					makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(mvhdDate))),
+					makeTrakWithMdhd(makeMdhdV0Body(dateToMp4Seconds(mdhdDate))),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(keysDate)
+		})
+
+		it('prefers udta.©day over mvhd and mdhd when keys is missing', async () => {
+			const udtaDate = new Date('2020-01-01T00:00:00Z')
+			const mvhdDate = new Date('2019-04-27T14:30:00Z')
+			const mdhdDate = new Date('2018-04-27T14:30:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeUdta(makeDay(udtaDate.toISOString())),
+					makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(mvhdDate))),
+					makeTrakWithMdhd(makeMdhdV0Body(dateToMp4Seconds(mdhdDate))),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(udtaDate)
+		})
+
+		it('prefers mvhd over mdhd when both are valid', async () => {
+			const mvhdDate = new Date('2019-04-27T14:30:00Z')
+			const mdhdDate = new Date('2018-04-27T14:30:00Z')
+			const file = concat(
+				makeAtom('ftyp', new Uint8Array([0, 0, 0, 0])),
+				makeMoov(
+					makeAtom('mvhd', makeMvhdV0Body(dateToMp4Seconds(mvhdDate))),
+					makeTrakWithMdhd(makeMdhdV0Body(dateToMp4Seconds(mdhdDate))),
+				),
+			)
+			fetchSpy.mockResolvedValue(new Response(bytesToBuffer(file), { status: 200 }))
+
+			const meta = await extractVideoMeta('https://x.test/v.mp4')
+			expect(meta.captureDate).toEqual(mvhdDate)
 		})
 	})
 
