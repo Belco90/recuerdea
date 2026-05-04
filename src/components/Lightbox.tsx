@@ -182,12 +182,6 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 								letterSpacing="0.08em"
 								textTransform="uppercase"
 							>
-								<Box as="span" color="white" fontWeight={600}>
-									{group.year}
-								</Box>
-								<Box as="span" opacity={0.4}>
-									·
-								</Box>
 								<Box as="span" opacity={0.65}>
 									{yearsAgo(group.yearsAgo)}
 								</Box>

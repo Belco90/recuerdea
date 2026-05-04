@@ -51,10 +51,6 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 				_firstLetter={{ textTransform: 'uppercase' }}
 			>
 				{yearsAgo(group.yearsAgo)}
-				<Text as="span" display={{ base: 'inline', md: 'none' }} color="ink.muted">
-					{' · '}
-					{group.year}
-				</Text>
 			</Heading>
 			<Text
 				fontFamily="mono"
