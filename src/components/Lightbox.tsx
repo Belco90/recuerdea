@@ -208,7 +208,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 									{idx + 1} / {items.length}
 								</Box>
 								<Dialog.CloseTrigger asChild display="flex">
-									<IconButton variant="ghost" size="sm" aria-label="Cerrar">
+									<IconButton variant="ghost" size="sm" aria-label="Cerrar" color="gray.contrast">
 										<X size={18} aria-hidden />
 									</IconButton>
 								</Dialog.CloseTrigger>
