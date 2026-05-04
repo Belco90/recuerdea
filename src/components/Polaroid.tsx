@@ -13,7 +13,6 @@ type PolaroidProps = {
 export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 	const rot = rotForKey(keyId)
 	const caption = item.place
-	const aspectRatio = item.width && item.height ? item.width / item.height : undefined
 
 	return (
 		<Box
@@ -44,7 +43,7 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 				position="relative"
 				transition="box-shadow 0.25s cubic-bezier(.2,.7,.3,1)"
 			>
-				<Box position="relative" bg="bg.muted" overflow="hidden" w="full" aspectRatio={aspectRatio}>
+				<Box position="relative" bg="bg.muted" overflow="hidden" w="full" aspectRatio="square">
 					<Image
 						src={item.thumbUrl}
 						alt=""
