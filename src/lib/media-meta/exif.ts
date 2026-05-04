@@ -16,9 +16,6 @@ const { parse } = exifr
 const RANGE_HEADER = 'bytes=0-10485759'
 
 type ExifTags = {
-	DateTimeOriginal?: unknown
-	CreateDate?: unknown
-	DateTime?: unknown
 	ExifImageWidth?: unknown
 	ExifImageHeight?: unknown
 	PixelXDimension?: unknown
@@ -37,9 +34,6 @@ type ExifTags = {
 // exifr's default `reviveValues: true` then surfaces the merged numeric
 // `latitude`/`longitude` we read in `pickLocation`.
 const TAG_NAMES = [
-	'DateTimeOriginal',
-	'CreateDate',
-	'DateTime',
 	'ExifImageWidth',
 	'ExifImageHeight',
 	'PixelXDimension',
@@ -58,13 +52,12 @@ export type GeoLocation = {
 }
 
 export type ImageMeta = {
-	captureDate: Date | null
 	width: number | null
 	height: number | null
 	location: GeoLocation | null
 }
 
-const EMPTY: ImageMeta = { captureDate: null, width: null, height: null, location: null }
+const EMPTY: ImageMeta = { width: null, height: null, location: null }
 
 export async function extractImageMeta(downloadUrl: string): Promise<ImageMeta> {
 	const res = await fetch(downloadUrl, { headers: { Range: RANGE_HEADER } })
@@ -79,17 +72,10 @@ export async function extractImageMeta(downloadUrl: string): Promise<ImageMeta> 
 	}
 
 	return {
-		captureDate: pickCaptureDate(tags),
 		width: pickDimension(tags?.ExifImageWidth, tags?.PixelXDimension, tags?.ImageWidth),
 		height: pickDimension(tags?.ExifImageHeight, tags?.PixelYDimension, tags?.ImageHeight),
 		location: pickLocation(tags),
 	}
-}
-
-function pickCaptureDate(tags: ExifTags | undefined): Date | null {
-	const candidate = tags?.DateTimeOriginal ?? tags?.CreateDate ?? tags?.DateTime
-	if (!(candidate instanceof Date) || Number.isNaN(candidate.getTime())) return null
-	return candidate
 }
 
 function pickDimension(...candidates: readonly unknown[]): number | null {
