@@ -195,7 +195,7 @@ Replace Tailwind responsive prefixes with Chakra's breakpoint object syntax:
 
 ```tsx
 // Tailwind: text-sm md:base lg:text-lg
-<Text fontSize={{ base: "sm", md: "md", lg: "lg" }} />
+<Text fontSize={{ base: 'sm', md: 'md', lg: 'lg' }} />
 ```
 
 **From CSS Modules** — convert what you can to Chakra props; keep `className`
@@ -247,11 +247,15 @@ const Card = styled.div`padding: 1rem; &:hover { background: #f3f4f6; }`
 ### `asChild` for Next.js Link and Image
 
 ```tsx
-import NextLink from "next/link"
-<ChakraLink asChild><NextLink href="/about">About</NextLink></ChakraLink>
+import NextLink from 'next/link'
+;<ChakraLink asChild>
+	<NextLink href="/about">About</NextLink>
+</ChakraLink>
 
-import NextImage from "next/image"
-<ChakraImage asChild><NextImage src="/hero.png" alt="Hero" width={800} height={400} /></ChakraImage>
+import NextImage from 'next/image'
+;<ChakraImage asChild>
+	<NextImage src="/hero.png" alt="Hero" width={800} height={400} />
+</ChakraImage>
 ```
 
 ### Refactor output format
