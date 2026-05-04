@@ -35,7 +35,7 @@
 		"@tanstack/router-plugin": "^1.132.0",
 		"exifr": "^7.1.3",
 		"lucide-react": "^0.545.0",
-		"pcloud-kit": "^0.1.2",
+		"pcloud-kit": "^0.3.0",
 		"react": "^19.2.0",
 		"react-dom": "^19.2.0"
 	},
@@ -50,7 +50,6 @@
 		"@vitejs/plugin-react": "^6.0.1",
 		"@vitest/browser": "^4.1.5",
 		"@vitest/browser-playwright": "^4.1.5",
-		"jsdom": "^28.1.0",
 		"nano-staged": "^1.0.2",
 		"netlify-cli": "^25.3.0",
 		"oxfmt": "^0.46.0",
