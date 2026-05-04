@@ -25,66 +25,6 @@ describe('extractImageMeta', () => {
 		fetchSpy.mockResolvedValue(new Response(new ArrayBuffer(8), { status: 200 }))
 	}
 
-	describe('captureDate', () => {
-		it('returns DateTimeOriginal when present', async () => {
-			mockOkResponse()
-			const expected = new Date('2019-04-27T14:30:00Z')
-			mockedParse.mockResolvedValue({ DateTimeOriginal: expected })
-
-			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta.captureDate).toEqual(expected)
-		})
-
-		it('falls back to CreateDate when DateTimeOriginal is absent', async () => {
-			mockOkResponse()
-			const expected = new Date('2021-07-08T12:00:00Z')
-			mockedParse.mockResolvedValue({ CreateDate: expected })
-
-			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta.captureDate).toEqual(expected)
-		})
-
-		it('falls back to DateTime when DateTimeOriginal and CreateDate are absent', async () => {
-			mockOkResponse()
-			const expected = new Date('2020-01-15T09:00:00Z')
-			mockedParse.mockResolvedValue({ DateTime: expected })
-
-			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta.captureDate).toEqual(expected)
-		})
-
-		it('prefers DateTimeOriginal over CreateDate over DateTime', async () => {
-			mockOkResponse()
-			const original = new Date('2019-04-27T14:30:00Z')
-			const created = new Date('2022-06-01T00:00:00Z')
-			const modified = new Date('2024-01-01T00:00:00Z')
-			mockedParse.mockResolvedValue({
-				DateTimeOriginal: original,
-				CreateDate: created,
-				DateTime: modified,
-			})
-
-			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta.captureDate).toEqual(original)
-		})
-
-		it('returns null captureDate when the date tag is not a Date instance', async () => {
-			mockOkResponse()
-			mockedParse.mockResolvedValue({ DateTimeOriginal: '2019-04-27' })
-
-			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta.captureDate).toBeNull()
-		})
-
-		it('returns null captureDate when the date tag is an invalid Date', async () => {
-			mockOkResponse()
-			mockedParse.mockResolvedValue({ DateTimeOriginal: new Date('not-a-date') })
-
-			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta.captureDate).toBeNull()
-		})
-	})
-
 	describe('width and height', () => {
 		it('returns ExifImageWidth/Height when present', async () => {
 			mockOkResponse()
@@ -131,7 +71,7 @@ describe('extractImageMeta', () => {
 
 		it('returns null dimensions when tags are missing', async () => {
 			mockOkResponse()
-			mockedParse.mockResolvedValue({ DateTimeOriginal: new Date('2020-01-01') })
+			mockedParse.mockResolvedValue({})
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
 			expect(meta.width).toBeNull()
@@ -168,7 +108,7 @@ describe('extractImageMeta', () => {
 
 		it('returns null when both GPS tags are absent', async () => {
 			mockOkResponse()
-			mockedParse.mockResolvedValue({ DateTimeOriginal: new Date('2020-01-01') })
+			mockedParse.mockResolvedValue({})
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
 			expect(meta.location).toBeNull()
@@ -279,7 +219,7 @@ describe('extractImageMeta', () => {
 	describe('error handling', () => {
 		it('sends a 10MB Range header — large enough for iPhone HEIC, capped to keep exifr from walking iinf into auxiliary/thumbnail items', async () => {
 			mockOkResponse()
-			mockedParse.mockResolvedValue({ DateTimeOriginal: new Date() })
+			mockedParse.mockResolvedValue({})
 
 			await extractImageMeta('https://x.test/a.jpg')
 
@@ -293,7 +233,7 @@ describe('extractImageMeta', () => {
 			mockedParse.mockResolvedValue(undefined)
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
+			expect(meta).toEqual({ width: null, height: null, location: null })
 		})
 
 		it('returns all-null when exifr returns no tags', async () => {
@@ -301,7 +241,7 @@ describe('extractImageMeta', () => {
 			mockedParse.mockResolvedValue({})
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
+			expect(meta).toEqual({ width: null, height: null, location: null })
 		})
 
 		it('returns all-null when exifr throws (corrupt header)', async () => {
@@ -309,14 +249,14 @@ describe('extractImageMeta', () => {
 			mockedParse.mockRejectedValue(new Error('bad jpeg'))
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
+			expect(meta).toEqual({ width: null, height: null, location: null })
 		})
 
 		it('returns all-null when the response is not ok (4xx/5xx)', async () => {
 			fetchSpy.mockResolvedValue(new Response(null, { status: 404 }))
 
 			const meta = await extractImageMeta('https://x.test/a.jpg')
-			expect(meta).toEqual({ captureDate: null, width: null, height: null, location: null })
+			expect(meta).toEqual({ width: null, height: null, location: null })
 			expect(mockedParse).not.toHaveBeenCalled()
 		})
 
