@@ -3,6 +3,7 @@ import type { MemoryItem } from '#/lib/memories/pcloud.server'
 
 import { downloadAs } from '#/lib/memories/download'
 import { getMediaDownloadUrl } from '#/lib/memories/get-download-url'
+import { yearsAgo } from '#/lib/utils/years-ago'
 import {
 	Alert,
 	Box,
@@ -25,12 +26,6 @@ type LightboxProps = {
 	startIndex: number
 	open: boolean
 	onClose: () => void
-}
-
-function yearsAgoLowercase(n: number): string {
-	if (n === 0) return 'hoy mismo'
-	if (n === 1) return 'hace un año'
-	return `hace ${n} años`
 }
 
 type VideoMemoryItem = Extract<MemoryItem, { kind: 'video' }>
@@ -194,7 +189,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 									·
 								</Box>
 								<Box as="span" opacity={0.65}>
-									{yearsAgoLowercase(group.yearsAgo)}
+									{yearsAgo(group.yearsAgo)}
 								</Box>
 								{item.place && (
 									<>

@@ -1,17 +1,12 @@
 import type { YearGroup } from '#/lib/memories/memory-grouping'
 
 import { Polaroid } from '#/components/Polaroid'
+import { yearsAgoCapitalized } from '#/lib/utils/years-ago'
 import { Box, Heading, Text } from '@chakra-ui/react'
 
 type YearSectionProps = {
 	group: YearGroup
 	onOpen: (year: number, idx: number) => void
-}
-
-function yearsAgoLabel(n: number): string {
-	if (n === 0) return 'Hoy mismo'
-	if (n === 1) return 'Hace un año'
-	return `Hace ${n} años`
 }
 
 export function YearSection({ group, onOpen }: YearSectionProps) {
@@ -54,7 +49,7 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 				color="ink"
 				m={0}
 			>
-				{yearsAgoLabel(group.yearsAgo)}
+				{yearsAgoCapitalized(group.yearsAgo)}
 				<Text as="span" display={{ base: 'inline', md: 'none' }} color="ink.muted">
 					{' · '}
 					{group.year}
