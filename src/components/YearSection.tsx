@@ -1,7 +1,7 @@
 import type { YearGroup } from '#/lib/memories/memory-grouping'
 
 import { Polaroid } from '#/components/Polaroid'
-import { yearsAgoCapitalized } from '#/lib/utils/years-ago'
+import { yearsAgo } from '#/lib/utils/years-ago'
 import { Box, Heading, Text } from '@chakra-ui/react'
 
 type YearSectionProps = {
@@ -48,8 +48,9 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 				letterSpacing="-0.015em"
 				color="ink"
 				m={0}
+				_firstLetter={{ textTransform: 'uppercase' }}
 			>
-				{yearsAgoCapitalized(group.yearsAgo)}
+				{yearsAgo(group.yearsAgo)}
 				<Text as="span" display={{ base: 'inline', md: 'none' }} color="ink.muted">
 					{' · '}
 					{group.year}
