@@ -1,17 +1,12 @@
 import type { YearGroup } from '#/lib/memories/memory-grouping'
 
 import { Polaroid } from '#/components/Polaroid'
-import { Box, Heading, Text } from '@chakra-ui/react'
+import { yearsAgo } from '#/lib/utils/years-ago'
+import { Box, Heading, SimpleGrid, Text } from '@chakra-ui/react'
 
 type YearSectionProps = {
 	group: YearGroup
 	onOpen: (year: number, idx: number) => void
-}
-
-function yearsAgoLabel(n: number): string {
-	if (n === 0) return 'Hoy mismo'
-	if (n === 1) return 'Hace un año'
-	return `Hace ${n} años`
 }
 
 export function YearSection({ group, onOpen }: YearSectionProps) {
@@ -53,12 +48,9 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 				letterSpacing="-0.015em"
 				color="ink"
 				m={0}
+				_firstLetter={{ textTransform: 'uppercase' }}
 			>
-				{yearsAgoLabel(group.yearsAgo)}
-				<Text as="span" display={{ base: 'inline', md: 'none' }} color="ink.muted">
-					{' · '}
-					{group.year}
-				</Text>
+				{yearsAgo(group.yearsAgo)}
 			</Heading>
 			<Text
 				fontFamily="mono"
@@ -71,7 +63,11 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 			>
 				{count} {count === 1 ? 'recuerdo' : 'recuerdos'}
 			</Text>
-			<Box columnCount={{ base: 2, md: 3, lg: 4 }} columnGap={{ base: 3.5, md: 4.5 }}>
+			<SimpleGrid
+				columns={{ base: 2, md: 3, lg: 4 }}
+				gap={{ base: 3.5, md: 4.5 }}
+				alignItems="start"
+			>
 				{group.items.map((item, idx) => (
 					<Polaroid
 						key={item.uuid}
@@ -80,7 +76,7 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 						onClick={() => onOpen(group.year, idx)}
 					/>
 				))}
-			</Box>
+			</SimpleGrid>
 		</Box>
 	)
 }

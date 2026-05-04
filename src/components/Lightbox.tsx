@@ -3,7 +3,9 @@ import type { MemoryItem } from '#/lib/memories/pcloud.server'
 
 import { downloadAs } from '#/lib/memories/download'
 import { getMediaDownloadUrl } from '#/lib/memories/get-download-url'
+import { yearsAgo } from '#/lib/utils/years-ago'
 import {
+	Alert,
 	Box,
 	Carousel,
 	Dialog,
@@ -11,24 +13,19 @@ import {
 	IconButton,
 	Image,
 	Portal,
-	Spinner,
-	Text,
 	VStack,
+	chakra,
 } from '@chakra-ui/react'
-import { AlertTriangle, ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Download, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
+
+const Video = chakra('video')
 
 type LightboxProps = {
 	group: YearGroup
 	startIndex: number
 	open: boolean
 	onClose: () => void
-}
-
-function yearsAgoLowercase(n: number): string {
-	if (n === 0) return 'hoy mismo'
-	if (n === 1) return 'hace un año'
-	return `hace ${n} años`
 }
 
 type VideoMemoryItem = Extract<MemoryItem, { kind: 'video' }>
@@ -46,20 +43,35 @@ function VideoSlide({ item, active }: { item: VideoMemoryItem; active: boolean }
 
 	if (hasError) {
 		return (
-			<VStack gap={3} color="whiteAlpha.85" textAlign="center" px={6} maxW="400px">
-				<AlertTriangle size={32} aria-hidden style={{ opacity: 0.7 }} />
-				<Text fontFamily="mono" fontSize="13px" letterSpacing="0.04em">
-					Tu navegador no puede reproducir este vídeo.
-				</Text>
-				<Text fontSize="sm" opacity={0.65}>
-					Pulsa el botón de descarga de arriba para verlo en tu reproductor.
-				</Text>
-			</VStack>
+			<Alert.Root
+				status="warning"
+				variant="subtle"
+				maxW="400px"
+				bg="whiteAlpha.100"
+				color="whiteAlpha.85"
+				borderRadius="md"
+				flexDirection="column"
+				alignItems="center"
+				textAlign="center"
+				gap={3}
+				px={6}
+				py={5}
+			>
+				<Alert.Indicator boxSize={8} opacity={0.7} />
+				<Alert.Content gap={2}>
+					<Alert.Title fontFamily="mono" fontSize="13px" letterSpacing="0.04em">
+						Tu navegador no puede reproducir este vídeo.
+					</Alert.Title>
+					<Alert.Description fontSize="sm" opacity={0.65}>
+						Pulsa el botón de descarga de arriba para verlo en tu reproductor.
+					</Alert.Description>
+				</Alert.Content>
+			</Alert.Root>
 		)
 	}
 
 	return (
-		<video
+		<Video
 			src={item.mediaUrl}
 			poster={item.thumbUrl}
 			controls
@@ -76,16 +88,14 @@ function VideoSlide({ item, active }: { item: VideoMemoryItem; active: boolean }
 				})
 				setHasError(true)
 			}}
-			style={{
-				maxWidth: '100%',
-				maxHeight: '100%',
-				objectFit: 'contain',
-				borderRadius: '2px',
-				background: '#000',
-			}}
+			maxW="full"
+			maxH="full"
+			objectFit="contain"
+			borderRadius="2px"
+			bg="black"
 		>
 			<track kind="captions" />
-		</video>
+		</Video>
 	)
 }
 
@@ -122,18 +132,14 @@ function DownloadButton({ item }: { item: MemoryItem }) {
 			color="white"
 			shadow="md"
 			aria-label={status === 'error' ? 'Error al descargar' : 'Descargar'}
-			disabled={status === 'pending'}
+			loading={status === 'pending'}
 			onClick={handleClick}
 		>
-			{status === 'pending' ? (
-				<Spinner size="xs" aria-hidden />
-			) : (
-				<Download
-					size={18}
-					aria-hidden
-					style={status === 'error' ? { color: 'var(--chakra-colors-red-400)' } : undefined}
-				/>
-			)}
+			<Download
+				size={18}
+				aria-hidden
+				color={status === 'error' ? 'var(--chakra-colors-red-400)' : undefined}
+			/>
 		</IconButton>
 	)
 }
@@ -176,14 +182,8 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 								letterSpacing="0.08em"
 								textTransform="uppercase"
 							>
-								<Box as="span" color="white" fontWeight={600}>
-									{group.year}
-								</Box>
-								<Box as="span" opacity={0.4}>
-									·
-								</Box>
 								<Box as="span" opacity={0.65}>
-									{yearsAgoLowercase(group.yearsAgo)}
+									{yearsAgo(group.yearsAgo)}
 								</Box>
 								{item.place && (
 									<>
@@ -208,7 +208,7 @@ export function Lightbox({ group, startIndex, open, onClose }: LightboxProps) {
 									{idx + 1} / {items.length}
 								</Box>
 								<Dialog.CloseTrigger asChild display="flex">
-									<IconButton variant="ghost" size="sm" aria-label="Cerrar">
+									<IconButton variant="ghost" size="sm" aria-label="Cerrar" color="gray.contrast">
 										<X size={18} aria-hidden />
 									</IconButton>
 								</Dialog.CloseTrigger>

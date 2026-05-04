@@ -71,6 +71,12 @@ const config = defineConfig({
 					value: '0 2px 2px rgba(0,0,0,.5), 0 18px 32px -10px rgba(0,0,0,.7)',
 				},
 			},
+			assets: {
+				adminStripe: {
+					value:
+						'repeating-linear-gradient(-45deg, color-mix(in srgb, var(--chakra-colors-accent-500) 10%, var(--chakra-colors-bg)) 0 14px, color-mix(in srgb, var(--chakra-colors-accent-500) 4%, var(--chakra-colors-bg)) 14px 28px)',
+				},
+			},
 		},
 		semanticTokens: {
 			colors: {

@@ -251,9 +251,6 @@ function LoginPage() {
 	)
 }
 
-const STRIPE_PATTERN =
-	'repeating-linear-gradient(38deg, var(--chakra-colors-bg-muted) 0 8px, var(--chakra-colors-accent-soft) 8px 16px)'
-
 function DecorativePolaroids() {
 	return (
 		<Box
@@ -295,13 +292,6 @@ function DecorativePolaroid(props: {
 			bg="paper"
 			borderRadius="2px"
 			boxShadow="rdShadowLift"
-			_before={{
-				content: '""',
-				position: 'absolute',
-				inset: '7px 7px 28px 7px',
-				bgImage: STRIPE_PATTERN,
-				opacity: 0.8,
-			}}
 			{...props}
 		/>
 	)

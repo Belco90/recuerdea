@@ -23,7 +23,6 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 			border={0}
 			bg="transparent"
 			display="block"
-			mb={4.5}
 			transform={`rotate(${rot}deg)`}
 			transition="transform 0.25s cubic-bezier(.2,.7,.3,1)"
 			_hover={{
@@ -31,7 +30,6 @@ export function Polaroid({ item, keyId, onClick }: PolaroidProps) {
 				'& > div': { boxShadow: 'rdShadowLift' },
 			}}
 			_active={{ transform: 'rotate(0deg) translateY(-1px) scale(0.99)' }}
-			css={{ breakInside: 'avoid' }}
 			onClick={onClick}
 			aria-label={caption ?? 'Recuerdo'}
 		>
