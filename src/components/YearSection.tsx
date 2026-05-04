@@ -2,7 +2,7 @@ import type { YearGroup } from '#/lib/memories/memory-grouping'
 
 import { Polaroid } from '#/components/Polaroid'
 import { yearsAgo } from '#/lib/utils/years-ago'
-import { Box, Heading, Text } from '@chakra-ui/react'
+import { Box, Heading, SimpleGrid, Text } from '@chakra-ui/react'
 
 type YearSectionProps = {
 	group: YearGroup
@@ -67,7 +67,11 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 			>
 				{count} {count === 1 ? 'recuerdo' : 'recuerdos'}
 			</Text>
-			<Box columnCount={{ base: 2, md: 3, lg: 4 }} columnGap={{ base: 3.5, md: 4.5 }}>
+			<SimpleGrid
+				columns={{ base: 2, md: 3, lg: 4 }}
+				gap={{ base: 3.5, md: 4.5 }}
+				alignItems="start"
+			>
 				{group.items.map((item, idx) => (
 					<Polaroid
 						key={item.uuid}
@@ -76,7 +80,7 @@ export function YearSection({ group, onOpen }: YearSectionProps) {
 						onClick={() => onOpen(group.year, idx)}
 					/>
 				))}
-			</Box>
+			</SimpleGrid>
 		</Box>
 	)
 }
