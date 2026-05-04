@@ -3,6 +3,7 @@ import type { SubmitEventHandler } from 'react'
 import { AppShell } from '#/components/AppShell'
 import { Wordmark } from '#/components/Wordmark'
 import { getServerUser } from '#/lib/auth/auth'
+import { persistAuthCookies } from '#/lib/auth/persist-cookies'
 import { spanishMonth } from '#/lib/utils/spanish-months'
 import { Box, Button, Field, Heading, Input, Stack, Text, VStack } from '@chakra-ui/react'
 import { acceptInvite, handleAuthCallback, login, updateUser } from '@netlify/identity'
@@ -68,6 +69,7 @@ function LoginPage() {
 			} else if (result.type === 'recovery') {
 				setMode('recovery')
 			} else if (result.user) {
+				persistAuthCookies()
 				window.location.href = '/'
 			}
 		})
@@ -93,6 +95,7 @@ function LoginPage() {
 			} else {
 				await updateUser({ password })
 			}
+			persistAuthCookies()
 			window.location.href = '/'
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Algo ha ido mal.')
