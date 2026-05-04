@@ -4,10 +4,6 @@ import { CalendarIcon, Star } from 'lucide-react'
 
 const route = getRouteApi('/')
 
-const STRIPE_BG = `repeating-linear-gradient(-45deg,
-  color-mix(in srgb, var(--chakra-colors-accent-500) 10%, var(--chakra-colors-bg)) 0 14px,
-  color-mix(in srgb, var(--chakra-colors-accent-500) 4%, var(--chakra-colors-bg)) 14px 28px)`
-
 export function AdminDateOverride({
 	initialActiveDate,
 }: {
@@ -21,7 +17,7 @@ export function AdminDateOverride({
 			role="region"
 			aria-label="Controles de administración"
 			position="relative"
-			bgImage={STRIPE_BG}
+			bgImage="adminStripe"
 			borderBottomWidth="1px"
 			borderBottomStyle="dashed"
 			borderBottomColor="accent.300"

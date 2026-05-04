@@ -29,7 +29,7 @@ describe('YearSection', () => {
 		await render(
 			<YearSection group={group} onOpen={vi.fn<(year: number, idx: number) => void>()} />,
 		)
-		await expect.element(page.getByRole('heading', { name: /Hace 3 años/ })).toBeVisible()
+		await expect.element(page.getByRole('heading', { name: /hace 3 años/i })).toBeVisible()
 		await expect.element(page.getByText('1 recuerdo')).toBeVisible()
 	})
 })

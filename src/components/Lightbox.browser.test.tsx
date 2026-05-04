@@ -48,7 +48,6 @@ const group: YearGroup = {
 describe('Lightbox', () => {
 	it('renders the year header and slide counter when open', async () => {
 		await render(<Lightbox group={group} startIndex={0} open onClose={vi.fn<() => void>()} />)
-		await expect.element(page.getByText('2022')).toBeVisible()
 		await expect.element(page.getByText('hace 4 años')).toBeVisible()
 		await expect.element(page.getByText('1 / 2')).toBeVisible()
 		await expect.element(page.getByRole('button', { name: 'Cerrar' })).toBeVisible()

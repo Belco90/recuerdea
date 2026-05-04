@@ -1,10 +1,11 @@
 import { Wordmark } from '#/components/Wordmark'
 import { useIdentity } from '#/lib/auth/identity-context'
-import { Avatar, Box, Container, HStack, IconButton, Text } from '@chakra-ui/react'
-import { Link, getRouteApi } from '@tanstack/react-router'
+import { Avatar, Box, Container, HStack, IconButton, Text, chakra } from '@chakra-ui/react'
+import { Link as RouterLink, getRouteApi } from '@tanstack/react-router'
 import { LogOut } from 'lucide-react'
 
 const route = getRouteApi('/')
+const Link = chakra(RouterLink)
 
 export function Topbar() {
 	const { user, logout } = useIdentity()
@@ -24,7 +25,7 @@ export function Topbar() {
 		>
 			<Container maxW="1080px" px={{ base: 4, md: 4.5 }}>
 				<HStack justify="space-between" align="center" gap={3} py={2.5}>
-					<Link to="/" aria-label="Recuerdea" style={{ color: 'inherit', textDecoration: 'none' }}>
+					<Link to="/" aria-label="Recuerdea" color="inherit" textDecoration="none">
 						<Wordmark />
 					</Link>
 					<HStack gap={2.5}>
