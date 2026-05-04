@@ -1,17 +1,23 @@
 import { Wordmark } from '#/components/Wordmark'
 import { useIdentity } from '#/lib/auth/identity-context'
-import { Avatar, Box, Container, HStack, IconButton, Text, chakra } from '@chakra-ui/react'
-import { Link as RouterLink, getRouteApi } from '@tanstack/react-router'
-import { LogOut } from 'lucide-react'
+import {
+	Box,
+	Button,
+	Container,
+	Drawer,
+	HStack,
+	IconButton,
+	Portal,
+	Stack,
+	Text,
+	chakra,
+} from '@chakra-ui/react'
+import { ClientOnly, Link as RouterLink } from '@tanstack/react-router'
+import { LogOut, User, X } from 'lucide-react'
 
-const route = getRouteApi('/')
 const Link = chakra(RouterLink)
 
 export function Topbar() {
-	const { user, logout } = useIdentity()
-	const { user: serverUser } = route.useRouteContext()
-	const email = user?.email ?? serverUser.email ?? ''
-
 	return (
 		<Box
 			as="header"
@@ -28,45 +34,70 @@ export function Topbar() {
 					<Link to="/" aria-label="Recuerdea" color="inherit" textDecoration="none">
 						<Wordmark />
 					</Link>
-					<HStack gap={2.5}>
-						<HStack
-							borderWidth="1px"
-							borderColor="line"
-							borderRadius="full"
-							pl="3px"
-							pr={{ base: '3px', sm: 3 }}
-							py="3px"
-							gap={2}
-							bg="paper/60"
-						>
-							<Avatar.Root size="xs" colorPalette="accent">
-								<Avatar.Fallback name={email} />
-							</Avatar.Root>
-							<Text
-								display={{ base: 'none', sm: 'inline' }}
-								fontSize="sm"
-								fontWeight={500}
-								color="ink"
-							>
-								{email}
-							</Text>
-						</HStack>
-						<IconButton
-							variant="outline"
-							size="sm"
-							borderRadius="full"
-							borderColor="line"
-							color="ink.muted"
-							bg="transparent"
-							_hover={{ color: 'ink', borderColor: 'ink.muted', bg: 'paper/70' }}
-							onClick={() => void logout()}
-							aria-label="Cerrar sesión"
-						>
-							<LogOut size={14} aria-hidden />
-						</IconButton>
-					</HStack>
+					<ClientOnly>
+						<AccountDrawer />
+					</ClientOnly>
 				</HStack>
 			</Container>
 		</Box>
+	)
+}
+
+function AccountDrawer() {
+	const { user, logout } = useIdentity()
+
+	return (
+		<Drawer.Root placement="end" size="xs">
+			<Drawer.Trigger asChild>
+				<IconButton
+					aria-label="Abrir menú de cuenta"
+					size="sm"
+					borderRadius="full"
+					variant="outline"
+					borderColor="line"
+					color="ink.muted"
+					bg="transparent"
+					_hover={{ color: 'ink', borderColor: 'ink.muted', bg: 'paper/70' }}
+				>
+					<User size={16} aria-hidden />
+				</IconButton>
+			</Drawer.Trigger>
+			<Portal>
+				<Drawer.Backdrop />
+				<Drawer.Positioner>
+					<Drawer.Content bg="paper" borderLeftWidth="1px" borderColor="line">
+						<Drawer.Header borderBottomWidth="1px" borderColor="line">
+							<Drawer.Title color="ink">Cuenta</Drawer.Title>
+							<Drawer.CloseTrigger asChild>
+								<IconButton variant="ghost" size="sm" aria-label="Cerrar">
+									<X size={18} aria-hidden />
+								</IconButton>
+							</Drawer.CloseTrigger>
+						</Drawer.Header>
+						<Drawer.Body>
+							<Stack gap={3}>
+								<Box>
+									<Text fontSize="xs" color="ink.muted">
+										Nombre
+									</Text>
+									<Text color="ink">{user?.name ?? '—'}</Text>
+								</Box>
+								<Box>
+									<Text fontSize="xs" color="ink.muted">
+										Correo
+									</Text>
+									<Text color="ink">{user?.email ?? '—'}</Text>
+								</Box>
+							</Stack>
+						</Drawer.Body>
+						<Drawer.Footer borderTopWidth="1px" borderColor="line">
+							<Button onClick={() => void logout()} variant="outline" w="full">
+								<LogOut size={14} aria-hidden /> Cerrar sesión
+							</Button>
+						</Drawer.Footer>
+					</Drawer.Content>
+				</Drawer.Positioner>
+			</Portal>
+		</Drawer.Root>
 	)
 }
