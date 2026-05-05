@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@netlify/identity':
+    hash: 266083d7b9c4b56f77e54c922924cbcb44ab105ff673dbb5552a49cfbe050517
+    path: patches/@netlify__identity.patch
+
 importers:
 
   .:
@@ -19,7 +24,7 @@ importers:
         version: 5.2.0
       '@netlify/identity':
         specifier: ^1.0.0
-        version: 1.0.0
+        version: 1.0.0(patch_hash=266083d7b9c4b56f77e54c922924cbcb44ab105ff673dbb5552a49cfbe050517)
       '@tanstack/react-devtools':
         specifier: ^0.10.2
         version: 0.10.2(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(csstype@3.2.3)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(solid-js@1.9.12)
@@ -7976,7 +7981,7 @@ snapshots:
     dependencies:
       '@netlify/headers-parser': 9.0.3
 
-  '@netlify/identity@1.0.0':
+  '@netlify/identity@1.0.0(patch_hash=266083d7b9c4b56f77e54c922924cbcb44ab105ff673dbb5552a49cfbe050517)':
     dependencies:
       gotrue-js: 1.0.1
 

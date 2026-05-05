@@ -5,7 +5,6 @@ import { getUser, logout as nfLogout, onAuthChange } from '@netlify/identity'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
 import { hardNavigate } from '../utils/navigation'
-import { persistAuthCookies } from './persist-cookies'
 
 type IdentityValue = {
 	user: User | null
@@ -23,16 +22,11 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
 		let alive = true
 		void getUser().then((u) => {
 			if (!alive) return
-			// SSR-side refresh writes session cookies via Set-Cookie; re-persist now
-			// that they're in document.cookie so they survive the next tab close.
-			if (u) persistAuthCookies()
 			setUser(u)
 			setReady(true)
 		})
-		const unsub = onAuthChange((event, u) => {
-			if (!alive) return
-			if (event === 'token_refresh' || event === 'login') persistAuthCookies()
-			setUser(u)
+		const unsub = onAuthChange((_event, u) => {
+			if (alive) setUser(u)
 		})
 		return () => {
 			alive = false

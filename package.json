@@ -84,6 +84,9 @@
 			"sharp",
 			"simple-git-hooks",
 			"unix-dgram"
-		]
+		],
+		"patchedDependencies": {
+			"@netlify/identity": "patches/@netlify__identity.patch"
+		}
 	}
 }
