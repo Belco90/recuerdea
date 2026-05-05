@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { FolderCacheStore, FolderSnapshot } from '../cache/folder-cache'
 import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
-import type { ResolveVideoUrlByCode } from './pcloud.server'
 
 import { getFolderCacheStore } from '../cache/folder-cache.server'
 import { getMediaCacheStore } from '../cache/media-cache.server'
@@ -105,16 +104,9 @@ const undatedD: CachedMedia = {
 	place: null,
 }
 
-let resolveVideoUrl: ReturnType<typeof vi.fn<ResolveVideoUrlByCode>>
-
-const videoCdn = (code: string) => `https://c-streamer.pcloud.test/720p?code=${code}`
-
-const deps = (): { resolveVideoUrl: ResolveVideoUrlByCode } => ({ resolveVideoUrl })
-
 beforeEach(() => {
 	mockedGetFolderCacheStore.mockReset()
 	mockedGetMediaCacheStore.mockReset()
-	resolveVideoUrl = vi.fn<ResolveVideoUrlByCode>(async (code) => videoCdn(code))
 })
 
 afterEach(() => {
@@ -127,13 +119,13 @@ describe('fetchTodayMemories', () => {
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore())
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result).toEqual([])
 		expect(warn).toHaveBeenCalledOnce()
 	})
 
-	it('attaches direct getpubthumb URLs on images and resolved CDN mediaUrl on videos', async () => {
+	it('attaches direct getpubthumb URLs on images and proxy mediaUrl on videos', async () => {
 		mockedGetFolderCacheStore.mockReturnValue(
 			makeFolderStore({
 				refreshedAt: '2026-04-29T04:00:00.000Z',
@@ -148,7 +140,7 @@ describe('fetchTodayMemories', () => {
 			}),
 		)
 
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result).toEqual([
 			{
@@ -173,33 +165,9 @@ describe('fetchTodayMemories', () => {
 				place: null,
 				thumbUrl: thumb640('CODE-C'),
 				lightboxUrl: thumb1025('CODE-C'),
-				mediaUrl: videoCdn('CODE-C'),
+				mediaUrl: '/api/video/uuid-c',
 			},
 		])
-		expect(resolveVideoUrl).toHaveBeenCalledWith('CODE-C')
-	})
-
-	it('drops a video and warns when its URL fails to resolve, without affecting other items', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({
-				refreshedAt: '2026-04-29T04:00:00.000Z',
-				uuids: ['uuid-a', 'uuid-c'],
-			}),
-		)
-		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageA, 'uuid-c': videoC }))
-		resolveVideoUrl = vi.fn<ResolveVideoUrlByCode>(async () => {
-			throw new Error('upstream 502')
-		})
-		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
-
-		expect(result.map((m) => m.uuid)).toEqual(['uuid-a'])
-		expect(warn).toHaveBeenCalledOnce()
-		const [msg] = warn.mock.calls[0]!
-		expect(typeof msg).toBe('string')
-		expect(String(msg)).not.toContain('CODE-C')
-		expect(String(msg)).not.toMatch(/\b300\b/) // fileid must not leak
 	})
 
 	it('passes through null width/height for legacy entries', async () => {
@@ -208,7 +176,7 @@ describe('fetchTodayMemories', () => {
 		)
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-b': imageB }))
 
-		const result = await fetchTodayMemories({ month: 6, day: 15 }, deps())
+		const result = await fetchTodayMemories({ month: 6, day: 15 })
 
 		expect(result).toEqual([
 			{
@@ -232,7 +200,7 @@ describe('fetchTodayMemories', () => {
 		)
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageWithPlace }))
 
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result).toHaveLength(1)
 		expect(result[0]!.place).toBe('Madrid, España')
@@ -254,7 +222,7 @@ describe('fetchTodayMemories', () => {
 			}),
 		)
 
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result.map((m) => m.name)).toEqual(['a.jpg', 'z.jpg'])
 	})
@@ -268,7 +236,7 @@ describe('fetchTodayMemories', () => {
 		)
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageA }))
 
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result.map((m) => m.uuid)).toEqual(['uuid-a'])
 	})
@@ -279,7 +247,7 @@ describe('fetchTodayMemories', () => {
 		)
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-d': undatedD }))
 
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result).toEqual([])
 	})
@@ -290,7 +258,7 @@ describe('fetchTodayMemories', () => {
 		)
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-b': imageB }))
 
-		const result = await fetchTodayMemories({ month: 4, day: 27 }, deps())
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result).toEqual([])
 	})
