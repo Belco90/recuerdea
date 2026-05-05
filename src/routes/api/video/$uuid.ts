@@ -1,7 +1,7 @@
 import { loadServerUser } from '#/lib/auth/auth.server'
 import { createMediaCache } from '#/lib/cache/media-cache'
 import { getMediaCacheStore } from '#/lib/cache/media-cache.server'
-import { resolveMediaUrl } from '#/lib/memories/pcloud-urls.server'
+import { resolveVideoLink } from '#/lib/memories/pcloud-urls.server'
 import { handleVideoStreamRequest } from '#/lib/memories/video-stream.server'
 import { createFileRoute } from '@tanstack/react-router'
 import { createClient } from 'pcloud-kit'
@@ -14,11 +14,11 @@ export const Route = createFileRoute('/api/video/$uuid')({
 				return handleVideoStreamRequest(request, uuid, {
 					loadServerUser,
 					mediaCache: createMediaCache(getMediaCacheStore()),
-					resolveStreamUrl: async (code) => {
+					resolveVideoUrl: async (fileid, opts) => {
 						const token = process.env.PCLOUD_TOKEN
 						if (!token) throw new Error('PCLOUD_TOKEN is not set')
 						const client = createClient({ token })
-						return resolveMediaUrl(client, code)
+						return resolveVideoLink(client, fileid, opts)
 					},
 					fetchBytes: async (url, range) => {
 						const headers = new Headers()

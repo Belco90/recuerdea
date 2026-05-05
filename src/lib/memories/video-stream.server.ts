@@ -1,29 +1,31 @@
 // Authenticated proxy for video bytes. The browser hits `/api/video/<uuid>`,
-// we resolve the pCloud `getpublinkdownload` CDN URL on the server, then pipe
-// the response body straight back. Range headers are forwarded for the stream
+// we resolve the pCloud `getvideolink` CDN URL on the server, then pipe the
+// response body straight back. Range headers are forwarded for the stream
 // path so HTML5 `<video>` seek/scrub still works; the `?download=1` variant
 // forces a full-file response with `Content-Disposition: attachment`.
 //
-// Why the proxy exists: pCloud's `getpublinkdownload` URLs are signed against
-// the calling IP. v9 demolished the v4 byte-streaming proxy and shipped CDN
-// URLs straight to the browser, which works for `getpubthumb` (stateless) but
-// breaks for `getpublinkdownload` — the URL the SSR mints can't be fetched
-// from a different IP. The in-file comment in `pcloud-urls.server.ts` flagged
-// this as a deploy-preview smoke item; this file is the fallback that
-// comment predicted.
+// Why the proxy exists: pCloud's signed-link URLs (`getvideolink`,
+// `getfilelink`, `getthumblink`) are bound to the calling IP. v9 demolished
+// the v4 byte-streaming proxy and shipped CDN URLs straight to the browser,
+// which works for `getpubthumb` (stateless) but breaks for IP-bound URLs —
+// the URL the SSR mints can't be fetched from a different IP. This file is
+// the proxy that compensates.
 
 import type { ServerUser } from '../auth/auth.server'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-export type ResolveStreamUrl = (code: string) => Promise<string>
+export type ResolveVideoUrl = (
+	fileid: number,
+	opts: { contenttype?: string; forcedownload?: boolean },
+) => Promise<string>
 export type FetchBytes = (url: string, range: string | null) => Promise<Response>
 
 export type VideoStreamDeps = {
 	loadServerUser: () => Promise<ServerUser | null>
 	mediaCache: MediaCache
-	resolveStreamUrl: ResolveStreamUrl
+	resolveVideoUrl: ResolveVideoUrl
 	fetchBytes: FetchBytes
 }
 
@@ -46,8 +48,10 @@ export async function handleVideoStreamRequest(
 	// here, even if the browser sent one.
 	const range = isDownload ? null : request.headers.get('range')
 
+	const opts = isDownload ? { forcedownload: true as const } : { contenttype: meta.contenttype }
+
 	try {
-		const upstreamUrl = await deps.resolveStreamUrl(meta.code)
+		const upstreamUrl = await deps.resolveVideoUrl(meta.fileid, opts)
 		const upstream = await deps.fetchBytes(upstreamUrl, range)
 		return isDownload ? buildDownloadResponse(upstream, meta) : buildStreamResponse(upstream, meta)
 	} catch (err) {

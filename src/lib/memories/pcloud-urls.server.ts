@@ -7,15 +7,15 @@ import type { Client } from 'pcloud-kit'
 // per-file public-link `code` reaches the browser via the URL (acknowledged
 // in SPEC §7).
 //
-// `getpublinkdownload` (used for video stream + downloads) is in the same
-// host+signed-path family as `getpubthumblink` and may carry the same
-// IP-binding semantics — confirm via deploy-preview smoke (play a video,
-// click download). If it fails the same way, the fallback is to restore the
-// proxy for these two paths only; there is no stateless direct-bytes
-// equivalent for full files.
+// `resolveMediaUrl` (`getpublinkdownload`) and `resolveVideoLink`
+// (`getvideolink`) both return IP-bound CDN URLs. `getpublinkdownload` URLs
+// for images survive the trip to the browser as long as the browser fetches
+// them right after resolution (used by the lightbox download button). Video
+// URLs go through the `/api/video/<uuid>` proxy because `<video src>` may be
+// fetched minutes after page render — see video-stream.server.ts.
 //
 // pcloud-kit's callRaw throws PcloudApiError automatically on `result !== 0`,
-// so resolveMediaUrl only handles the "success but empty hosts" edge case.
+// so the helpers only handle the "success but empty hosts" edge case.
 
 export type ThumbSize = '640x640' | '1025x1025'
 
