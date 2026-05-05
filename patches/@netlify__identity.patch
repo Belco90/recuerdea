@@ -1,0 +1,90 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 2b63723b44f6b54e52028d77fdb55ae7e7a7b424..4667718e7c47659760252a593ba103d2d8e27070 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -147,6 +147,8 @@ var getIdentityContext = () => {
+ // src/cookies.ts
+ var NF_JWT_COOKIE = "nf_jwt";
+ var NF_REFRESH_COOKIE = "nf_refresh";
++// Patched: cookie Max-Age so auth survives tab close. 30 days.
++var AUTH_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 30;
+ var getCookie = (name) => {
+   if (typeof document === "undefined") return null;
+   const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]*)`));
+@@ -164,7 +166,8 @@ var setAuthCookies = (cookies, accessToken, refreshToken) => {
+     httpOnly: false,
+     secure: true,
+     path: "/",
+-    sameSite: "Lax"
++    sameSite: "Lax",
++    maxAge: AUTH_COOKIE_MAX_AGE_S
+   });
+   if (refreshToken) {
+     cookies.set({
+@@ -173,7 +176,8 @@ var setAuthCookies = (cookies, accessToken, refreshToken) => {
+       httpOnly: false,
+       secure: true,
+       path: "/",
+-      sameSite: "Lax"
++      sameSite: "Lax",
++      maxAge: AUTH_COOKIE_MAX_AGE_S
+     });
+   }
+ };
+@@ -183,9 +187,9 @@ var deleteAuthCookies = (cookies) => {
+ };
+ var setBrowserAuthCookies = (accessToken, refreshToken) => {
+   if (typeof document === "undefined") return;
+-  document.cookie = `${NF_JWT_COOKIE}=${encodeURIComponent(accessToken)}; path=/; secure; samesite=lax`;
++  document.cookie = `${NF_JWT_COOKIE}=${encodeURIComponent(accessToken)}; path=/; secure; samesite=lax; max-age=${AUTH_COOKIE_MAX_AGE_S}`;
+   if (refreshToken) {
+-    document.cookie = `${NF_REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; path=/; secure; samesite=lax`;
++    document.cookie = `${NF_REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; path=/; secure; samesite=lax; max-age=${AUTH_COOKIE_MAX_AGE_S}`;
+   }
+ };
+ var deleteBrowserAuthCookies = () => {
+diff --git a/dist/index.js b/dist/index.js
+index 37dfbbe33be4e7e4c337baf1b0bb368953427629..7e0e0a5e201b29ae2831cff93f4638b5f3581179 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -97,6 +97,8 @@ var getIdentityContext = () => {
+ // src/cookies.ts
+ var NF_JWT_COOKIE = "nf_jwt";
+ var NF_REFRESH_COOKIE = "nf_refresh";
++// Patched: cookie Max-Age so auth survives tab close. 30 days.
++var AUTH_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 30;
+ var getCookie = (name) => {
+   if (typeof document === "undefined") return null;
+   const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=([^;]*)`));
+@@ -114,7 +116,8 @@ var setAuthCookies = (cookies, accessToken, refreshToken) => {
+     httpOnly: false,
+     secure: true,
+     path: "/",
+-    sameSite: "Lax"
++    sameSite: "Lax",
++    maxAge: AUTH_COOKIE_MAX_AGE_S
+   });
+   if (refreshToken) {
+     cookies.set({
+@@ -123,7 +126,8 @@ var setAuthCookies = (cookies, accessToken, refreshToken) => {
+       httpOnly: false,
+       secure: true,
+       path: "/",
+-      sameSite: "Lax"
++      sameSite: "Lax",
++      maxAge: AUTH_COOKIE_MAX_AGE_S
+     });
+   }
+ };
+@@ -133,9 +137,9 @@ var deleteAuthCookies = (cookies) => {
+ };
+ var setBrowserAuthCookies = (accessToken, refreshToken) => {
+   if (typeof document === "undefined") return;
+-  document.cookie = `${NF_JWT_COOKIE}=${encodeURIComponent(accessToken)}; path=/; secure; samesite=lax`;
++  document.cookie = `${NF_JWT_COOKIE}=${encodeURIComponent(accessToken)}; path=/; secure; samesite=lax; max-age=${AUTH_COOKIE_MAX_AGE_S}`;
+   if (refreshToken) {
+-    document.cookie = `${NF_REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; path=/; secure; samesite=lax`;
++    document.cookie = `${NF_REFRESH_COOKIE}=${encodeURIComponent(refreshToken)}; path=/; secure; samesite=lax; max-age=${AUTH_COOKIE_MAX_AGE_S}`;
+   }
+ };
+ var deleteBrowserAuthCookies = () => {
