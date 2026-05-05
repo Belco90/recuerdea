@@ -107,17 +107,8 @@ function DownloadButton({ item }: { item: MemoryItem }) {
 	const handleClick = async () => {
 		setStatus('pending')
 		try {
-			if (item.kind === 'video') {
-				// Route through the auth-gated proxy: pCloud's signed CDN URLs
-				// for video are IP-bound (410 from a different IP), so the
-				// browser can't fetch them directly even for an immediate
-				// blob-download. The proxy delivers the original file with the
-				// right Content-Disposition.
-				await downloadAs({ url: `/api/video/${item.uuid}?download=1`, name: item.name })
-			} else {
-				const info = await getMediaDownloadUrl({ data: { uuid: item.uuid } })
-				await downloadAs({ url: info.url, name: info.name })
-			}
+			const info = await getMediaDownloadUrl({ data: { uuid: item.uuid } })
+			await downloadAs({ url: info.url, name: info.name })
 			setStatus('idle')
 		} catch (err) {
 			// eslint-disable-next-line no-console
