@@ -61,3 +61,48 @@ export async function resolveVideoLink(
 	if (!host) throw new TypeError('getvideolink: no hosts returned')
 	return `https://${host}${res.path}`
 }
+
+type PubVideoVariant = {
+	isoriginal?: boolean
+	videocodec?: string
+	audiocodec?: string
+	width?: number
+	height?: number
+	hosts: readonly string[]
+	path: string
+}
+
+type PubVideoLinksResponse = { variants: readonly PubVideoVariant[] }
+
+// Resolves a browser-playable video URL via `getpubvideolinks`, the
+// public-link variant of pCloud's video-streaming API. Returns multiple
+// pre-transcoded variants tied to the public-link `code`. We pick a non-
+// original H.264 variant (universally playable in Safari macOS + Chrome
+// Android), or fall back to any H.264, or finally the first variant.
+//
+// Unlike `getvideolink` (auth, IP-bound) the returned CDN URL is meant to
+// be consumed by anyone with the public-link `code`, so it should survive
+// the trip to the browser. Smoke this on a deploy preview before relying
+// on it for `<video src>` (which holds the URL across user idle time).
+export async function resolvePubVideoUrl(client: Client, code: string): Promise<string> {
+	const res = await client.callRaw<PubVideoLinksResponse>('getpubvideolinks', { code })
+	const largestTranscoded = res.variants.reduce<PubVideoVariant | null>(
+		(best, v) =>
+			!v.isoriginal &&
+			v.videocodec === 'h264' &&
+			(best === null || variantArea(v) > variantArea(best))
+				? v
+				: best,
+		null,
+	)
+	const picked =
+		largestTranscoded ?? res.variants.find((v) => v.videocodec === 'h264') ?? res.variants[0]
+	if (!picked) throw new TypeError('getpubvideolinks: no variants returned')
+	const host = picked.hosts[0]
+	if (!host) throw new TypeError('getpubvideolinks: no hosts on variant')
+	return `https://${host}${picked.path}`
+}
+
+function variantArea(v: PubVideoVariant): number {
+	return (v.width ?? 0) * (v.height ?? 0)
+}
