@@ -7,6 +7,7 @@ import { createMediaCache } from '../cache/media-cache'
 import {
 	handleVideoStreamRequest,
 	type FetchBytes,
+	type ResolveDownloadUrl,
 	type ResolveStreamUrl,
 } from './video-stream.server'
 
@@ -37,8 +38,8 @@ const videoMeta: CachedMedia = {
 	code: 'CODE-C',
 	linkid: 3000,
 	kind: 'video',
-	contenttype: 'video/mp4',
-	name: 'c.mp4',
+	contenttype: 'video/quicktime',
+	name: 'IMG_1201.mov',
 	captureDate: '2018-04-27T10:00:00.000Z',
 	width: 1920,
 	height: 1080,
@@ -54,10 +55,14 @@ const imageMeta: CachedMedia = {
 }
 
 let resolveStreamUrl: ReturnType<typeof vi.fn<ResolveStreamUrl>>
+let resolveDownloadUrl: ReturnType<typeof vi.fn<ResolveDownloadUrl>>
 let fetchBytes: ReturnType<typeof vi.fn<FetchBytes>>
 
 beforeEach(() => {
-	resolveStreamUrl = vi.fn<ResolveStreamUrl>(async (code) => `https://cdn.test/v?code=${code}`)
+	resolveStreamUrl = vi.fn<ResolveStreamUrl>(async (code) => `https://cdn.test/stream?code=${code}`)
+	resolveDownloadUrl = vi.fn<ResolveDownloadUrl>(
+		async (code) => `https://cdn.test/download?code=${code}`,
+	)
 	fetchBytes = vi.fn<FetchBytes>(
 		async () =>
 			new Response(new Uint8Array([1, 2, 3, 4]), {
@@ -81,11 +86,13 @@ describe('handleVideoStreamRequest', () => {
 			loadServerUser: async () => null,
 			mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
 		expect(res.status).toBe(401)
 		expect(resolveStreamUrl).not.toHaveBeenCalled()
+		expect(resolveDownloadUrl).not.toHaveBeenCalled()
 		expect(fetchBytes).not.toHaveBeenCalled()
 	})
 
@@ -94,6 +101,7 @@ describe('handleVideoStreamRequest', () => {
 			loadServerUser: async () => adminUser,
 			mediaCache: createMediaCache(makeMediaStore()),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
@@ -106,6 +114,7 @@ describe('handleVideoStreamRequest', () => {
 			loadServerUser: async () => adminUser,
 			mediaCache: createMediaCache(makeMediaStore()),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
@@ -118,6 +127,7 @@ describe('handleVideoStreamRequest', () => {
 			loadServerUser: async () => adminUser,
 			mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: imageMeta })),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
@@ -125,20 +135,24 @@ describe('handleVideoStreamRequest', () => {
 		expect(resolveStreamUrl).not.toHaveBeenCalled()
 	})
 
-	it('streams bytes from the resolved upstream and overrides content-type', async () => {
+	it('streams bytes from the resolved upstream and stamps Content-Type: video/mp4', async () => {
 		const res = await handleVideoStreamRequest(makeRequest(), VALID_UUID, {
 			loadServerUser: async () => adminUser,
 			mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
 		expect(res.status).toBe(200)
+		// Source MIME is video/quicktime but the response advertises video/mp4 to
+		// match what getpubvideolinks H.264 variants actually deliver.
 		expect(res.headers.get('content-type')).toBe('video/mp4')
 		expect(res.headers.get('content-length')).toBe('4')
 		expect(res.headers.get('accept-ranges')).toBe('bytes')
 		expect(resolveStreamUrl).toHaveBeenCalledWith('CODE-C')
-		expect(fetchBytes).toHaveBeenCalledWith('https://cdn.test/v?code=CODE-C', null)
+		expect(resolveDownloadUrl).not.toHaveBeenCalled()
+		expect(fetchBytes).toHaveBeenCalledWith('https://cdn.test/stream?code=CODE-C', null)
 		const buffer = await res.arrayBuffer()
 		expect(new Uint8Array(buffer)).toEqual(new Uint8Array([1, 2, 3, 4]))
 	})
@@ -159,29 +173,31 @@ describe('handleVideoStreamRequest', () => {
 			loadServerUser: async () => adminUser,
 			mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
 		expect(res.status).toBe(206)
 		expect(res.headers.get('content-range')).toBe('bytes 0-1/100')
-		expect(fetchBytes).toHaveBeenCalledWith('https://cdn.test/v?code=CODE-C', 'bytes=0-1')
+		expect(fetchBytes).toHaveBeenCalledWith('https://cdn.test/stream?code=CODE-C', 'bytes=0-1')
 	})
 
-	it('returns 502 when the upstream resolver throws', async () => {
+	it('returns 502 when the stream resolver throws', async () => {
 		resolveStreamUrl = vi.fn<ResolveStreamUrl>(async () => {
-			throw new Error('publinkdownload failed: 410 Gone')
+			throw new Error('getpubvideolinks failed: 410 Gone')
 		})
 
 		const res = await handleVideoStreamRequest(makeRequest(), VALID_UUID, {
 			loadServerUser: async () => adminUser,
 			mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
 		expect(res.status).toBe(502)
 		const body = await res.text()
-		expect(body).toContain('publinkdownload failed')
+		expect(body).toContain('getpubvideolinks failed')
 		expect(fetchBytes).not.toHaveBeenCalled()
 	})
 
@@ -194,6 +210,7 @@ describe('handleVideoStreamRequest', () => {
 			loadServerUser: async () => adminUser,
 			mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 			resolveStreamUrl,
+			resolveDownloadUrl,
 			fetchBytes,
 		})
 
@@ -203,22 +220,26 @@ describe('handleVideoStreamRequest', () => {
 	})
 
 	describe('?download=1', () => {
-		it('returns 200 + Content-Disposition: attachment + no-store cache', async () => {
+		it('uses the download resolver, returns 200, sets Content-Disposition + no-store', async () => {
 			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
 				loadServerUser: async () => adminUser,
 				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 				resolveStreamUrl,
+				resolveDownloadUrl,
 				fetchBytes,
 			})
 
 			expect(res.status).toBe(200)
-			expect(res.headers.get('content-type')).toBe('video/mp4')
+			// Source MIME on download — we want the original file faithfully.
+			expect(res.headers.get('content-type')).toBe('video/quicktime')
 			expect(res.headers.get('cache-control')).toBe('private, max-age=0, no-store')
 			expect(res.headers.get('accept-ranges')).toBeNull()
+			expect(resolveStreamUrl).not.toHaveBeenCalled()
+			expect(resolveDownloadUrl).toHaveBeenCalledWith('CODE-C')
 			const disposition = res.headers.get('content-disposition')!
 			expect(disposition).toContain('attachment')
-			expect(disposition).toContain('filename="c.mp4"')
-			expect(disposition).toContain("filename*=UTF-8''c.mp4")
+			expect(disposition).toContain('filename="IMG_1201.mov"')
+			expect(disposition).toContain("filename*=UTF-8''IMG_1201.mov")
 		})
 
 		it('refuses to forward Range headers in download mode (always full file)', async () => {
@@ -229,11 +250,12 @@ describe('handleVideoStreamRequest', () => {
 					loadServerUser: async () => adminUser,
 					mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 					resolveStreamUrl,
+					resolveDownloadUrl,
 					fetchBytes,
 				},
 			)
 
-			expect(fetchBytes).toHaveBeenCalledWith('https://cdn.test/v?code=CODE-C', null)
+			expect(fetchBytes).toHaveBeenCalledWith('https://cdn.test/download?code=CODE-C', null)
 		})
 
 		it('forces status 200 even if upstream returns 206', async () => {
@@ -249,6 +271,7 @@ describe('handleVideoStreamRequest', () => {
 				loadServerUser: async () => adminUser,
 				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 				resolveStreamUrl,
+				resolveDownloadUrl,
 				fetchBytes,
 			})
 
@@ -263,6 +286,7 @@ describe('handleVideoStreamRequest', () => {
 				loadServerUser: async () => adminUser,
 				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: utf8Meta })),
 				resolveStreamUrl,
+				resolveDownloadUrl,
 				fetchBytes,
 			})
 
@@ -271,11 +295,31 @@ describe('handleVideoStreamRequest', () => {
 			expect(disposition).toContain("filename*=UTF-8''" + encodeURIComponent('recuérdame año.mp4'))
 		})
 
+		it('returns 502 when the download resolver throws', async () => {
+			resolveDownloadUrl = vi.fn<ResolveDownloadUrl>(async () => {
+				throw new Error('getpublinkdownload failed: 410 Gone')
+			})
+
+			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
+				loadServerUser: async () => adminUser,
+				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
+				resolveStreamUrl,
+				resolveDownloadUrl,
+				fetchBytes,
+			})
+
+			expect(res.status).toBe(502)
+			const body = await res.text()
+			expect(body).toContain('getpublinkdownload failed')
+			expect(fetchBytes).not.toHaveBeenCalled()
+		})
+
 		it('still 401 unauth and 404 missing in download mode', async () => {
 			const unauth = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
 				loadServerUser: async () => null,
 				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
 				resolveStreamUrl,
+				resolveDownloadUrl,
 				fetchBytes,
 			})
 			expect(unauth.status).toBe(401)
@@ -284,6 +328,7 @@ describe('handleVideoStreamRequest', () => {
 				loadServerUser: async () => adminUser,
 				mediaCache: createMediaCache(makeMediaStore()),
 				resolveStreamUrl,
+				resolveDownloadUrl,
 				fetchBytes,
 			})
 			expect(missing.status).toBe(404)

@@ -1,29 +1,35 @@
-// Authenticated proxy for video bytes. The browser hits `/api/video/<uuid>`,
-// we resolve the pCloud `getpublinkdownload` CDN URL on the server, then pipe
-// the response body straight back. Range headers are forwarded for the stream
-// path so HTML5 `<video>` seek/scrub still works; the `?download=1` variant
-// forces a full-file response with `Content-Disposition: attachment`.
+// Authenticated proxy for video bytes. The browser hits `/api/video/<uuid>`
+// and this handler resolves the upstream pCloud CDN URL on the server, then
+// pipes the response body straight back. Both stream and download paths go
+// through here because pCloud's signed CDN URLs (`getpubvideolinks`,
+// `getpublinkdownload`) are IP-bound — the URL the SSR mints is rejected
+// with 410 "another IP address" when the browser fetches it.
 //
-// Why the proxy exists: pCloud's `getpublinkdownload` URLs are signed against
-// the calling IP. v9 demolished the v4 byte-streaming proxy and shipped CDN
-// URLs straight to the browser, which works for `getpubthumb` (stateless) but
-// breaks for `getpublinkdownload` — the URL the SSR mints can't be fetched
-// from a different IP. The in-file comment in `pcloud-urls.server.ts` flagged
-// this as a deploy-preview smoke item; this file is the fallback that
-// comment predicted.
+// Stream path (`/api/video/<uuid>`): upstream is `getpubvideolinks` —
+// pCloud's pre-transcoded H.264 variant of the video. We force
+// `Content-Type: video/mp4` on the response so iPhone QuickTime sources
+// play in browsers that wouldn't decode the original container.
+//
+// Download path (`/api/video/<uuid>?download=1`): upstream is
+// `getpublinkdownload` — the original file. `Content-Type` is the cached
+// source MIME; `Content-Disposition: attachment` forces the save dialog.
 
 import type { ServerUser } from '../auth/auth.server'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
 
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
+const STREAM_CONTENT_TYPE = 'video/mp4'
+
 export type ResolveStreamUrl = (code: string) => Promise<string>
+export type ResolveDownloadUrl = (code: string) => Promise<string>
 export type FetchBytes = (url: string, range: string | null) => Promise<Response>
 
 export type VideoStreamDeps = {
 	loadServerUser: () => Promise<ServerUser | null>
 	mediaCache: MediaCache
 	resolveStreamUrl: ResolveStreamUrl
+	resolveDownloadUrl: ResolveDownloadUrl
 	fetchBytes: FetchBytes
 }
 
@@ -47,18 +53,24 @@ export async function handleVideoStreamRequest(
 	const range = isDownload ? null : request.headers.get('range')
 
 	try {
-		const upstreamUrl = await deps.resolveStreamUrl(meta.code)
+		const upstreamUrl = isDownload
+			? await deps.resolveDownloadUrl(meta.code)
+			: await deps.resolveStreamUrl(meta.code)
 		const upstream = await deps.fetchBytes(upstreamUrl, range)
-		return isDownload ? buildDownloadResponse(upstream, meta) : buildStreamResponse(upstream, meta)
+		return isDownload ? buildDownloadResponse(upstream, meta) : buildStreamResponse(upstream)
 	} catch (err) {
 		const message = err instanceof Error ? err.message : 'unknown error'
 		return new Response(`pCloud error: ${message}`, { status: 502 })
 	}
 }
 
-function buildStreamResponse(upstream: Response, meta: CachedMedia): Response {
+function buildStreamResponse(upstream: Response): Response {
 	const headers = new Headers({
-		'content-type': meta.contenttype,
+		// Stamp video/mp4 regardless of the source's contenttype. The picked
+		// `getpubvideolinks` variant is H.264 — pCloud delivers these as MP4 —
+		// so labeling QuickTime/HEVC sources as video/mp4 matches the bytes
+		// being shipped and unblocks Safari macOS + Chrome Android playback.
+		'content-type': STREAM_CONTENT_TYPE,
 		'accept-ranges': 'bytes',
 		// Short cache: pCloud-signed URLs expire and we re-resolve on each
 		// hit, so don't let intermediates serve stale bytes for long.

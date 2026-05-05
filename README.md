@@ -89,7 +89,7 @@ scripts/             # oauth-provision.mjs (one-time pCloud token bootstrap)
 - **Pre-commit**: `simple-git-hooks` runs `oxlint --fix` + `oxfmt` on staged files. Don't bypass with `--no-verify`.
 - **Imports**: prefer the `#/*` alias for cross-module imports inside `src/`.
 - **Tests**: colocate `*.test.ts(x)` with source for `src/lib/`; component browser tests use `*.browser.test.tsx`.
-- **Comments**: minimal — only when the *why* is non-obvious.
+- **Comments**: minimal — only when the _why_ is non-obvious.
 
 ## Deployment
 

@@ -57,10 +57,10 @@ function buildMemoryItem(match: Match): MemoryItem {
 			place: match.meta.place,
 			thumbUrl,
 			lightboxUrl,
-			// Auth-gated proxy route: resolves the pCloud signed URL on the server
-			// (where it was minted) and pipes bytes back. Direct CDN URLs from
-			// `getpublinkdownload` are signed against the calling IP and break
-			// when fetched from a different IP — see video-stream.server.ts.
+			// Auth-gated proxy: pCloud's signed CDN URLs (`getpubvideolinks`,
+			// `getpublinkdownload`) are IP-bound — direct browser fetches get a
+			// 410 "another IP address". The proxy resolves upstream server-side
+			// and pipes bytes back. See video-stream.server.ts.
 			mediaUrl: `/api/video/${match.uuid}`,
 		}
 	}

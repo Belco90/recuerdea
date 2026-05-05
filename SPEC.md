@@ -31,20 +31,20 @@ Recuerdea is a personal **"on this day" memory surfacer**. Each visit to the hom
 
 ## 3. Commands
 
-| Command                        | Purpose                                                                       |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| `pnpm install`                 | Install deps (pnpm 10.30.2).                                                  |
-| `pnpm dev`                     | Vite dev server on port 3000 (no Functions / Blobs).                          |
+| Command                        | Purpose                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `pnpm install`                 | Install deps (pnpm 10.30.2).                                                 |
+| `pnpm dev`                     | Vite dev server on port 3000 (no Functions / Blobs).                         |
 | `pnpm dev:netlify`             | `netlify dev` on port 8888 — production-shaped local with Functions + Blobs. |
-| `pnpm build`                   | Production build.                                                             |
-| `pnpm preview`                 | Preview the production build locally.                                         |
-| `pnpm test`                    | Run all Vitest projects (`unit` + `browser`).                                 |
-| `pnpm test:unit`               | Run only the Node unit project.                                               |
-| `pnpm test:browser`            | Run only the browser project (headless Chromium via Playwright).              |
-| `pnpm lint` / `pnpm lint:fix`  | oxlint.                                                                       |
-| `pnpm format` / `format:check` | oxfmt.                                                                        |
-| `pnpm type-check`              | `tsc --noEmit`.                                                               |
-| `pnpm invoke:refresh-memories` | Invoke the scheduled function on the local Netlify dev server.                |
+| `pnpm build`                   | Production build.                                                            |
+| `pnpm preview`                 | Preview the production build locally.                                        |
+| `pnpm test`                    | Run all Vitest projects (`unit` + `browser`).                                |
+| `pnpm test:unit`               | Run only the Node unit project.                                              |
+| `pnpm test:browser`            | Run only the browser project (headless Chromium via Playwright).             |
+| `pnpm lint` / `pnpm lint:fix`  | oxlint.                                                                      |
+| `pnpm format` / `format:check` | oxfmt.                                                                       |
+| `pnpm type-check`              | `tsc --noEmit`.                                                              |
+| `pnpm invoke:refresh-memories` | Invoke the scheduled function on the local Netlify dev server.               |
 
 CI (`.github/workflows/ci.yml`) runs type-check, test, lint, and format-check in parallel; all must pass.
 
