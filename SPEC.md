@@ -17,11 +17,10 @@ Recuerdea is a personal **"on this day" memory surfacer**. Each visit to the hom
 
 - `GET /` (authenticated): server returns **all** media items in the pCloud folder whose capture date matches today's month/day in any past year.
 - Each item carries a media kind (`'image'` or `'video'`), a display URL, and a capture date.
-- Capture date sources:
-  - **Images**: EXIF `DateTimeOriginal` (fallback `DateTime`).
-  - **Videos**: container `creation_time` from MP4/MOV (`mvhd` atom).
-  - Items with no parseable capture date are skipped (not silently shown as today's match).
-- Items are sorted oldest year first; tiebreak by `fileid` ascending. Order is stable across same-day refreshes.
+- Capture date source:
+  - pCloud's `file.created` field, returned directly by `listfolder`. v2's EXIF / mvhd extraction was retired in v10 — see §17.
+  - Items with no parseable `file.created` are skipped (not silently shown as today's match).
+- Items are sorted **newest year first**; tiebreak by `fileid` ascending. Order is stable across same-day refreshes. (v1/v2 sorted oldest-year-first; flipped in commit `1cc010d` and locked in in v10.)
 - Layout: vertical scrollable feed (one item per row, full-width media). Each row shows the media, its formatted capture date, and visually distinguishes image vs video (e.g. via the player UI itself).
 - Videos render with `<video controls>`, no autoplay, with a poster from a pCloud public-link thumbnail. Stream URL via pCloud public-link download.
 - If no item matches, render a friendly empty state ("No memories on this day"). **No random fallback button.**
@@ -32,15 +31,20 @@ Recuerdea is a personal **"on this day" memory surfacer**. Each visit to the hom
 
 ## 3. Commands
 
-| Command           | Purpose                                         |
-| ----------------- | ----------------------------------------------- |
-| `pnpm install`    | Install deps (pnpm 10.30.2).                    |
-| `pnpm dev`        | Start the Vite dev server.                      |
-| `pnpm build`      | Production build.                               |
-| `pnpm test`       | Run Vitest in browser mode (headless Chromium). |
-| `pnpm lint`       | Run oxlint.                                     |
-| `pnpm format`     | Run oxfmt.                                      |
-| `pnpm type-check` | Run `tsc --noEmit`.                             |
+| Command                        | Purpose                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| `pnpm install`                 | Install deps (pnpm 10.30.2).                                                  |
+| `pnpm dev`                     | Vite dev server on port 3000 (no Functions / Blobs).                          |
+| `pnpm dev:netlify`             | `netlify dev` on port 8888 — production-shaped local with Functions + Blobs. |
+| `pnpm build`                   | Production build.                                                             |
+| `pnpm preview`                 | Preview the production build locally.                                         |
+| `pnpm test`                    | Run all Vitest projects (`unit` + `browser`).                                 |
+| `pnpm test:unit`               | Run only the Node unit project.                                               |
+| `pnpm test:browser`            | Run only the browser project (headless Chromium via Playwright).              |
+| `pnpm lint` / `pnpm lint:fix`  | oxlint.                                                                       |
+| `pnpm format` / `format:check` | oxfmt.                                                                        |
+| `pnpm type-check`              | `tsc --noEmit`.                                                               |
+| `pnpm invoke:refresh-memories` | Invoke the scheduled function on the local Netlify dev server.                |
 
 CI (`.github/workflows/ci.yml`) runs type-check, test, lint, and format-check in parallel; all must pass.
 
@@ -53,46 +57,51 @@ src/
     index.tsx       # Home route — beforeLoad auth gate + loader + Home component (composes Topbar, AdminDateOverride, Hero, Timeline / YearSection / Polaroid, EmptyState, Lightbox)
     login.tsx       # Netlify Identity login + invite/recovery callbacks (analog-album layout — v5)
     api/
-      memory/
-        $uuid.ts    # GET /api/memory/:uuid?variant=image|stream|poster — auth-gated, byte-streams the public-link response — added in v4
+      video/
+        $uuid.ts    # GET /api/video/:uuid[?download=1] — auth-gated, byte-streams pCloud video bytes; range forwarded for stream, stripped for download. v9 demolished /api/memory/<uuid>; v10 reintroduced this narrower proxy because `getpublinkdownload` URLs are IP-bound (see §17).
   components/       # Reusable presentational React components (PascalCase per file). All Chakra-native — v5.
     AppShell.tsx          # Page-level Box wrapper (paper bg lives on body via globalCss)
     Wordmark.tsx          # Italic Fraunces "Recuerdea" wordmark with rotated R + accent dot
-    Topbar.tsx            # Sticky blurred topbar — Wordmark + user pill (Avatar.Fallback) + logout
+    Topbar.tsx            # Sticky blurred topbar — Wordmark + ClientOnly-wrapped AccountDrawer (Cuenta drawer with name/email + logout) — v10
     Hero.tsx              # Big day + italic-accent month + mono caps year/count meta
     EmptyState.tsx        # Three striped polaroids + Spanish empty copy
-    Polaroid.tsx          # Polaroid tile (paper frame, stable rotation, lazy image, video badge, handwritten caption)
+    Polaroid.tsx          # Polaroid tile (paper frame, stable rotation, square-cropped lazy image/video poster, video badge, handwritten caption) — v10 squared crop
     YearSection.tsx       # Year-marker dot + "Hace N año(s)" title + columnCount masonry of Polaroid tiles
     Timeline.tsx          # Vertical timeline line + end dot + Spanish footer
-    Lightbox.tsx          # Per-year fullscreen Chakra Dialog (image or video controls autoPlay, swipe, arrow keys, dots)
+    Lightbox.tsx          # Per-year fullscreen Chakra Dialog (image or video controls autoPlay, swipe, arrow keys, dots, blob-download button)
     AdminDateOverride.tsx # Admin-only banner: striped diagonal bg + paper tape + Chakra DatePicker + state pill
-  lib/                # Pure logic + server functions; split by domain. Tests colocated as *.test.ts(x).
+  lib/                # Pure logic + server functions; split by domain. Tests colocated as *.test.ts(x); browser tests as *.browser.test.ts(x).
     auth/                       # User identity end-to-end
       auth.ts                   # createServerFn wrapper for getServerUser
       auth.server.ts            # loadServerUser — server-only auth (isAdmin, JWT decode)
       identity-context.tsx      # IdentityProvider + useIdentity hook
     memories/                   # pCloud-backed memory pipeline
       pcloud.ts                 # createServerFn wrapper for getTodayMemories — returns MemoryItem[]
-      pcloud.server.ts          # Loader — reads from folder-cache + media-cache only; no listfolder, no pCloud client. MemoryItem now carries width/height — v5.
+      pcloud.server.ts          # Loader — reads from folder-cache + media-cache only; builds thumb URLs synchronously; videos point at /api/video/<uuid>. No listfolder, no pCloud client.
+      pcloud-urls.server.ts     # buildThumbUrl (stateless `getpubthumb?code=…&size=…`) + resolveMediaUrl (server-side `getpublinkdownload`) — v9
       refresh-memories.server.ts# Cron orchestrator: lists folder, ensures public links, writes caches, sweeps deleted files — v4
-      memory-route.server.ts    # /api/memory/$uuid handler (auth gate + byte-streaming) — v4
+      video-stream.server.ts    # Pure handler for /api/video/$uuid: auth gate, cache lookup, range-forwarded byte-stream or download response — v10
+      get-download-url.ts       # createServerFn wrapper that resolves a fresh download URL (used for image originals) — v9
+      get-download-url.server.ts# Pure resolveDownloadUrl(uuid, deps) — auth + cache + resolveMediaUrl
+      download.ts               # Browser blob-download helper (fetch → blob → object URL → anchor click → revoke) — v9
       memory-grouping.ts        # groupMemoriesByYear pure helper — v5
     cache/                      # Netlify-Blobs-backed stores; each pair = pure abstraction + server store-getter with no-op fallback — v4
-      media-cache.ts            # Pure (uuid → CachedMedia) cache abstraction. CachedMedia gains width/height (v5), location + place (v6).
+      media-cache.ts            # Pure (uuid → CachedMedia) cache abstraction. CachedMedia carries width/height (v5), location + place (v6).
       media-cache.server.ts
       fileid-index.ts           # Pure (fileid → uuid) sidecar abstraction
       fileid-index.server.ts
       folder-cache.ts           # Pure folder-listing snapshot abstraction
       folder-cache.server.ts
-    media-meta/                 # Capture-date + dimensions + GPS extraction from bytes; called from refresh-memories.server
-      exif.ts                   # EXIF extraction (extractImageMeta) — extended in v5 (dims), v6 (GPS lat/lng)
-      video-meta.ts             # MP4/MOV moov walker — capture date (mvhd) + dimensions (tkhd) (extractVideoMeta) — extended in v5 (dims), v6 (GPS via udta.©xyz)
-      filename-date.ts          # Filename-based capture-date fallback
+    media-meta/                 # Dimensions + GPS extraction from bytes; called from refresh-memories.server. Capture date now comes from pCloud `file.created` (v10) — extractors no longer return it.
+      exif.ts                   # EXIF extraction (extractImageMeta) — width/height + GPS lat/lng
+      video-meta.ts             # MP4/MOV moov walker (extractVideoMeta) — width/height (tkhd) + GPS (udta.©xyz)
       geoapify.server.ts        # v6 — Reverse-geocode lat/lng → Spanish place string via Geoapify; raw fetch, body-status authoritative, tagged failure reasons
     utils/                      # Small leaf helpers
       spanish-months.ts         # SPANISH_MONTHS const + spanishMonth(idx) — used by Hero, login, AdminDateOverride — v5
       rotation.ts               # Stable per-key rotation for polaroid scatter — v5
       navigation.ts             # hardNavigate (post-logout cookie refresh)
+      years-ago.ts              # yearsAgo(captureYear, todayYear) — pure helper, replaces ad-hoc inline math in YearSection
+  env.d.ts          # NodeJS.ProcessEnv typing for PCLOUD_TOKEN + PCLOUD_MEMORIES_FOLDER_ID
   theme.ts          # Chakra v3 createSystem — accent.50…950 palette, semantic light/dark tokens, fonts, shadows, keyframes, breakpoints.md=720px, paper-noise body bg via globalCss — v5
   fonts.css         # @font-face declarations for the four self-hosted variable woff2 in public/fonts/ — v5
   router.tsx        # getRouter() factory
@@ -100,13 +109,17 @@ src/
 public/
   fonts/            # Self-hosted variable woff2 (Fraunces, Inter, Caveat, JetBrains Mono — latin subset only) — v5
 test/
-  setup.ts          # Vitest browser-mode setup, mocks @netlify/identity
+  setup.ts          # Vitest setup — mocks @netlify/identity, shims globalThis.process
   stubs/            # Stubs for @tanstack/react-start in browser mode
 __mocks__/
   @netlify/identity.ts
 netlify/
   functions/
     refresh-memories.ts # Scheduled Netlify Function: lists folder, ensures public links, writes caches, sweeps deleted files — added in v4 (registered via netlify.toml [functions."refresh-memories"] schedule)
+patches/
+  @netlify__identity.patch # pnpm patch — Netlify Identity hardcodes session cookies; the patch raises Max-Age to 30d so logins survive page reloads. Re-apply on library upgrade.
+scripts/
+  oauth-provision.mjs # One-time pCloud OAuth bootstrap — exchanges an authorize code for the access token used as PCLOUD_TOKEN.
 ```
 
 Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
@@ -122,11 +135,13 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 
 ## 6. Testing Strategy
 
-- **Required**: Vitest browser-mode tests for any new logic added to `src/lib/`. Tests colocate with source as `*.test.ts(x)`.
-- **Optional**: Route-level / UI tests are nice-to-have but not blocking.
+- **Two Vitest projects** (configured in `vitest.config.ts`):
+  - `unit` — Node environment, runs `src/**/*.test.{ts,tsx}` (excluding `*.browser.test.*`). Use for pure logic in `src/lib/`.
+  - `browser` — headless Chromium via Playwright, runs `src/**/*.browser.test.{ts,tsx}`. Use for component render / interaction tests.
+- **Required**: Tests for any new logic added to `src/lib/`, colocated as `*.test.ts(x)`. Component tests are encouraged but not blocking; when written, name them `*.browser.test.tsx` so they land in the browser project.
 - **Setup**: `test/setup.ts` mocks `@netlify/identity` and shims `globalThis.process`. New tests should reuse this setup, not re-mock from scratch.
-- **CI gate**: `pnpm test` must pass on every PR (matrix in `.github/workflows/ci.yml`).
-- **Server functions**: test the pure helpers they wrap, not the `createServerFn` wrapper itself (which is framework code).
+- **CI gate**: `pnpm test` (both projects) must pass on every PR (matrix in `.github/workflows/ci.yml`). `pnpm test:unit` and `pnpm test:browser` are available for targeted runs.
+- **Server functions**: test the pure helpers they wrap (e.g. `resolveDownloadUrl`, `handleVideoStreamRequest`, `fetchTodayMemories`), not the `createServerFn` wrapper itself (which is framework code).
 
 ## 7. Boundaries
 
@@ -138,7 +153,8 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - Colocate tests with source under `src/lib/` for any new pure logic.
 - Use the existing path alias `#/*` for `src/` imports.
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
-- **Resolve media URLs server-side in the loader (v9).** The home loader builds direct `https://eapi.pcloud.com/getpubthumb?code=${code}&size=${size}` URLs per item — `640x640` → `MemoryItem.thumbUrl`, `1025x1025` → `MemoryItem.lightboxUrl`. The `getpubthumb` endpoint serves bytes statelessly (no signed URL, no IP binding), so the browser can render `<img src>` directly. Per-file public-link `code` reaches the browser via the URL — explicitly relaxed from earlier versions; see "Never do" below. For videos the loader calls `getpublinkdownload({ code })` server-side and embeds the resolved `https://${hosts[0]}${path}` CDN URL in `MemoryItem.mediaUrl`; downloads use a separate `getMediaDownloadUrl({ uuid })` server-fn that resolves the same way and the client `fetch`es the URL into a `Blob` saved via `<a download>`. The previous `/api/memory/<uuid>?variant=...` byte-streaming proxy was removed in v9 — the double-hop was the latency bottleneck. (`getpubthumblink`'s CDN URLs are signed against the calling IP and break when the browser fetches from a different IP, which is why thumbs use the stateless URL build instead.)
+- **Resolve image URLs server-side in the loader (v9).** The home loader builds direct `https://eapi.pcloud.com/getpubthumb?code=${code}&size=${size}` URLs per item — `640x640` → `MemoryItem.thumbUrl`, `1025x1025` → `MemoryItem.lightboxUrl`. The `getpubthumb` endpoint serves bytes statelessly (no signed URL, no IP binding), so the browser can render `<img src>` directly. Per-file public-link `code` reaches the browser via the URL — explicitly relaxed from earlier versions; see "Never do" below.
+- **Route video bytes through the `/api/video/<uuid>` proxy (v10).** Videos can't use the v9 direct-CDN trick because `getpublinkdownload` URLs are IP-bound — the URL the SSR mints is rejected when the browser fetches it from a different IP. Instead `MemoryItem.mediaUrl` is `/api/video/<uuid>` and the auth-gated route handler resolves the pCloud CDN URL server-side and pipes bytes back, forwarding the browser's `Range` header so HTML5 `<video>` seeks work. Image originals (download button) use a one-off `getMediaDownloadUrl({ uuid })` server-fn → CDN URL → client-side `fetch` → `Blob` → `<a download>` (image CDN URLs from `getpublinkdownload` work in the browser when fetched right after resolution; videos can't rely on that timing because they need a stable `<video src>`). The video proxy adds `?download=1` to force a full-file response with `Content-Disposition: attachment`. The wider v4 `/api/memory/<uuid>` byte-streaming proxy stays demolished — only video bytes go through a function.
 - **The cron is the only writer for `media/<uuid>`, `fileid-index/<fileid>`, and `folder/v1`.** Loader and route handlers are read-only. Pre-prod, the cron must be triggered manually via the Netlify dashboard so the snapshot exists before users hit the page.
 - **Public-link lifecycle is owned by the cron.** When the cron sees a fileid disappear from `listfolder`, it calls `deletepublink(linkid)` and clears `media/<uuid>` + `fileid-index/<fileid>`. No abandoned public links accumulate in pCloud's "Public Links" panel.
 - **The home page HTML is `Cache-Control: private` (or `no-store`).** Per-user content; never publicly cached. Verify with `curl -I` on the deploy preview after any change to the home loader.
@@ -165,7 +181,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - Re-introduce the random fallback — explicitly retired in v2.
 - **Sign an IP-bound pCloud URL on the server and pass it to the browser.** `getfilelink` / `getthumblink` / `getvideolink` URLs are bound to the calling function's IP — the browser's IP won't match, the request gets rejected with "another IP address". v4 sidesteps this by using public-link URLs, which are not IP-bound. The IP-bound endpoints are only allowed when the URL is consumed in the same handler (e.g. EXIF range fetch from the cron).
 - **Sign pCloud URLs from the browser.** pCloud rejects `getfilelink` / `getthumblink` calls from browser origins with code 7010 "Invalid link referer", regardless of the page's HTTPS scheme. The pCloud token must stay server-only.
-- **Embed the pCloud token or public-link `linkid` in HTML / JSON / loader cache.** The token and `linkid` are server-only. v9 relaxes this for `uuid`, the per-file public-link `code` (embedded in thumb URLs as `?code=…`), and the resolved video CDN URLs (`mediaUrl`). The trade-off on `code` exposure: anyone who can read the page HTML can fetch the underlying file from pCloud directly. Acceptable for this single-user app; documented in §15.
+- **Embed the pCloud token or public-link `linkid` in HTML / JSON / loader cache.** The token and `linkid` are server-only. v9 relaxes this for `uuid` and the per-file public-link `code` (embedded in image thumb URLs as `?code=…`). The trade-off on `code` exposure: anyone who can read the page HTML can fetch the underlying image from pCloud directly. Acceptable for this single-user app; documented in §15. **Resolved `getpublinkdownload` CDN URLs do not reach the browser** — v10 found they're IP-bound, so videos go through `/api/video/<uuid>` and image-original downloads resolve a fresh URL via a server-fn at click time (consumed immediately by the same browser context).
 - **Public-cache the home page HTML.** Per-user content. `Cache-Control` must be `private` / `no-store` / absent — never `public, s-maxage=...`.
 - Push directly to `main` — open a PR from the version branch instead.
 
@@ -335,3 +351,56 @@ For readers diffing this spec against v8:
 - §7 Boundaries: "Always do" replaces the proxy-route bullet with the v9 server-side resolution rule. "Never do" relaxes the no-embed rule to allow `uuid` + the resolved CDN URLs (but not `code` / `linkid` / token).
 - §8 Open Questions: §8.4 (media URL signing) closed with the v9 design. §8.7 (scalability budget) updated for the new loader cost (2N+V parallel calls).
 - §13 (v6) and earlier sections: unchanged.
+
+## 17. v10 Acceptance Criteria
+
+Cumulative on top of §15 (v9). v10 is a small batch of corrections discovered after v9 shipped — narrow, unrelated to the v9 architecture but each visible enough to merit recording.
+
+**Capture date source**
+
+- Capture date now comes from pCloud's `file.created` field returned by `listfolder`. The cron passes it through to `CachedMedia.captureDate` as an ISO string. EXIF / mvhd capture-date extraction is retired — `extractImageMeta` and `extractVideoMeta` now return only `width`, `height`, and `location` (used for thumbnails and reverse-geocoding).
+- Why: `file.created` is the pCloud upload-derived date that matches what users actually see in the pCloud UI. EXIF / mvhd dates were technically correct but routinely wrong (clip re-exports, scanned photos, devices with bad clocks). Skipping the per-file range fetch for capture-date extraction also cuts cron time and pCloud API load.
+- Items with no parseable `file.created` are skipped by the loader (parity with the v2 rule for missing capture date).
+
+**Sort order**
+
+- Newest year first (`b.year - a.year`), tiebreak by `fileid` ascending. v1/v2 sorted oldest-year-first; commit `1cc010d` flipped it pre-v10 and v10 locks the rule into the SPEC. §2 Acceptance Criteria updated accordingly.
+
+**Video delivery**
+
+- `MemoryItem.mediaUrl` is `/api/video/<uuid>` (an auth-gated proxy route), not a direct pCloud CDN URL. `getpublinkdownload` URLs proved to be IP-bound — the browser receives "another IP address" when it tries to fetch the SSR-minted URL. The proxy resolves the URL server-side per request and pipes the response body back, forwarding the browser's `Range` header so HTML5 `<video>` seek/scrub still works.
+- Video downloads use the same proxy with `?download=1`, which forces a `200` response with `Content-Disposition: attachment` and `cache-control: no-store`. Image-original downloads keep the v9 path (server-fn → CDN URL → client-side blob), which works because `getpublinkdownload` URLs for images are consumed immediately after resolution.
+- `src/lib/memories/video-stream.server.ts` is the pure handler; `src/routes/api/video/$uuid.ts` is the thin route shell that wires deps. v9's `pcloud-urls.server.ts` comment block predicted this fallback ("If it fails the same way, the fallback is to restore the proxy for these two paths only…") — v10 is that fallback materialising.
+
+**Polaroid thumbnails**
+
+- Thumbnails (image and video poster) are square-cropped via `objectFit: 'cover'` + a fixed-aspect frame so the masonry layout stays even regardless of source aspect ratio.
+
+**Account UI**
+
+- The `Topbar` user pill is replaced by a Chakra `Drawer.Root` (`AccountDrawer`) showing the authenticated user's name + email and a "Cerrar sesión" button. The drawer is wrapped in `<ClientOnly>` from `@tanstack/react-router` because Netlify Identity state only exists on the client.
+
+**Auth cookie persistence**
+
+- `@netlify/identity` is patched via `pnpm patch` (`patches/@netlify__identity.patch`) to set `Max-Age=2592000` (30 days) on the session cookie. The library otherwise hardcodes session cookies, which dropped the login on every page reload. Re-apply on library upgrade.
+
+**Test infrastructure**
+
+- Vitest splits into two projects: `unit` (Node, runs `*.test.ts(x)`) and `browser` (headless Chromium via `@vitest/browser-playwright`, runs `*.browser.test.tsx`). `pnpm test` runs both; `pnpm test:unit` / `pnpm test:browser` for targeted runs. Reusable component smoke tests under `src/components/*.browser.test.tsx`.
+
+**Hot path / cron**
+
+- Unchanged from v9 (cache shape unchanged; cron is sole writer; `/` HTML stays `Cache-Control: private`). The video proxy adds 1 cache read + 1 `getpublinkdownload` call per video play / scrub Range request.
+
+## 18. v9 → v10 changes summary
+
+For readers diffing this spec against v9:
+
+- §1 Objective: unchanged.
+- §2 Acceptance Criteria: capture-date source rewritten (pCloud `file.created`, no more EXIF / mvhd date). Sort order flipped to newest-year-first.
+- §3 Commands: adds `dev:netlify`, `preview`, `test:unit`, `test:browser`, `lint:fix`, `format:check`, `invoke:refresh-memories`.
+- §4 Project Structure: replaces `routes/api/memory/<uuid>` with `routes/api/video/<uuid>`. Adds `lib/memories/video-stream.server.ts`, `lib/memories/pcloud-urls.server.ts`, `lib/memories/get-download-url(.server).ts`, `lib/memories/download.ts`, `lib/utils/years-ago.ts`, `env.d.ts`, `patches/@netlify__identity.patch`, `scripts/oauth-provision.mjs`. `media-meta/` callouts no longer mention capture-date extraction. `Topbar` description gains the AccountDrawer + ClientOnly. `Polaroid` description gains the squared crop.
+- §6 Testing Strategy: documents the two Vitest projects and the `*.browser.test.tsx` naming.
+- §7 Boundaries: "Always do" gains a separate bullet for routing video bytes through `/api/video/<uuid>` (next to the v9 image-URL rule). "Never do" tightens the no-embed rule — `getpublinkdownload` CDN URLs do not reach the browser; videos use the proxy and image downloads consume a freshly resolved URL on-demand.
+- §17 (new): v10 acceptance criteria — file.created capture date, newest-year-first sort, `/api/video/<uuid>` proxy, square thumbnail crop, account drawer, identity cookie patch, Vitest unit/browser split.
+- §15 (v9) and earlier acceptance sections: left as historical record. Where v10 changes the rule, the current truth lives in §7 and §17.

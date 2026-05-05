@@ -1,192 +1,98 @@
-Welcome to your new TanStack Start app!
+# Recuerdea
 
-# Getting Started
+A personal **"on this day"** memory surfacer. The home page surfaces every photo and video taken on today's month/day in a past year, drawn from a pCloud folder owned by the user. Single-user app — the owner is the only authenticated visitor.
 
-To run this application:
+The full architecture, acceptance criteria, and boundary rules live in [`SPEC.md`](./SPEC.md).
+
+## Stack
+
+- **TanStack Start** (TanStack Router + Vite) hosted on **Netlify**.
+- **Chakra UI v3** for components, custom theme in `src/theme.ts`, self-hosted variable fonts in `public/fonts/`.
+- **pCloud** as the media store, accessed via `pcloud-kit` from server-only modules.
+- **Netlify Blobs** as the metadata cache (`media/<uuid>`, `fileid-index/<fileid>`, `folder/v1`).
+- **Netlify Scheduled Function** (`netlify/functions/refresh-memories.ts`) refreshes the cache daily.
+- **Netlify Identity** for auth.
+- **Geoapify** for reverse-geocoding GPS coordinates into Spanish place captions.
+- **Vitest** with two projects: `unit` (Node) + `browser` (headless Chromium via Playwright).
+
+## Prerequisites
+
+- Node.js (matching the version pinned in CI).
+- `pnpm@10.30.2` (declared in `packageManager`).
+- A linked Netlify site for `pnpm dev:netlify` (Functions + Blobs require it).
+- Server-only environment variables (set via `netlify env:set` for previews/prod, or in a local `.env` consumed by `netlify dev`):
+  - `PCLOUD_TOKEN` — pCloud OAuth access token (provision via `node scripts/oauth-provision.mjs`).
+  - `PCLOUD_MEMORIES_FOLDER_ID` — pCloud folder id to scan.
+  - `GEOAPIFY_API_KEY` — for the cron's reverse-geocoding pass.
+  - Optional: `RECUERDEA_GEOCODE_MAX_PER_RUN` (default 200).
+
+## Getting started
 
 ```bash
 pnpm install
-pnpm netlify link # (if you haven't already linked your Netlify site)
-pnpm netlify dev
+pnpm netlify link            # one-time, links to the Netlify site
+pnpm dev:netlify             # production-shaped local dev at http://localhost:8888
 ```
 
-# Building For Production
+`pnpm dev` (port 3000) runs Vite alone — fine for UI work but lacks Netlify Functions and Blobs, so the home loader falls back to the empty state.
 
-To build this application for production:
+The cron is the **only writer** for the Blobs cache. Before the home page can render anything, trigger the scheduled function once:
 
 ```bash
-pnpm build
+pnpm invoke:refresh-memories     # local; Netlify dev must be running
+# or trigger from the Netlify dashboard for a deploy preview / prod
 ```
 
-## Testing
+## Scripts
 
-This project uses [Vitest](https://vitest.dev/) for testing. You can run the tests with:
+| Command                        | Purpose                                                 |
+| ------------------------------ | ------------------------------------------------------- |
+| `pnpm dev`                     | Vite dev server on port 3000 (no Functions / Blobs).    |
+| `pnpm dev:netlify`             | `netlify dev` on port 8888 — Functions + Blobs enabled. |
+| `pnpm build`                   | Production build.                                       |
+| `pnpm preview`                 | Preview the production build locally.                   |
+| `pnpm test`                    | Run all Vitest projects.                                |
+| `pnpm test:unit`               | Run only the Node unit project.                         |
+| `pnpm test:browser`            | Run only the headless-Chromium browser project.         |
+| `pnpm type-check`              | `tsc --noEmit`.                                         |
+| `pnpm lint` / `pnpm lint:fix`  | oxlint.                                                 |
+| `pnpm format` / `format:check` | oxfmt.                                                  |
+| `pnpm invoke:refresh-memories` | Invoke the scheduled function on the local dev server.  |
 
-```bash
-pnpm test
+CI (`.github/workflows/ci.yml`) runs type-check, test, lint, and format-check in parallel; all must pass.
+
+## Project layout
+
+Top-level orientation; the canonical map is in [`SPEC.md` §4](./SPEC.md#4-project-structure).
+
+```
+src/
+  routes/            # TanStack Router file-based routes (incl. api/video/$uuid.ts proxy)
+  components/        # Chakra-native presentational components
+  lib/
+    auth/            # Netlify Identity wrapper + server-only auth helpers
+    cache/           # Netlify-Blobs-backed media-cache, fileid-index, folder-cache
+    media-meta/      # EXIF, MP4/MOV walker, Geoapify reverse-geocoder
+    memories/        # pCloud loader, refresh cron, video proxy, download helpers
+    utils/           # Spanish months, polaroid rotation, navigation, years-ago
+  theme.ts           # Chakra v3 system: palette, tokens, fonts, paper-noise bg
+  fonts.css          # Self-hosted variable woff2 declarations
+netlify/functions/   # Scheduled refresh-memories function
+patches/             # @netlify/identity patch (cookie persistence)
+scripts/             # oauth-provision.mjs (one-time pCloud token bootstrap)
 ```
 
-## Styling
+## Conventions
 
-This project uses [Tailwind CSS](https://tailwindcss.com/) for styling.
+- **Formatter**: oxfmt — tabs, single quotes, no semicolons.
+- **Linter**: oxlint.
+- **Pre-commit**: `simple-git-hooks` runs `oxlint --fix` + `oxfmt` on staged files. Don't bypass with `--no-verify`.
+- **Imports**: prefer the `#/*` alias for cross-module imports inside `src/`.
+- **Tests**: colocate `*.test.ts(x)` with source for `src/lib/`; component browser tests use `*.browser.test.tsx`.
+- **Comments**: minimal — only when the *why* is non-obvious.
 
-### Removing Tailwind CSS
+## Deployment
 
-If you prefer not to use Tailwind CSS:
+PRs target `main`. Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge: trigger the cron once via the Netlify dashboard, then load `/` against the preview URL.
 
-1. Remove the demo pages in `src/routes/demo/`
-2. Replace the Tailwind import in `src/styles.css` with your own styles
-3. Remove `tailwindcss()` from the plugins array in `vite.config.ts`
-4. Uninstall the packages: `pnpm add @tailwindcss/vite tailwindcss --dev`
-
-## Routing
-
-This project uses [TanStack Router](https://tanstack.com/router) with file-based routing. Routes are managed as files in `src/routes`.
-
-### Adding A Route
-
-To add a new route to your application just add a new file in the `./src/routes` directory.
-
-TanStack will automatically generate the content of the route file for you.
-
-Now that you have two routes you can use a `Link` component to navigate between them.
-
-### Adding Links
-
-To use SPA (Single Page Application) navigation you will need to import the `Link` component from `@tanstack/react-router`.
-
-```tsx
-import { Link } from '@tanstack/react-router'
-```
-
-Then anywhere in your JSX you can use it like so:
-
-```tsx
-<Link to="/about">About</Link>
-```
-
-This will create a link that will navigate to the `/about` route.
-
-More information on the `Link` component can be found in the [Link documentation](https://tanstack.com/router/v1/docs/framework/react/api/router/linkComponent).
-
-### Using A Layout
-
-In the File Based Routing setup the layout is located in `src/routes/__root.tsx`. Anything you add to the root route will appear in all the routes. The route content will appear in the JSX where you render `{children}` in the `shellComponent`.
-
-Here is an example layout that includes a header:
-
-```tsx
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-
-export const Route = createRootRoute({
-	head: () => ({
-		meta: [
-			{ charSet: 'utf-8' },
-			{ name: 'viewport', content: 'width=device-width, initial-scale=1' },
-			{ title: 'My App' },
-		],
-	}),
-	shellComponent: ({ children }) => (
-		<html lang="en">
-			<head>
-				<HeadContent />
-			</head>
-			<body>
-				<header>
-					<nav>
-						<Link to="/">Home</Link>
-						<Link to="/about">About</Link>
-					</nav>
-				</header>
-				{children}
-				<Scripts />
-			</body>
-		</html>
-	),
-})
-```
-
-More information on layouts can be found in the [Layouts documentation](https://tanstack.com/router/latest/docs/framework/react/guide/routing-concepts#layouts).
-
-## Server Functions
-
-TanStack Start provides server functions that allow you to write server-side code that seamlessly integrates with your client components.
-
-```tsx
-import { createServerFn } from '@tanstack/react-start'
-
-const getServerTime = createServerFn({
-	method: 'GET',
-}).handler(async () => {
-	return new Date().toISOString()
-})
-
-// Use in a component
-function MyComponent() {
-	const [time, setTime] = useState('')
-
-	useEffect(() => {
-		getServerTime().then(setTime)
-	}, [])
-
-	return <div>Server time: {time}</div>
-}
-```
-
-## API Routes
-
-You can create API routes by using the `server` property in your route definitions:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-import { json } from '@tanstack/react-start'
-
-export const Route = createFileRoute('/api/hello')({
-	server: {
-		handlers: {
-			GET: () => json({ message: 'Hello, World!' }),
-		},
-	},
-})
-```
-
-## Data Fetching
-
-There are multiple ways to fetch data in your application. You can use TanStack Query to fetch data from a server. But you can also use the `loader` functionality built into TanStack Router to load the data for a route before it's rendered.
-
-For example:
-
-```tsx
-import { createFileRoute } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/people')({
-	loader: async () => {
-		const response = await fetch('https://swapi.dev/api/people')
-		return response.json()
-	},
-	component: PeopleComponent,
-})
-
-function PeopleComponent() {
-	const data = Route.useLoaderData()
-	return (
-		<ul>
-			{data.results.map((person) => (
-				<li key={person.name}>{person.name}</li>
-			))}
-		</ul>
-	)
-}
-```
-
-Loaders simplify your data fetching logic dramatically. Check out more information in the [Loader documentation](https://tanstack.com/router/latest/docs/framework/react/guide/data-loading#loader-parameters).
-
-# Demo files
-
-Files prefixed with `demo` can be safely deleted. They are there to provide a starting point for you to play around with the features you've installed.
-
-# Learn More
-
-You can learn more about all of the offerings from TanStack in the [TanStack documentation](https://tanstack.com).
-
-For TanStack Start specific documentation, visit [TanStack Start](https://tanstack.com/start).
+For boundaries (what to never do — public-cache the home page, sign IP-bound URLs, ship pCloud tokens to the browser, etc.), see [`SPEC.md` §7](./SPEC.md#7-boundaries).
