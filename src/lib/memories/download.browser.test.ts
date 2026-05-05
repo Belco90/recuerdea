@@ -21,9 +21,7 @@ describe('downloadAs', () => {
 
 		await downloadAs({ url: 'https://example.com/a.jpg', name: 'foo.jpg', fetcher, clicker })
 
-		expect(fetcher).toHaveBeenCalledWith('https://example.com/a.jpg', {
-			referrerPolicy: 'no-referrer',
-		})
+		expect(fetcher).toHaveBeenCalledWith('https://example.com/a.jpg')
 		expect(createSpy).toHaveBeenCalledWith(blob)
 		expect(clicked).not.toBeNull()
 		expect(clicked!.getAttribute('href')).toBe(objectUrl)

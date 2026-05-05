@@ -77,12 +77,6 @@ function VideoSlide({ item, active }: { item: VideoMemoryItem; active: boolean }
 			controls
 			autoPlay={active}
 			preload={active ? 'metadata' : 'none'}
-			// pCloud's signed CDN URLs may reject browser fetches that carry a
-			// non-pcloud Referer (the `gethlslink` doc explicitly notes referrer
-			// gating). Strip the Referer here so segment/byte fetches go through.
-			// Spread (instead of `referrerPolicy={…}`) because Chakra's
-			// `chakra('video')` polymorphic types omit this prop.
-			{...{ referrerPolicy: 'no-referrer' as const }}
 			onError={(event) => {
 				const target = event.currentTarget
 				// eslint-disable-next-line no-console

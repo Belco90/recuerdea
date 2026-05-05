@@ -15,9 +15,7 @@ export async function downloadAs({
 	fetcher = fetch,
 	clicker = defaultClicker,
 }: DownloadOpts): Promise<void> {
-	// Strip Referer so pCloud's CDN URLs (which may gate by referrer) don't
-	// 410 on browser-origin requests. Same rationale as the <video> element.
-	const res = await fetcher(url, { referrerPolicy: 'no-referrer' })
+	const res = await fetcher(url)
 	if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`)
 	const blob = await res.blob()
 	const objectUrl = URL.createObjectURL(blob)
