@@ -107,16 +107,8 @@ function DownloadButton({ item }: { item: MemoryItem }) {
 	const handleClick = async () => {
 		setStatus('pending')
 		try {
-			if (item.kind === 'video') {
-				// Route through the auth-gated proxy: the same IP-binding that
-				// breaks <video src=…> on direct pCloud CDN URLs also breaks
-				// browser-side downloads. The proxy sets Content-Disposition
-				// so the browser saves with the original filename.
-				await downloadAs({ url: `/api/video/${item.uuid}?download=1`, name: item.name })
-			} else {
-				const info = await getMediaDownloadUrl({ data: { uuid: item.uuid } })
-				await downloadAs({ url: info.url, name: info.name })
-			}
+			const info = await getMediaDownloadUrl({ data: { uuid: item.uuid } })
+			await downloadAs({ url: info.url, name: info.name })
 			setStatus('idle')
 		} catch (err) {
 			// eslint-disable-next-line no-console
