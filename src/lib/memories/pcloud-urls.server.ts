@@ -34,3 +34,30 @@ export async function resolveMediaUrl(client: Client, code: string): Promise<str
 	if (!host) throw new TypeError('getpublinkdownload: no hosts returned')
 	return `https://${host}${res.path}`
 }
+
+export type VideoLinkOpts = {
+	contenttype?: string
+	forcedownload?: boolean
+}
+
+// Resolves a `getvideolink` CDN URL for the given fileid. Like the other
+// signed-link endpoints in pCloud's API, the returned URL is IP-bound — only
+// safe to fetch from the same host that resolved it. Pass `contenttype` to
+// have pCloud serve the response with that MIME, or `forcedownload: true` to
+// have pCloud emit `Content-Disposition: attachment` upstream. The proxy at
+// `/api/video/<uuid>` overrides both headers itself, so these args are mostly
+// to align pCloud's behavior with what we're going to ship to the browser.
+export async function resolveVideoLink(
+	client: Client,
+	fileid: number,
+	opts: VideoLinkOpts,
+): Promise<string> {
+	const params: Record<string, string | number | boolean> = { fileid }
+	if (opts.contenttype !== undefined) params.contenttype = opts.contenttype
+	if (opts.forcedownload === true) params.forcedownload = 1
+
+	const res = await client.callRaw<PublinkLink>('getvideolink', params)
+	const host = res.hosts[0]
+	if (!host) throw new TypeError('getvideolink: no hosts returned')
+	return `https://${host}${res.path}`
+}
