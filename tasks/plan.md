@@ -35,7 +35,7 @@ Docs: <https://docs.pcloud.com/methods/streaming/getvideolink.html>
 
 - **New helper `resolveVideoLink(client, fileid, opts)` in
   `pcloud-urls.server.ts`.** Calls `client.callRaw('getvideolink', { fileid,
-  ...opts })` and returns `https://${hosts[0]}${path}`. Mirrors the existing
+...opts })` and returns `https://${hosts[0]}${path}`. Mirrors the existing
   `resolveMediaUrl(client, code)` shape so the file stays cohesive. Existing
   `resolveMediaUrl` is kept (image downloads still use it).
 - **Resolver dep on `video-stream.server.ts` becomes fileid-based.** Replace
@@ -60,6 +60,7 @@ Docs: <https://docs.pcloud.com/methods/streaming/getvideolink.html>
 - [ ] **Task 1** — Add `resolveVideoLink` to `pcloud-urls.server.ts` + tests
 
 #### Checkpoint 1 (after Task 1)
+
 - [ ] `pnpm test:unit -- pcloud-urls.server` green
 - [ ] `pnpm type-check` clean
 
@@ -69,13 +70,14 @@ Docs: <https://docs.pcloud.com/methods/streaming/getvideolink.html>
 - [ ] **Task 3** — Update route shell `src/routes/api/video/$uuid.ts`
 
 #### Checkpoint 2 (after Tasks 2–3)
+
 - [ ] `pnpm test` (unit + browser) green
 - [ ] `pnpm type-check` clean
 - [ ] `pnpm lint` clean
 - [ ] `pnpm format:check` clean
 - [ ] **Manual smoke (deploy preview):** play a cached video; download the
-  same video; both succeed; no `another IP address` / `410 Gone` errors in
-  the Network tab; the downloaded file lands with the original filename.
+      same video; both succeed; no `another IP address` / `410 Gone` errors in
+      the Network tab; the downloaded file lands with the original filename.
 
 ---
 
@@ -89,30 +91,34 @@ returns `https://${hosts[0]}${path}`. Includes the same "no hosts" guard as
 `resolveMediaUrl`.
 
 Options shape:
+
 ```ts
 type VideoLinkOpts = {
-  contenttype?: string
-  forcedownload?: boolean
+	contenttype?: string
+	forcedownload?: boolean
 }
 ```
+
 - When `forcedownload` is `true`, pass `forcedownload: 1` (number) to
   `callRaw`. When `false` or absent, omit the key.
 - When `contenttype` is set, pass it through verbatim. When absent, omit.
 
 **Acceptance criteria:**
+
 - [ ] `resolveVideoLink(client, 123, { contenttype: 'video/mp4' })` invokes
-  `client.callRaw('getvideolink', { fileid: 123, contenttype: 'video/mp4' })`
-  and returns `https://${hosts[0]}${path}`.
+      `client.callRaw('getvideolink', { fileid: 123, contenttype: 'video/mp4' })`
+      and returns `https://${hosts[0]}${path}`.
 - [ ] `resolveVideoLink(client, 123, { forcedownload: true })` invokes
-  `client.callRaw('getvideolink', { fileid: 123, forcedownload: 1 })`.
+      `client.callRaw('getvideolink', { fileid: 123, forcedownload: 1 })`.
 - [ ] `resolveVideoLink(client, 123, {})` invokes
-  `client.callRaw('getvideolink', { fileid: 123 })` (no extra keys).
+      `client.callRaw('getvideolink', { fileid: 123 })` (no extra keys).
 - [ ] Throws `TypeError('getvideolink: no hosts returned')` when `hosts` is
-  empty (parity with `resolveMediaUrl`).
+      empty (parity with `resolveMediaUrl`).
 - [ ] Propagates errors thrown by `callRaw`.
 - [ ] Public surface adds `resolveVideoLink` and `VideoLinkOpts` only.
 
 **Verification:**
+
 - [ ] `pnpm test:unit src/lib/memories/pcloud-urls.server.test.ts` passes
 - [ ] `pnpm type-check` clean
 - [ ] `pnpm lint` clean
@@ -120,6 +126,7 @@ type VideoLinkOpts = {
 **Dependencies:** None.
 
 **Files likely touched:**
+
 - `src/lib/memories/pcloud-urls.server.ts`
 - `src/lib/memories/pcloud-urls.server.test.ts`
 
@@ -134,9 +141,7 @@ and change its signature to `(fileid, opts)`. The handler picks opts based on
 `isDownload`:
 
 ```ts
-const opts = isDownload
-  ? { forcedownload: true }
-  : { contenttype: meta.contenttype }
+const opts = isDownload ? { forcedownload: true } : { contenttype: meta.contenttype }
 const upstreamUrl = await deps.resolveVideoUrl(meta.fileid, opts)
 ```
 
@@ -145,6 +150,7 @@ filename handling, range-forwarding semantics) stays identical. The change is
 purely how the upstream URL is resolved.
 
 Update `video-stream.server.test.ts`:
+
 - Mocks intercept `resolveVideoUrl(fileid, opts)`.
 - New assertions:
   - Stream path calls resolver with `(meta.fileid, { contenttype: meta.contenttype })`.
@@ -153,19 +159,21 @@ Update `video-stream.server.test.ts`:
   tests continue to pass with updated mock signatures.
 
 **Acceptance criteria:**
+
 - [ ] Public types updated: `ResolveStreamUrl` removed; `ResolveVideoUrl`
-  exported as
-  `(fileid: number, opts: { contenttype?: string; forcedownload?: boolean }) => Promise<string>`.
+      exported as
+      `(fileid: number, opts: { contenttype?: string; forcedownload?: boolean }) => Promise<string>`.
 - [ ] `VideoStreamDeps.resolveVideoUrl` replaces
-  `VideoStreamDeps.resolveStreamUrl`.
+      `VideoStreamDeps.resolveStreamUrl`.
 - [ ] Stream branch resolves with `{ contenttype: meta.contenttype }`.
 - [ ] Download branch resolves with `{ forcedownload: true }`.
 - [ ] Existing response semantics preserved (Range forwarding on stream;
-  no-Range + manual `Content-Disposition` + 200 on download; manual
-  `content-type` override; 502 on resolver/fetch errors).
+      no-Range + manual `Content-Disposition` + 200 on download; manual
+      `content-type` override; 502 on resolver/fetch errors).
 - [ ] No reference to the removed `code`-based resolver remains.
 
 **Verification:**
+
 - [ ] `pnpm test:unit src/lib/memories/video-stream.server.test.ts` passes
 - [ ] `pnpm test:unit` (full unit project) passes
 - [ ] `pnpm type-check` clean
@@ -174,6 +182,7 @@ Update `video-stream.server.test.ts`:
 **Dependencies:** Task 1.
 
 **Files likely touched:**
+
 - `src/lib/memories/video-stream.server.ts`
 - `src/lib/memories/video-stream.server.test.ts`
 
@@ -189,22 +198,24 @@ owns `PCLOUD_TOKEN` + client construction, forwards `(fileid, opts)`.
 
 ```ts
 resolveVideoUrl: async (fileid, opts) => {
-  const token = process.env.PCLOUD_TOKEN
-  if (!token) throw new Error('PCLOUD_TOKEN is not set')
-  const client = createClient({ token })
-  return resolveVideoLink(client, fileid, opts)
+	const token = process.env.PCLOUD_TOKEN
+	if (!token) throw new Error('PCLOUD_TOKEN is not set')
+	const client = createClient({ token })
+	return resolveVideoLink(client, fileid, opts)
 }
 ```
 
 **Acceptance criteria:**
+
 - [ ] Route shell imports `resolveVideoLink` (replaces `resolveMediaUrl`
-  import in this file).
+      import in this file).
 - [ ] No other behavior change (`fetchBytes`, auth, cache deps unchanged).
 - [ ] `pnpm test:browser` green (no Lightbox regression).
 - [ ] Manual deploy-preview smoke: play + download a known cached video;
-  Network tab clean.
+      Network tab clean.
 
 **Verification:**
+
 - [ ] `pnpm test` (both projects) passes
 - [ ] `pnpm type-check` clean
 - [ ] `pnpm lint` clean
@@ -214,6 +225,7 @@ resolveVideoUrl: async (fileid, opts) => {
 **Dependencies:** Tasks 1 + 2.
 
 **Files likely touched:**
+
 - `src/routes/api/video/$uuid.ts`
 
 **Estimated scope:** XS (1 file).
@@ -222,13 +234,13 @@ resolveVideoUrl: async (fileid, opts) => {
 
 ## Risks and Mitigations
 
-| Risk | Impact | Mitigation |
-|---|---|---|
-| `getvideolink` URLs behave differently than `getpublinkdownload` (token expiry, IP-binding strictness, hosts shape) | Med | Per-request resolution + immediate proxy fetch keeps the URL alive in the same call. Smoke on deploy preview before merge. |
-| pCloud's `forcedownload=1` upstream `Content-Disposition` clashes with the proxy's manual one | Low | Proxy always overrides `Content-Disposition`; upstream value never reaches the browser. |
-| `contenttype` parameter encoding (slashes) | Low | `pcloud-kit`'s `callRaw` URL-encodes params. Helper test asserts the call arguments shape. |
-| Hidden consumer of `resolveStreamUrl`/`ResolveStreamUrl` breaks on rename | Low | Single consumer (`$uuid.ts` route shell). Verify with grep before/after. |
-| Browser cache serves stale `?download=1` responses with old upstream bytes | Low | Existing `cache-control: private, max-age=0, no-store` on download responses already handles this. |
+| Risk                                                                                                                | Impact | Mitigation                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `getvideolink` URLs behave differently than `getpublinkdownload` (token expiry, IP-binding strictness, hosts shape) | Med    | Per-request resolution + immediate proxy fetch keeps the URL alive in the same call. Smoke on deploy preview before merge. |
+| pCloud's `forcedownload=1` upstream `Content-Disposition` clashes with the proxy's manual one                       | Low    | Proxy always overrides `Content-Disposition`; upstream value never reaches the browser.                                    |
+| `contenttype` parameter encoding (slashes)                                                                          | Low    | `pcloud-kit`'s `callRaw` URL-encodes params. Helper test asserts the call arguments shape.                                 |
+| Hidden consumer of `resolveStreamUrl`/`ResolveStreamUrl` breaks on rename                                           | Low    | Single consumer (`$uuid.ts` route shell). Verify with grep before/after.                                                   |
+| Browser cache serves stale `?download=1` responses with old upstream bytes                                          | Low    | Existing `cache-control: private, max-age=0, no-store` on download responses already handles this.                         |
 
 ## Open Questions
 

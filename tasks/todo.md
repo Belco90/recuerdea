@@ -26,6 +26,7 @@
     - [ ] Asserts `callRaw` error propagation
 
 ### ✅ Checkpoint 1 — helper green
+
 - [ ] `pnpm test:unit -- pcloud-urls.server` green
 - [ ] `pnpm type-check` clean
 
@@ -52,6 +53,7 @@
     - [ ] No other change to the shell
 
 ### ✅ Checkpoint 2 — proxy on `getvideolink`
+
 - [ ] `pnpm test` (unit + browser) green
 - [ ] `pnpm type-check` clean
 - [ ] `pnpm lint` clean
