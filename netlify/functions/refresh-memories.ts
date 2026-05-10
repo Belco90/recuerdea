@@ -19,7 +19,7 @@ function getEnvConfig(): { token: string; folderId: number } {
 	return { token, folderId }
 }
 
-export const handler = schedule('0 4 * * *', async (event) => {
+export const handler = schedule('0 4,22 * * *', async (event) => {
 	// Scheduled functions don't get the automatic Blobs context that on-demand
 	// SSR functions get — we have to wire it up explicitly. Without this the
 	// `getStore` calls in the cache factories throw and fall back to no-op
