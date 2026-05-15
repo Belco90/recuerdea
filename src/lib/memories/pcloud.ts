@@ -2,6 +2,8 @@ import { createServerFn } from '@tanstack/react-start'
 
 import type { MemoryItem } from './pcloud.server'
 
+import { getTodayInSpain } from '../utils/spain-today'
+
 type DateOverride = { month: number; day: number }
 
 function parseOverrideInput(input: unknown): DateOverride | null {
@@ -15,8 +17,7 @@ function parseOverrideInput(input: unknown): DateOverride | null {
 }
 
 function realToday(): DateOverride {
-	const now = new Date()
-	return { month: now.getMonth() + 1, day: now.getDate() }
+	return getTodayInSpain()
 }
 
 export const getTodayMemories = createServerFn({ method: 'GET' })
