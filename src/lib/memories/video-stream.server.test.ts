@@ -220,7 +220,7 @@ describe('handleVideoStreamRequest', () => {
 	})
 
 	describe('?download=1', () => {
-		it('uses the download resolver, returns 200, sets Content-Disposition + no-store', async () => {
+		it('uses the download resolver, returns 200, stamps video/mp4 + renames to .mp4 + no-store', async () => {
 			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
 				loadServerUser: async () => adminUser,
 				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: videoMeta })),
@@ -230,16 +230,18 @@ describe('handleVideoStreamRequest', () => {
 			})
 
 			expect(res.status).toBe(200)
-			// Source MIME on download — we want the original file faithfully.
-			expect(res.headers.get('content-type')).toBe('video/quicktime')
+			// Bytes shipped are pCloud's transcoded H.264 MP4 (see route shell),
+			// so the response advertises video/mp4 regardless of source MIME.
+			expect(res.headers.get('content-type')).toBe('video/mp4')
 			expect(res.headers.get('cache-control')).toBe('private, max-age=0, no-store')
 			expect(res.headers.get('accept-ranges')).toBeNull()
 			expect(resolveStreamUrl).not.toHaveBeenCalled()
 			expect(resolveDownloadUrl).toHaveBeenCalledWith('CODE-C')
 			const disposition = res.headers.get('content-disposition')!
 			expect(disposition).toContain('attachment')
-			expect(disposition).toContain('filename="IMG_1201.mov"')
-			expect(disposition).toContain("filename*=UTF-8''IMG_1201.mov")
+			// .mov → .mp4 rename: bytes are MP4, filename extension matches.
+			expect(disposition).toContain('filename="IMG_1201.mp4"')
+			expect(disposition).toContain("filename*=UTF-8''IMG_1201.mp4")
 		})
 
 		it('refuses to forward Range headers in download mode (always full file)', async () => {
@@ -279,7 +281,7 @@ describe('handleVideoStreamRequest', () => {
 			expect(res.headers.get('content-range')).toBeNull()
 		})
 
-		it('UTF-8 filename: ASCII fallback strips non-printables, RFC 5987 encodes the original', async () => {
+		it('UTF-8 filename: ASCII fallback strips non-printables, RFC 5987 encodes the renamed name', async () => {
 			const utf8Meta: CachedMedia = { ...videoMeta, name: 'recuérdame año.mp4' }
 
 			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
@@ -293,6 +295,27 @@ describe('handleVideoStreamRequest', () => {
 			const disposition = res.headers.get('content-disposition')!
 			expect(disposition).toMatch(/filename="recurdame ao\.mp4"/)
 			expect(disposition).toContain("filename*=UTF-8''" + encodeURIComponent('recuérdame año.mp4'))
+		})
+
+		it.each<{ source: string; expected: string }>([
+			{ source: 'IMG_1201.mov', expected: 'IMG_1201.mp4' },
+			{ source: 'clip.MP4', expected: 'clip.mp4' },
+			{ source: 'vacation', expected: 'vacation.mp4' },
+			{ source: 'a.b.mov', expected: 'a.b.mp4' },
+			{ source: 'already.mp4', expected: 'already.mp4' },
+		])('renames $source to $expected in Content-Disposition', async ({ source, expected }) => {
+			const meta: CachedMedia = { ...videoMeta, name: source }
+			const res = await handleVideoStreamRequest(makeRequest({}, '?download=1'), VALID_UUID, {
+				loadServerUser: async () => adminUser,
+				mediaCache: createMediaCache(makeMediaStore({ [VALID_UUID]: meta })),
+				resolveStreamUrl,
+				resolveDownloadUrl,
+				fetchBytes,
+			})
+
+			const disposition = res.headers.get('content-disposition')!
+			expect(disposition).toContain(`filename="${expected}"`)
+			expect(disposition).toContain("filename*=UTF-8''" + encodeURIComponent(expected))
 		})
 
 		it('returns 502 when the download resolver throws', async () => {

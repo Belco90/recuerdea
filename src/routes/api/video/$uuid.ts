@@ -1,7 +1,7 @@
 import { loadServerUser } from '#/lib/auth/auth.server'
 import { createMediaCache } from '#/lib/cache/media-cache'
 import { getMediaCacheStore } from '#/lib/cache/media-cache.server'
-import { resolveMediaUrl, resolvePubVideoUrl } from '#/lib/memories/pcloud-urls.server'
+import { resolvePubVideoUrl } from '#/lib/memories/pcloud-urls.server'
 import { handleVideoStreamRequest } from '#/lib/memories/video-stream.server'
 import { createFileRoute } from '@tanstack/react-router'
 import { createClient } from 'pcloud-kit'
@@ -24,7 +24,11 @@ export const Route = createFileRoute('/api/video/$uuid')({
 						const token = process.env.PCLOUD_TOKEN
 						if (!token) throw new Error('PCLOUD_TOKEN is not set')
 						const client = createClient({ token })
-						return resolveMediaUrl(client, code)
+						// Same transcoded H.264 variant as the stream path. Android
+						// can't decode HEVC; the original iPhone .mov fails to play
+						// (audio-only) when downloaded. The proxy advertises
+						// `video/mp4` + a `.mp4` filename to match the actual bytes.
+						return resolvePubVideoUrl(client, code)
 					},
 					fetchBytes: async (url, range) => {
 						const headers = new Headers()

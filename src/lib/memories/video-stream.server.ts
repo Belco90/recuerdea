@@ -10,9 +10,14 @@
 // `Content-Type: video/mp4` on the response so iPhone QuickTime sources
 // play in browsers that wouldn't decode the original container.
 //
-// Download path (`/api/video/<uuid>?download=1`): upstream is
-// `getpublinkdownload` — the original file. `Content-Type` is the cached
-// source MIME; `Content-Disposition: attachment` forces the save dialog.
+// Download path (`/api/video/<uuid>?download=1`): upstream is **the same
+// `getpubvideolinks` H.264 variant** as the stream path. Serving the
+// original file (`getpublinkdownload`) used to ship iPhone HEVC `.mov`
+// bytes that Android can't decode (audio-only). The response advertises
+// `Content-Type: video/mp4` and renames the filename to `.mp4` so the
+// label matches the bytes. `Content-Disposition: attachment` forces the
+// save dialog. Trade-off: downloads are no longer byte-identical to the
+// source; users wanting the original can grab it from pCloud directly.
 
 import type { ServerUser } from '../auth/auth.server'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
@@ -85,16 +90,27 @@ function buildStreamResponse(upstream: Response): Response {
 }
 
 function buildDownloadResponse(upstream: Response, meta: CachedMedia): Response {
+	// Bytes shipped are pCloud's transcoded H.264 MP4 (see route shell —
+	// download path resolves via `getpubvideolinks`, same source as stream).
+	// Stamp `video/mp4` and rename the filename to `.mp4` so the response
+	// matches reality on strict-MIME Android players.
+	const downloadName = normalizeFilenameToMp4(meta.name)
 	const headers = new Headers({
-		'content-type': meta.contenttype,
+		'content-type': 'video/mp4',
 		'cache-control': 'private, max-age=0, no-store',
-		'content-disposition': buildContentDisposition(meta.name),
+		'content-disposition': buildContentDisposition(downloadName),
 	})
 	const contentLength = upstream.headers.get('content-length')
 	if (contentLength) headers.set('content-length', contentLength)
 	// Force 200 — strip any upstream `content-range` semantics that would
 	// otherwise confuse the browser save dialog.
 	return new Response(upstream.body, { status: 200, headers })
+}
+
+function normalizeFilenameToMp4(name: string): string {
+	const lastDot = name.lastIndexOf('.')
+	const base = lastDot > 0 ? name.slice(0, lastDot) : name
+	return `${base}.mp4`
 }
 
 function buildContentDisposition(name: string): string {
