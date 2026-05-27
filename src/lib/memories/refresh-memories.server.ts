@@ -1,6 +1,5 @@
 import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 
-import type { CollectionCache } from '../cache/collection-cache'
 import type { FileidIndex } from '../cache/fileid-index'
 import type { FolderCache } from '../cache/folder-cache'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
@@ -30,20 +29,6 @@ export type GeocodeOpts = {
 	sleepMs?: number
 	sleep?: (ms: number) => Promise<void>
 	geocoder?: Geocoder
-}
-
-export type CollectionOpts = {
-	cache: CollectionCache
-	collectionid: number
-	// pCloud-native auth client used for `collection_*` calls. Separate from
-	// the OAuth client passed positionally because the OAuth scope used by the
-	// rest of the cron is unreliable for collection mutations (see SPEC §21).
-	client: Client
-}
-
-export type CollectionStats = {
-	linked: number
-	alive: number
 }
 
 const ZERO_FAILURES: Record<FailureReason, number> = {
@@ -248,12 +233,6 @@ export type RefreshResult = {
 	geocodeSkippedAfterStop: number
 	geocodeFailures: Record<FailureReason, number>
 	geocodeStoppedReason: FailureReason | null
-	// `null` when no collection is configured (env var unset). Otherwise:
-	// `linked` is the number of fileids returned by `collection_details`,
-	// `alive` is the subset that resolved to a uuid in the current folder
-	// snapshot. The delta (`linked - alive`) is the count of collection items
-	// the cron couldn't index — surfaces in the cron log.
-	collectionStats: CollectionStats | null
 }
 
 export async function refreshMemories(
@@ -263,7 +242,6 @@ export async function refreshMemories(
 	fileidIndex: FileidIndex,
 	folderCache: FolderCache,
 	geocodeOpts?: GeocodeOpts,
-	collectionOpts?: CollectionOpts,
 ): Promise<RefreshResult> {
 	const files = await listMediaFiles(client, folderId)
 	const processed = await Promise.all(
@@ -292,10 +270,6 @@ export async function refreshMemories(
 		refreshedAt,
 		uuids: aliveUuids,
 	})
-
-	const collectionStats = collectionOpts
-		? await refreshCollectionSnapshot(fileidIndex, aliveSet, collectionOpts, refreshedAt)
-		: null
 
 	const geocodeResult = geocodeOpts
 		? await runGeocodePass(aliveUuids, aliveCached, mediaCache, geocodeOpts)
@@ -327,41 +301,7 @@ export async function refreshMemories(
 		geocodeSkippedAfterStop: geocodeResult.skippedAfterStop,
 		geocodeFailures: geocodeResult.failures,
 		geocodeStoppedReason: geocodeResult.stoppedReason,
-		collectionStats,
 	}
-}
-
-// pCloud's `collection_details` returns the file list under `collection.contents`
-// (an array). `collection.items` is the COUNT (a number) — confusingly named.
-// Defending against either: prefer contents, fall back to items if it's an array
-// (in case a future API rev renames).
-type CollectionDetailsResponse = {
-	collection: {
-		contents?: ReadonlyArray<FileMetadata>
-		items?: number | ReadonlyArray<FileMetadata>
-	}
-}
-
-async function refreshCollectionSnapshot(
-	fileidIndex: FileidIndex,
-	aliveSet: ReadonlySet<string>,
-	opts: CollectionOpts,
-	refreshedAt: string,
-): Promise<CollectionStats> {
-	const res = await opts.client.call<CollectionDetailsResponse>('collection_details', {
-		collectionid: opts.collectionid,
-		showfiles: 1,
-	})
-	const contents =
-		res.collection.contents ?? (Array.isArray(res.collection.items) ? res.collection.items : [])
-	const uuids: string[] = []
-	for (const item of contents) {
-		// eslint-disable-next-line no-await-in-loop
-		const uuid = await fileidIndex.lookup(item.fileid)
-		if (uuid && aliveSet.has(uuid)) uuids.push(uuid)
-	}
-	await opts.cache.remember({ refreshedAt, uuids })
-	return { linked: contents.length, alive: uuids.length }
 }
 
 async function runGeocodePass(
