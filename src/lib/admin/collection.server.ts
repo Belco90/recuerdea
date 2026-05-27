@@ -1,114 +1,77 @@
-import type { Client, FileMetadata } from 'pcloud-kit'
+import type { CollectionCache } from '../cache/collection-cache'
+import type { CachedMedia, MediaCache } from '../cache/media-cache'
+
+import { buildThumbUrl } from '../memories/pcloud-urls.server'
 
 export type AdminFileItem = {
-	fileid: number
+	uuid: string
 	name: string
 	kind: 'image' | 'video' | 'other'
 	thumbUrl: string | null
 }
 
-export class CollectionIdMissingError extends Error {
-	readonly tag = 'collection-id-missing' as const
-	constructor() {
-		super('PCLOUD_COLLECTION_ID is not set')
-	}
-}
-
-export function assertCollectionId(): number {
-	const raw = process.env.PCLOUD_COLLECTION_ID
-	if (!raw) throw new CollectionIdMissingError()
-	const id = Number(raw)
-	if (!Number.isInteger(id)) throw new TypeError('PCLOUD_COLLECTION_ID must be an integer')
-	return id
-}
-
-// pCloud's `collection_details` with `showfiles=1` returns the file array under
-// `collection.contents`. `collection.items` is the COUNT (a number), not an
-// array — easy to confuse, and an empty collection comes back with `items: 0`.
-type CollectionDetailsResponse = {
-	collection: {
-		contents?: ReadonlyArray<FileMetadata>
-		items?: number | ReadonlyArray<FileMetadata>
-	}
-}
-
-type ThumbsLinksResponse = {
-	thumbs: ReadonlyArray<{
-		result: number
-		fileid: number
-		path?: string
-		hosts?: ReadonlyArray<string>
-	}>
-}
-
-function kindFromContenttype(ct: string): 'image' | 'video' | 'other' {
-	if (ct.startsWith('image/')) return 'image'
-	if (ct.startsWith('video/')) return 'video'
+function kindFromCached(meta: CachedMedia): 'image' | 'video' | 'other' {
+	if (meta.kind === 'image') return 'image'
+	if (meta.kind === 'video') return 'video'
 	return 'other'
 }
 
-function assertPositiveIntegers(fileids: readonly number[]): void {
-	if (fileids.length === 0) throw new TypeError('fileids must not be empty')
-	for (const id of fileids) {
-		if (!Number.isInteger(id) || id <= 0) {
-			throw new TypeError(`fileids must be positive integers (got ${id})`)
+function assertUuids(uuids: readonly string[]): void {
+	if (uuids.length === 0) throw new TypeError('uuids must not be empty')
+	for (const u of uuids) {
+		if (typeof u !== 'string' || u.length === 0) {
+			throw new TypeError(`uuids must be non-empty strings (got ${String(u)})`)
 		}
 	}
 }
 
-export async function fetchCollectionMedia(client: Client): Promise<AdminFileItem[]> {
-	const collectionid = assertCollectionId()
-	const res = await client.call<CollectionDetailsResponse>('collection_details', {
-		collectionid,
-		showfiles: 1,
-	})
-	const files =
-		res.collection.contents ?? (Array.isArray(res.collection.items) ? res.collection.items : [])
-	if (files.length === 0) return []
+export async function fetchCuratedItems(
+	collection: CollectionCache,
+	media: MediaCache,
+): Promise<AdminFileItem[]> {
+	const snap = await collection.lookup()
+	if (!snap || snap.uuids.length === 0) return []
 
-	const fileids = files.map((f) => f.fileid)
-	const thumbs = await client.call<ThumbsLinksResponse>('getthumbslinks', {
-		fileids: fileids.join(','),
-		size: '320x320',
-		crop: 1,
-		type: 'jpg',
-	})
-	const thumbByFileid = new Map<number, string>()
-	for (const t of thumbs.thumbs) {
-		if (t.result !== 0) continue
-		const host = t.hosts?.[0]
-		if (!host || !t.path) continue
-		thumbByFileid.set(t.fileid, `https://${host}${t.path}`)
+	const metas = await Promise.all(snap.uuids.map((uuid) => media.lookup(uuid)))
+	const items: AdminFileItem[] = []
+	for (let i = 0; i < snap.uuids.length; i++) {
+		const uuid = snap.uuids[i]!
+		const meta = metas[i]
+		if (!meta) continue
+		items.push({
+			uuid,
+			name: meta.name,
+			kind: kindFromCached(meta),
+			thumbUrl: buildThumbUrl(meta.code, '320x320'),
+		})
 	}
-
-	return files.map((f) => ({
-		fileid: f.fileid,
-		name: f.name,
-		kind: kindFromContenttype(f.contenttype),
-		thumbUrl: thumbByFileid.get(f.fileid) ?? null,
-	}))
+	return items
 }
 
-export async function linkFilesToCollectionRaw(
-	client: Client,
-	fileids: readonly number[],
+export async function addUuidsToCollection(
+	collection: CollectionCache,
+	uuids: readonly string[],
 ): Promise<void> {
-	assertPositiveIntegers(fileids)
-	const collectionid = assertCollectionId()
-	await client.call('collection_linkfiles', {
-		collectionid,
-		fileids: fileids.join(','),
-	})
+	assertUuids(uuids)
+	const current = (await collection.lookup())?.uuids ?? []
+	const merged = [...current]
+	const seen = new Set(current)
+	for (const uuid of uuids) {
+		if (!seen.has(uuid)) {
+			merged.push(uuid)
+			seen.add(uuid)
+		}
+	}
+	await collection.remember({ refreshedAt: new Date().toISOString(), uuids: merged })
 }
 
-export async function unlinkFilesFromCollectionRaw(
-	client: Client,
-	fileids: readonly number[],
+export async function removeUuidsFromCollection(
+	collection: CollectionCache,
+	uuids: readonly string[],
 ): Promise<void> {
-	assertPositiveIntegers(fileids)
-	const collectionid = assertCollectionId()
-	await client.call('collection_unlinkfiles', {
-		collectionid,
-		fileids: fileids.join(','),
-	})
+	assertUuids(uuids)
+	const current = (await collection.lookup())?.uuids ?? []
+	const drop = new Set(uuids)
+	const next = current.filter((u) => !drop.has(u))
+	await collection.remember({ refreshedAt: new Date().toISOString(), uuids: next })
 }
