@@ -56,6 +56,7 @@ export async function fetchAdminFolderMedia(): Promise<AdminMediaItem[]> {
 			return meta ? { uuid, meta } : null
 		}),
 	)
-	const live = entries.filter((e): e is Entry => e !== null)
-	return [...live].toSorted(compare).map(toItem)
+	const live: Entry[] = entries.filter((e): e is Entry => e !== null)
+	live.sort(compare)
+	return live.map(toItem)
 }
