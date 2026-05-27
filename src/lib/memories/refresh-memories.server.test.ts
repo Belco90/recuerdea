@@ -103,6 +103,7 @@ type FakeClientOverrides = {
 	files?: FileMetadata[]
 	getfilepublink?: (fileid: number) => Promise<{ code: string; linkid: number }>
 	deletepublink?: (linkid: number) => Promise<void>
+	collectionDetails?: () => Promise<{ collection: { items?: FileMetadata[] } }>
 }
 
 function fakeClient(overrides: FakeClientOverrides = {}): Client {
@@ -111,6 +112,7 @@ function fakeClient(overrides: FakeClientOverrides = {}): Client {
 		overrides.getfilepublink ??
 		(async (fileid) => ({ code: `code-${fileid}`, linkid: fileid * 10 }))
 	const deletepublink = overrides.deletepublink ?? (async () => {})
+	const collectionDetails = overrides.collectionDetails
 	return {
 		listfolder: vi
 			.fn<Client['listfolder']>()
@@ -127,6 +129,10 @@ function fakeClient(overrides: FakeClientOverrides = {}): Client {
 				const p = params as { linkid: number }
 				await deletepublink(p.linkid)
 				return { result: 0 }
+			}
+			if (method === 'collection_details') {
+				if (!collectionDetails) throw new Error('collection_details called without override')
+				return collectionDetails()
 			}
 			throw new Error(`unexpected pCloud method in tests: ${method}`)
 		}) as unknown as Client['call'],
@@ -1260,6 +1266,124 @@ describe('refreshMemories', () => {
 			info.mockRestore()
 			warn.mockRestore()
 			error.mockRestore()
+		})
+	})
+
+	describe('collection cache', () => {
+		type CSnap = { refreshedAt: string; uuids: readonly string[] }
+		function makeCollectionStore() {
+			const state: { value: CSnap | undefined } = { value: undefined }
+			return {
+				get: vi.fn<() => Promise<CSnap | undefined>>(async () => state.value),
+				set: vi.fn<(next: CSnap) => Promise<void>>(async (next) => {
+					state.value = next
+				}),
+				state,
+			}
+		}
+
+		it('skips collection_details and never writes collectionCache when collectionOpts is omitted', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const collectionStore = makeCollectionStore()
+			const { createCollectionCache } = await import('../cache/collection-cache')
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(client.call).not.toHaveBeenCalledWith('collection_details', expect.anything())
+			expect(collectionStore.set).not.toHaveBeenCalled()
+			expect(result.collectionStats).toBeNull()
+			// Touch the import so it isn't dropped as unused.
+			void createCollectionCache
+		})
+
+		it('writes the intersection of collection fileids ∩ alive uuids to collectionCache', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const collectionStore = makeCollectionStore()
+			const { createCollectionCache } = await import('../cache/collection-cache')
+			const collectionCache = createCollectionCache(collectionStore)
+			fileidStore.data.set(100, { uuid: 'uuid-100' })
+			mediaStore.data.set('uuid-100', {
+				fileid: 100,
+				hash: 'h-a',
+				code: 'code-100',
+				linkid: 1000,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'a.jpg',
+				captureDate: '2020-01-15T10:00:00.000Z',
+				width: 4032,
+				height: 3024,
+				location: null,
+				place: null,
+			})
+			const client = fakeClient({
+				files: [jpegA],
+				collectionDetails: async () => ({
+					collection: {
+						items: [
+							makeFile({ fileid: 100, name: 'a.jpg', contenttype: 'image/jpeg', hash: 'h-a' }),
+							makeFile({ fileid: 9999, name: 'ghost.jpg', contenttype: 'image/jpeg', hash: 'g' }),
+						],
+					},
+				}),
+			})
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				undefined,
+				{ cache: collectionCache, collectionid: 7 },
+			)
+
+			expect(client.call).toHaveBeenCalledWith(
+				'collection_details',
+				expect.objectContaining({ collectionid: 7, showfiles: 1 }),
+			)
+			expect(collectionStore.set).toHaveBeenCalledTimes(1)
+			const [snapshot] = collectionStore.set.mock.calls[0]!
+			expect(snapshot.uuids).toEqual(['uuid-100'])
+			expect(result.collectionStats).toEqual({ linked: 2, alive: 1 })
+		})
+
+		it('writes an empty uuid list when the collection is empty', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			const collectionStore = makeCollectionStore()
+			const { createCollectionCache } = await import('../cache/collection-cache')
+			const collectionCache = createCollectionCache(collectionStore)
+			const client = fakeClient({
+				files: [jpegA],
+				collectionDetails: async () => ({ collection: { items: [] } }),
+			})
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				undefined,
+				{ cache: collectionCache, collectionid: 7 },
+			)
+
+			expect(collectionStore.set).toHaveBeenCalledTimes(1)
+			expect(collectionStore.set.mock.calls[0]![0].uuids).toEqual([])
+			expect(result.collectionStats).toEqual({ linked: 0, alive: 0 })
 		})
 	})
 })

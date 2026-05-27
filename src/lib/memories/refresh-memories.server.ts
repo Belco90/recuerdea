@@ -1,5 +1,6 @@
 import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 
+import type { CollectionCache } from '../cache/collection-cache'
 import type { FileidIndex } from '../cache/fileid-index'
 import type { FolderCache } from '../cache/folder-cache'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
@@ -29,6 +30,16 @@ export type GeocodeOpts = {
 	sleepMs?: number
 	sleep?: (ms: number) => Promise<void>
 	geocoder?: Geocoder
+}
+
+export type CollectionOpts = {
+	cache: CollectionCache
+	collectionid: number
+}
+
+export type CollectionStats = {
+	linked: number
+	alive: number
 }
 
 const ZERO_FAILURES: Record<FailureReason, number> = {
@@ -233,6 +244,12 @@ export type RefreshResult = {
 	geocodeSkippedAfterStop: number
 	geocodeFailures: Record<FailureReason, number>
 	geocodeStoppedReason: FailureReason | null
+	// `null` when no collection is configured (env var unset). Otherwise:
+	// `linked` is the number of fileids returned by `collection_details`,
+	// `alive` is the subset that resolved to a uuid in the current folder
+	// snapshot. The delta (`linked - alive`) is the count of collection items
+	// the cron couldn't index — surfaces in the cron log.
+	collectionStats: CollectionStats | null
 }
 
 export async function refreshMemories(
@@ -242,6 +259,7 @@ export async function refreshMemories(
 	fileidIndex: FileidIndex,
 	folderCache: FolderCache,
 	geocodeOpts?: GeocodeOpts,
+	collectionOpts?: CollectionOpts,
 ): Promise<RefreshResult> {
 	const files = await listMediaFiles(client, folderId)
 	const processed = await Promise.all(
@@ -265,10 +283,15 @@ export async function refreshMemories(
 	const staleUuids = allCachedUuids.filter((uuid) => !aliveSet.has(uuid))
 	await Promise.all(staleUuids.map((uuid) => sweepUuid(client, uuid, mediaCache, fileidIndex)))
 
+	const refreshedAt = new Date().toISOString()
 	await folderCache.remember({
-		refreshedAt: new Date().toISOString(),
+		refreshedAt,
 		uuids: aliveUuids,
 	})
+
+	const collectionStats = collectionOpts
+		? await refreshCollectionSnapshot(client, fileidIndex, aliveSet, collectionOpts, refreshedAt)
+		: null
 
 	const geocodeResult = geocodeOpts
 		? await runGeocodePass(aliveUuids, aliveCached, mediaCache, geocodeOpts)
@@ -300,7 +323,34 @@ export async function refreshMemories(
 		geocodeSkippedAfterStop: geocodeResult.skippedAfterStop,
 		geocodeFailures: geocodeResult.failures,
 		geocodeStoppedReason: geocodeResult.stoppedReason,
+		collectionStats,
 	}
+}
+
+type CollectionDetailsResponse = {
+	collection: { items?: ReadonlyArray<FileMetadata> }
+}
+
+async function refreshCollectionSnapshot(
+	client: Client,
+	fileidIndex: FileidIndex,
+	aliveSet: ReadonlySet<string>,
+	opts: CollectionOpts,
+	refreshedAt: string,
+): Promise<CollectionStats> {
+	const res = await client.call<CollectionDetailsResponse>('collection_details', {
+		collectionid: opts.collectionid,
+		showfiles: 1,
+	})
+	const items = res.collection.items ?? []
+	const uuids: string[] = []
+	for (const item of items) {
+		// eslint-disable-next-line no-await-in-loop
+		const uuid = await fileidIndex.lookup(item.fileid)
+		if (uuid && aliveSet.has(uuid)) uuids.push(uuid)
+	}
+	await opts.cache.remember({ refreshedAt, uuids })
+	return { linked: items.length, alive: uuids.length }
 }
 
 async function runGeocodePass(
