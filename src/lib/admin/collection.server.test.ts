@@ -135,7 +135,7 @@ describe('fetchCollectionMedia', () => {
 		const client = makeClient(async (method, params) => {
 			expect(method).toBe('collection_details')
 			expect(params).toEqual({ collectionid: 99, showfiles: 1 })
-			return { collection: { items: [makeFile(100), makeFile(200)] } }
+			return { collection: { items: 2, contents: [makeFile(100), makeFile(200)] } }
 		})
 		const fileidIndex = createFileidIndex(makeFileidStore({ 100: 'uuid-a', 200: 'uuid-b' }))
 		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA, 'uuid-b': imageB }))
@@ -164,7 +164,7 @@ describe('fetchCollectionMedia', () => {
 
 	it('skips fileids that have no entry in the fileid-index', async () => {
 		const client = makeClient(async () => ({
-			collection: { items: [makeFile(100), makeFile(999)] },
+			collection: { items: 2, contents: [makeFile(100), makeFile(999)] },
 		}))
 		const fileidIndex = createFileidIndex(makeFileidStore({ 100: 'uuid-a' }))
 		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA }))
@@ -176,7 +176,7 @@ describe('fetchCollectionMedia', () => {
 
 	it('skips uuids that have no entry in the media cache', async () => {
 		const client = makeClient(async () => ({
-			collection: { items: [makeFile(100), makeFile(200)] },
+			collection: { items: 2, contents: [makeFile(100), makeFile(200)] },
 		}))
 		const fileidIndex = createFileidIndex(makeFileidStore({ 100: 'uuid-a', 200: 'uuid-ghost' }))
 		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA }))
@@ -194,9 +194,20 @@ describe('fetchCollectionMedia', () => {
 		expect(await fetchCollectionMedia(client, fileidIndex, mediaCache)).toEqual([])
 	})
 
+	it('returns [] for the real empty-collection shape (`items: 0`, no `contents`)', async () => {
+		// Regression for "items is not iterable": pCloud returns `items` as the
+		// numeric count, not the file array, and omits `contents` entirely when
+		// the collection has zero files.
+		const client = makeClient(async () => ({ collection: { items: 0 } }))
+		const fileidIndex = createFileidIndex(makeFileidStore())
+		const mediaCache = createMediaCache(makeMediaStore())
+
+		expect(await fetchCollectionMedia(client, fileidIndex, mediaCache)).toEqual([])
+	})
+
 	it('throws CollectionIdMissingError when PCLOUD_COLLECTION_ID is unset', async () => {
 		vi.stubEnv('PCLOUD_COLLECTION_ID', '')
-		const client = makeClient(async () => ({ collection: { items: [] } }))
+		const client = makeClient(async () => ({ collection: { items: 0 } }))
 		const fileidIndex = createFileidIndex(makeFileidStore())
 		const mediaCache = createMediaCache(makeMediaStore())
 

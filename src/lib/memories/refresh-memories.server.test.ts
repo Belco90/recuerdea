@@ -134,7 +134,9 @@ function fakeClient(overrides: FakeClientOverrides = {}): Client {
 }
 
 function fakeAdminClient(
-	collectionDetails?: () => Promise<{ collection: { items?: FileMetadata[] } }>,
+	collectionDetails?: () => Promise<{
+		collection: { contents?: FileMetadata[]; items?: number | FileMetadata[] }
+	}>,
 ): Client {
 	return {
 		call: vi.fn<Client['call']>().mockImplementation(async (method: string) => {
@@ -1338,7 +1340,8 @@ describe('refreshMemories', () => {
 			const client = fakeClient({ files: [jpegA] })
 			const adminClient = fakeAdminClient(async () => ({
 				collection: {
-					items: [
+					items: 2,
+					contents: [
 						makeFile({ fileid: 100, name: 'a.jpg', contenttype: 'image/jpeg', hash: 'h-a' }),
 						makeFile({ fileid: 9999, name: 'ghost.jpg', contenttype: 'image/jpeg', hash: 'g' }),
 					],
@@ -1374,7 +1377,10 @@ describe('refreshMemories', () => {
 			const { createCollectionCache } = await import('../cache/collection-cache')
 			const collectionCache = createCollectionCache(collectionStore)
 			const client = fakeClient({ files: [jpegA] })
-			const adminClient = fakeAdminClient(async () => ({ collection: { items: [] } }))
+			// Real pCloud shape for an empty collection: `items` is a numeric count,
+			// `contents` is absent (or empty). Regression for "items is not iterable"
+			// when we mistakenly treated `items` as the array.
+			const adminClient = fakeAdminClient(async () => ({ collection: { items: 0 } }))
 
 			const result = await refreshMemories(
 				client,

@@ -23,11 +23,13 @@ function buildThumb(code: string): string {
 	return `https://eapi.pcloud.com/getpubthumb?code=${encodeURIComponent(code)}&size=320x320`
 }
 
-// pCloud's `collection_details` with `showfiles=1` nests the file list under
-// `collection.items`. Each item is a regular `FileMetadata`.
+// pCloud's `collection_details` with `showfiles=1` returns the file array under
+// `collection.contents`. `collection.items` is the COUNT (a number), not an
+// array — easy to confuse, and an empty collection comes back with `items: 0`.
 type CollectionDetailsResponse = {
 	collection: {
-		items?: ReadonlyArray<FileMetadata>
+		contents?: ReadonlyArray<FileMetadata>
+		items?: number | ReadonlyArray<FileMetadata>
 	}
 }
 
@@ -41,7 +43,8 @@ export async function fetchCollectionMedia(
 		collectionid,
 		showfiles: 1,
 	})
-	const files = res.collection.items ?? []
+	const files =
+		res.collection.contents ?? (Array.isArray(res.collection.items) ? res.collection.items : [])
 
 	const items = await Promise.all(
 		files.map(async (file): Promise<AdminMediaItem | null> => {

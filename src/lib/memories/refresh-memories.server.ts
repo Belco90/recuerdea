@@ -331,8 +331,15 @@ export async function refreshMemories(
 	}
 }
 
+// pCloud's `collection_details` returns the file list under `collection.contents`
+// (an array). `collection.items` is the COUNT (a number) — confusingly named.
+// Defending against either: prefer contents, fall back to items if it's an array
+// (in case a future API rev renames).
 type CollectionDetailsResponse = {
-	collection: { items?: ReadonlyArray<FileMetadata> }
+	collection: {
+		contents?: ReadonlyArray<FileMetadata>
+		items?: number | ReadonlyArray<FileMetadata>
+	}
 }
 
 async function refreshCollectionSnapshot(
@@ -345,15 +352,16 @@ async function refreshCollectionSnapshot(
 		collectionid: opts.collectionid,
 		showfiles: 1,
 	})
-	const items = res.collection.items ?? []
+	const contents =
+		res.collection.contents ?? (Array.isArray(res.collection.items) ? res.collection.items : [])
 	const uuids: string[] = []
-	for (const item of items) {
+	for (const item of contents) {
 		// eslint-disable-next-line no-await-in-loop
 		const uuid = await fileidIndex.lookup(item.fileid)
 		if (uuid && aliveSet.has(uuid)) uuids.push(uuid)
 	}
 	await opts.cache.remember({ refreshedAt, uuids })
-	return { linked: items.length, alive: uuids.length }
+	return { linked: contents.length, alive: uuids.length }
 }
 
 async function runGeocodePass(
