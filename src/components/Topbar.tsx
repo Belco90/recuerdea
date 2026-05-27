@@ -44,7 +44,7 @@ export function Topbar() {
 }
 
 function AccountDrawer() {
-	const { user, logout } = useIdentity()
+	const { user, isAdmin, logout } = useIdentity()
 
 	return (
 		<Drawer.Root placement="end" size="xs">
@@ -88,6 +88,23 @@ function AccountDrawer() {
 									</Text>
 									<Text color="ink">{user?.email ?? '—'}</Text>
 								</Box>
+								{isAdmin && (
+									<Link
+										to="/admin/collection"
+										mt={2}
+										py={2}
+										px={3}
+										borderWidth="1px"
+										borderColor="line"
+										borderRadius="md"
+										color="ink"
+										fontSize="sm"
+										textDecoration="none"
+										_hover={{ bg: 'paper/70', borderColor: 'ink.muted' }}
+									>
+										Administración
+									</Link>
+								)}
 							</Stack>
 						</Drawer.Body>
 						<Drawer.Footer borderTopWidth="1px" borderColor="line">
