@@ -4,19 +4,17 @@ import type { AdminFileItem } from './collection.server'
 
 export type { AdminFileItem }
 
-export type CollectionMediaResult =
-	| { status: 'ok'; items: AdminFileItem[] }
-	| { status: 'unconfigured' }
+export type CollectionMediaResult = { status: 'ok'; items: AdminFileItem[] }
 
-type FileidsInput = { fileids: readonly number[] }
+type UuidsInput = { uuids: readonly string[] }
 
-function parseFileidsInput(input: unknown): FileidsInput | null {
+function parseUuidsInput(input: unknown): UuidsInput | null {
 	if (!input || typeof input !== 'object') return null
 	const obj = input as Record<string, unknown>
-	if (!Array.isArray(obj.fileids)) return null
-	if (obj.fileids.length === 0) return null
-	if (!obj.fileids.every((f): f is number => Number.isInteger(f) && (f as number) > 0)) return null
-	return { fileids: obj.fileids as readonly number[] }
+	if (!Array.isArray(obj.uuids)) return null
+	if (obj.uuids.length === 0) return null
+	if (!obj.uuids.every((u): u is string => typeof u === 'string' && u.length > 0)) return null
+	return { uuids: obj.uuids as readonly string[] }
 }
 
 async function gateAdmin(): Promise<void> {
@@ -26,44 +24,43 @@ async function gateAdmin(): Promise<void> {
 	if (!user.isAdmin) throw new Error('forbidden')
 }
 
-async function makeClient() {
-	const token = process.env.PCLOUD_ADMIN_AUTH
-	if (!token) throw new Error('PCLOUD_ADMIN_AUTH is not set')
-	const { createClient } = await import('pcloud-kit')
-	return createClient({ token, type: 'pcloud' })
+async function makeStores() {
+	const { createCollectionCache } = await import('../cache/collection-cache')
+	const { getCollectionCacheStore } = await import('../cache/collection-cache.server')
+	const { createMediaCache } = await import('../cache/media-cache')
+	const { getMediaCacheStore } = await import('../cache/media-cache.server')
+	return {
+		collection: createCollectionCache(getCollectionCacheStore()),
+		media: createMediaCache(getMediaCacheStore()),
+	}
 }
 
 export const getCollectionMedia = createServerFn({ method: 'GET' }).handler(
 	async (): Promise<CollectionMediaResult> => {
 		await gateAdmin()
-		const { CollectionIdMissingError, fetchCollectionMedia } = await import('./collection.server')
-		try {
-			const client = await makeClient()
-			const items = await fetchCollectionMedia(client)
-			return { status: 'ok', items }
-		} catch (e) {
-			if (e instanceof CollectionIdMissingError) return { status: 'unconfigured' }
-			throw e
-		}
+		const { fetchCuratedItems } = await import('./collection.server')
+		const { collection, media } = await makeStores()
+		const items = await fetchCuratedItems(collection, media)
+		return { status: 'ok', items }
 	},
 )
 
-export const linkFilesToCollection = createServerFn({ method: 'POST' })
-	.inputValidator((input: unknown): FileidsInput | null => parseFileidsInput(input))
+export const addToCollection = createServerFn({ method: 'POST' })
+	.inputValidator((input: unknown): UuidsInput | null => parseUuidsInput(input))
 	.handler(async ({ data }): Promise<void> => {
 		if (!data) throw new Error('invalid input')
 		await gateAdmin()
-		const client = await makeClient()
-		const { linkFilesToCollectionRaw } = await import('./collection.server')
-		await linkFilesToCollectionRaw(client, data.fileids)
+		const { addUuidsToCollection } = await import('./collection.server')
+		const { collection } = await makeStores()
+		await addUuidsToCollection(collection, data.uuids)
 	})
 
-export const unlinkFilesFromCollection = createServerFn({ method: 'POST' })
-	.inputValidator((input: unknown): FileidsInput | null => parseFileidsInput(input))
+export const removeFromCollection = createServerFn({ method: 'POST' })
+	.inputValidator((input: unknown): UuidsInput | null => parseUuidsInput(input))
 	.handler(async ({ data }): Promise<void> => {
 		if (!data) throw new Error('invalid input')
 		await gateAdmin()
-		const client = await makeClient()
-		const { unlinkFilesFromCollectionRaw } = await import('./collection.server')
-		await unlinkFilesFromCollectionRaw(client, data.fileids)
+		const { removeUuidsFromCollection } = await import('./collection.server')
+		const { collection } = await makeStores()
+		await removeUuidsFromCollection(collection, data.uuids)
 	})
