@@ -35,6 +35,10 @@ export type GeocodeOpts = {
 export type CollectionOpts = {
 	cache: CollectionCache
 	collectionid: number
+	// pCloud-native auth client used for `collection_*` calls. Separate from
+	// the OAuth client passed positionally because the OAuth scope used by the
+	// rest of the cron is unreliable for collection mutations (see SPEC §21).
+	client: Client
 }
 
 export type CollectionStats = {
@@ -290,7 +294,7 @@ export async function refreshMemories(
 	})
 
 	const collectionStats = collectionOpts
-		? await refreshCollectionSnapshot(client, fileidIndex, aliveSet, collectionOpts, refreshedAt)
+		? await refreshCollectionSnapshot(fileidIndex, aliveSet, collectionOpts, refreshedAt)
 		: null
 
 	const geocodeResult = geocodeOpts
@@ -332,13 +336,12 @@ type CollectionDetailsResponse = {
 }
 
 async function refreshCollectionSnapshot(
-	client: Client,
 	fileidIndex: FileidIndex,
 	aliveSet: ReadonlySet<string>,
 	opts: CollectionOpts,
 	refreshedAt: string,
 ): Promise<CollectionStats> {
-	const res = await client.call<CollectionDetailsResponse>('collection_details', {
+	const res = await opts.client.call<CollectionDetailsResponse>('collection_details', {
 		collectionid: opts.collectionid,
 		showfiles: 1,
 	})

@@ -103,7 +103,6 @@ type FakeClientOverrides = {
 	files?: FileMetadata[]
 	getfilepublink?: (fileid: number) => Promise<{ code: string; linkid: number }>
 	deletepublink?: (linkid: number) => Promise<void>
-	collectionDetails?: () => Promise<{ collection: { items?: FileMetadata[] } }>
 }
 
 function fakeClient(overrides: FakeClientOverrides = {}): Client {
@@ -112,7 +111,6 @@ function fakeClient(overrides: FakeClientOverrides = {}): Client {
 		overrides.getfilepublink ??
 		(async (fileid) => ({ code: `code-${fileid}`, linkid: fileid * 10 }))
 	const deletepublink = overrides.deletepublink ?? (async () => {})
-	const collectionDetails = overrides.collectionDetails
 	return {
 		listfolder: vi
 			.fn<Client['listfolder']>()
@@ -130,11 +128,21 @@ function fakeClient(overrides: FakeClientOverrides = {}): Client {
 				await deletepublink(p.linkid)
 				return { result: 0 }
 			}
+			throw new Error(`unexpected pCloud method on OAuth client in tests: ${method}`)
+		}) as unknown as Client['call'],
+	} as unknown as Client
+}
+
+function fakeAdminClient(
+	collectionDetails?: () => Promise<{ collection: { items?: FileMetadata[] } }>,
+): Client {
+	return {
+		call: vi.fn<Client['call']>().mockImplementation(async (method: string) => {
 			if (method === 'collection_details') {
 				if (!collectionDetails) throw new Error('collection_details called without override')
 				return collectionDetails()
 			}
-			throw new Error(`unexpected pCloud method in tests: ${method}`)
+			throw new Error(`unexpected pCloud method on admin client in tests: ${method}`)
 		}) as unknown as Client['call'],
 	} as unknown as Client
 }
@@ -1327,17 +1335,15 @@ describe('refreshMemories', () => {
 				location: null,
 				place: null,
 			})
-			const client = fakeClient({
-				files: [jpegA],
-				collectionDetails: async () => ({
-					collection: {
-						items: [
-							makeFile({ fileid: 100, name: 'a.jpg', contenttype: 'image/jpeg', hash: 'h-a' }),
-							makeFile({ fileid: 9999, name: 'ghost.jpg', contenttype: 'image/jpeg', hash: 'g' }),
-						],
-					},
-				}),
-			})
+			const client = fakeClient({ files: [jpegA] })
+			const adminClient = fakeAdminClient(async () => ({
+				collection: {
+					items: [
+						makeFile({ fileid: 100, name: 'a.jpg', contenttype: 'image/jpeg', hash: 'h-a' }),
+						makeFile({ fileid: 9999, name: 'ghost.jpg', contenttype: 'image/jpeg', hash: 'g' }),
+					],
+				},
+			}))
 
 			const result = await refreshMemories(
 				client,
@@ -1346,13 +1352,14 @@ describe('refreshMemories', () => {
 				createFileidIndex(fileidStore),
 				createFolderCache(folderStore),
 				undefined,
-				{ cache: collectionCache, collectionid: 7 },
+				{ cache: collectionCache, collectionid: 7, client: adminClient },
 			)
 
-			expect(client.call).toHaveBeenCalledWith(
+			expect(adminClient.call).toHaveBeenCalledWith(
 				'collection_details',
 				expect.objectContaining({ collectionid: 7, showfiles: 1 }),
 			)
+			expect(client.call).not.toHaveBeenCalledWith('collection_details', expect.anything())
 			expect(collectionStore.set).toHaveBeenCalledTimes(1)
 			const [snapshot] = collectionStore.set.mock.calls[0]!
 			expect(snapshot.uuids).toEqual(['uuid-100'])
@@ -1366,10 +1373,8 @@ describe('refreshMemories', () => {
 			const collectionStore = makeCollectionStore()
 			const { createCollectionCache } = await import('../cache/collection-cache')
 			const collectionCache = createCollectionCache(collectionStore)
-			const client = fakeClient({
-				files: [jpegA],
-				collectionDetails: async () => ({ collection: { items: [] } }),
-			})
+			const client = fakeClient({ files: [jpegA] })
+			const adminClient = fakeAdminClient(async () => ({ collection: { items: [] } }))
 
 			const result = await refreshMemories(
 				client,
@@ -1378,7 +1383,7 @@ describe('refreshMemories', () => {
 				createFileidIndex(fileidStore),
 				createFolderCache(folderStore),
 				undefined,
-				{ cache: collectionCache, collectionid: 7 },
+				{ cache: collectionCache, collectionid: 7, client: adminClient },
 			)
 
 			expect(collectionStore.set).toHaveBeenCalledTimes(1)

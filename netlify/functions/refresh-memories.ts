@@ -11,7 +11,12 @@ import { connectLambda } from '@netlify/blobs'
 import { schedule } from '@netlify/functions'
 import { createClient } from 'pcloud-kit'
 
-function getEnvConfig(): { token: string; folderId: number; collectionId: number | null } {
+function getEnvConfig(): {
+	token: string
+	folderId: number
+	collectionId: number | null
+	adminToken: string | null
+} {
 	const token = process.env.PCLOUD_TOKEN
 	const folderIdRaw = process.env.PCLOUD_MEMORIES_FOLDER_ID
 	if (!token) throw new Error('PCLOUD_TOKEN is not set')
@@ -27,7 +32,9 @@ function getEnvConfig(): { token: string; folderId: number; collectionId: number
 		collectionId = parsed
 	}
 
-	return { token, folderId, collectionId }
+	const adminToken = process.env.PCLOUD_ADMIN_AUTH ?? null
+
+	return { token, folderId, collectionId, adminToken }
 }
 
 export const handler = schedule('0 4,22 * * *', async (event) => {
@@ -41,7 +48,7 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 	// to the shape `connectLambda` expects.
 	connectLambda(event as unknown as Parameters<typeof connectLambda>[0])
 
-	const { token, folderId, collectionId } = getEnvConfig()
+	const { token, folderId, collectionId, adminToken } = getEnvConfig()
 	const client = createClient({ token })
 	const mediaCache = createMediaCache(getMediaCacheStore())
 	const fileidIndex = createFileidIndex(getFileidIndexStore())
@@ -58,7 +65,19 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 	if (!collectionId) {
 		// eslint-disable-next-line no-console
 		console.warn('[refresh] collection snapshot skipped: PCLOUD_COLLECTION_ID unset')
+	} else if (!adminToken) {
+		// eslint-disable-next-line no-console
+		console.warn('[refresh] collection snapshot skipped: PCLOUD_ADMIN_AUTH unset')
 	}
+
+	const collectionOpts =
+		collectionId && adminToken
+			? {
+					cache: collectionCache,
+					collectionid: collectionId,
+					client: createClient({ token: adminToken, type: 'pcloud' as const }),
+				}
+			: undefined
 
 	const result = await refreshMemories(
 		client,
@@ -67,7 +86,7 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 		fileidIndex,
 		folderCache,
 		apiKey ? { apiKey, cap } : undefined,
-		collectionId ? { cache: collectionCache, collectionid: collectionId } : undefined,
+		collectionOpts,
 	)
 
 	const e = result.extractCounts

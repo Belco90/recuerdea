@@ -27,15 +27,15 @@ async function gateAdmin(): Promise<void> {
 }
 
 async function makeDeps() {
-	const token = process.env.PCLOUD_TOKEN
-	if (!token) throw new Error('PCLOUD_TOKEN is not set')
+	const token = process.env.PCLOUD_ADMIN_AUTH
+	if (!token) throw new Error('PCLOUD_ADMIN_AUTH is not set')
 	const { createClient } = await import('pcloud-kit')
 	const { createFileidIndex } = await import('../cache/fileid-index')
 	const { getFileidIndexStore } = await import('../cache/fileid-index.server')
 	const { createMediaCache } = await import('../cache/media-cache')
 	const { getMediaCacheStore } = await import('../cache/media-cache.server')
 	return {
-		client: createClient({ token }),
+		client: createClient({ token, type: 'pcloud' }),
 		fileidIndex: createFileidIndex(getFileidIndexStore()),
 		mediaCache: createMediaCache(getMediaCacheStore()),
 	}
