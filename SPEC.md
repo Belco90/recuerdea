@@ -449,3 +449,40 @@ For readers diffing this spec against v10:
 - §7 Boundaries: "Always do" gains the collection-cache to the cron's writer set. "Never do" gains an admin-only carve-out for fileid (still server-side for the public app). "Ask first" unchanged.
 - §17 (v10): unchanged.
 - §19 (new): v11 acceptance criteria — curation model, admin route, write boundaries, cron extension, new surface.
+
+## 21. v12 Acceptance Criteria
+
+Cumulative on top of §19 (v11). v12 reworks `/admin/collection`'s data path so the curator can pick any image/video under a supervised source folder — no longer constrained to whatever the memories cron happened to snapshot — and isolates admin pCloud writes behind a dedicated auth token. The home page (v11) is unchanged.
+
+**Split auth model**
+
+- A new server-only env var `PCLOUD_ADMIN_AUTH` carries a pCloud-native auth token (mint via `getauth=1` against `userinfo`; **not** an OAuth token). Every `collection_*` call — from both the admin route AND the cron's collection-snapshot pass — is made through a client constructed with `createClient({ token, type: 'pcloud' })`. The existing OAuth `PCLOUD_TOKEN` is no longer accepted for collection writes; pCloud rejects OAuth on those endpoints with `result: 1000 "Log in required"`.
+- The cron skips the collection-snapshot pass entirely (logging `collection snapshot skipped: PCLOUD_ADMIN_AUTH unset`) when `PCLOUD_ADMIN_AUTH` is missing, even if `PCLOUD_COLLECTION_ID` is set. The folder snapshot + memories cache still refresh — only the collection narrowing falls back.
+
+**Live admin view (decoupled from memories cache)**
+
+- `/admin/collection`'s top section reads the live pCloud collection by calling `collection_details({ collectionid, showfiles: 1 })` + a batched `getthumbslinks` request. No dependency on `folder/v1` or `media/<uuid>` — a freshly-linked file appears in the admin grid immediately, without waiting for 04:00 UTC. **`fileid` is the wire id** for link/unlink; uuids no longer cross this surface.
+- Empty-collection shape: pCloud returns `collection.contents` (the file array) and `collection.items` (a numeric count, not an array). When the collection is empty, `contents` is omitted and `items: 0`. Both `fetchCollectionMedia` and the cron's `refreshCollectionSnapshot` read `contents` (with a defensive fallback if `items` is ever an array). Regression test required.
+- Each `AdminFileItem = { fileid, name, kind: 'image' | 'video' | 'other', thumbUrl: string | null }` — `thumbUrl` is null when pCloud doesn't return a thumb for that fileid. The grid renders a "sin miniatura" fallback tile.
+
+**Source folder navigator**
+
+- `PCLOUD_SOURCE_FOLDER_ID` (server-only env var) bounds the "Añadir más" picker. The route accepts a `?folderid=N` search param and the loader passes it through to `fetchAdminSourceFolder(client, { folderid })`. Default (no search param) lists the source root.
+- `fetchAdminSourceFolder` calls `listfolder({ folderid, noshares: 1 })`, splits contents into subfolders + `image/*` | `video/*` files, batches `getthumbslinks` for the files, and walks parents to build breadcrumbs. The walk stops at the source root, the pCloud root (folderid 0), or depth 10 — whichever comes first. If the source root isn't found in the ancestor chain, throws `FolderNotPermittedError`, which the server-fn maps to a tagged `{ status: 'folder-not-permitted' }` result so the route can render a banner instead of 500-ing.
+- The navigator UI: breadcrumb row → subfolder grid → file grid (square tiles, video badge, check overlay when picked) → sticky footer with `Guardar (N)` / `Cancelar` (hidden when N=0). Already-collected fileids are marked `aria-disabled` in the file grid; multi-select state lives in the component, persists across navigation, and is cleared on Save or Cancel.
+
+**Updated surface**
+
+- `src/lib/admin/collection.{ts,server.ts}` — `fetchCollectionMedia(client)` (no caches), `linkFilesToCollectionRaw(client, fileids: readonly number[])`, `unlinkFilesFromCollectionRaw(client, fileids)`. Server-fn wrappers accept `{ fileids: readonly number[] }`.
+- `src/lib/admin/source-folder.{ts,server.ts}` (new) — `fetchAdminSourceFolder`, `assertSourceFolderId()`, `SourceFolderIdMissingError`, `FolderNotPermittedError`, and the `AdminFolderListing` type.
+- `src/components/AdminFolderNavigator.tsx` (new) — replaces `AdminCollectionGrid.tsx` (deleted along with `lib/admin/folder-media.*`).
+- `src/components/CollectionItemsGrid.tsx` — now `AdminFileItem`-shaped (fileid keys, name caption, thumbUrl-null fallback).
+
+## 22. v11 → v12 changes summary
+
+For readers diffing this spec against v11:
+
+- §4 Project Structure: `lib/admin/folder-media.{ts,server.ts}` removed; `lib/admin/source-folder.{ts,server.ts}` added. `components/AdminCollectionGrid.tsx` removed; `components/AdminFolderNavigator.tsx` added.
+- §7 Boundaries: "Always do" gains the split-auth rule — `collection_*` always through the `PCLOUD_ADMIN_AUTH` (pCloud-native) client, never OAuth. "Never do" gains: never call `collection_*` with the OAuth `PCLOUD_TOKEN`.
+- §19 (v11): the admin grids documented there are superseded by §21 — `AdminCollectionGrid` is gone, "Añadir más" is now a navigable folder tree, and `fileid` (not `uuid`) is the wire id.
+- §21 (new): v12 acceptance criteria — split auth, live admin view, source-folder navigator, updated surface.

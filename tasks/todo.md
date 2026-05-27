@@ -188,20 +188,20 @@ alive=M missing=K` still emits.
 
 ## Phase 4 — Cleanup
 
-- [ ] Delete `src/lib/admin/folder-media.ts`.
-- [ ] Delete `src/lib/admin/folder-media.server.ts`.
-- [ ] Delete `src/lib/admin/folder-media.server.test.ts`.
-- [ ] Delete `src/components/AdminCollectionGrid.tsx`.
-- [ ] Delete `src/components/AdminCollectionGrid.browser.test.tsx`.
-- [ ] grep for `AdminCollectionGrid`, `fetchAdminFolderMedia`,
+- [x] Delete `src/lib/admin/folder-media.ts`.
+- [x] Delete `src/lib/admin/folder-media.server.ts`.
+- [x] Delete `src/lib/admin/folder-media.server.test.ts`.
+- [x] Delete `src/components/AdminCollectionGrid.tsx`.
+- [x] Delete `src/components/AdminCollectionGrid.browser.test.tsx`.
+- [x] grep for `AdminCollectionGrid`, `fetchAdminFolderMedia`,
       `getAdminFolderMedia`, `AdminMediaItem` — no remaining
       references.
-- [ ] Update `SPEC.md`: add §21 (v12 acceptance criteria — split
+- [x] Update `SPEC.md`: add §21 (v12 acceptance criteria — split
       auth, source-folder navigation, decoupling) and §22 (v11 → v12
       diff). Update §7 boundaries with the two-client model.
-- [ ] `pnpm test && pnpm type-check && pnpm lint && pnpm format:check`.
+- [x] `pnpm test && pnpm type-check && pnpm lint && pnpm format:check`.
 
 ### Acceptance — Phase 4
 
-- [ ] No orphan references to the removed surface.
-- [ ] SPEC reflects the new architecture.
+- [x] No orphan references to the removed surface.
+- [x] SPEC reflects the new architecture.
