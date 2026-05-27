@@ -155,7 +155,8 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
 - **Resolve image URLs server-side in the loader (v9).** The home loader builds direct `https://eapi.pcloud.com/getpubthumb?code=${code}&size=${size}` URLs per item — `640x640` → `MemoryItem.thumbUrl`, `1025x1025` → `MemoryItem.lightboxUrl`. The `getpubthumb` endpoint serves bytes statelessly (no signed URL, no IP binding), so the browser can render `<img src>` directly. Per-file public-link `code` reaches the browser via the URL — explicitly relaxed from earlier versions; see "Never do" below.
 - **Route video bytes through the `/api/video/<uuid>` proxy (v10).** Videos can't use the v9 direct-CDN trick because `getpublinkdownload` URLs are IP-bound — the URL the SSR mints is rejected when the browser fetches it from a different IP. Instead `MemoryItem.mediaUrl` is `/api/video/<uuid>` and the auth-gated route handler resolves the pCloud CDN URL server-side and pipes bytes back, forwarding the browser's `Range` header so HTML5 `<video>` seeks work. Image originals (download button) use a one-off `getMediaDownloadUrl({ uuid })` server-fn → CDN URL → client-side `fetch` → `Blob` → `<a download>` (image CDN URLs from `getpublinkdownload` work in the browser when fetched right after resolution; videos can't rely on that timing because they need a stable `<video src>`). The video proxy adds `?download=1` to force a full-file response with `Content-Disposition: attachment`. The wider v4 `/api/memory/<uuid>` byte-streaming proxy stays demolished — only video bytes go through a function.
-- **The cron is the only writer for `media/<uuid>`, `fileid-index/<fileid>`, and `folder/v1`.** Loader and route handlers are read-only. Pre-prod, the cron must be triggered manually via the Netlify dashboard so the snapshot exists before users hit the page.
+- **The cron is the only writer for `media/<uuid>`, `fileid-index/<fileid>`, and `folder/v1`.** Loader and route handlers are read-only against those stores. Pre-prod, the cron must be triggered manually via the Netlify dashboard so the snapshot exists before users hit the page.
+- **The admin route at `/admin/collection` is the sole writer of `collection/v1` (v13).** The cron does not read or write the collection blob. Admin edits land instantly on `/` — no waiting for the next cron run.
 - **Public-link lifecycle is owned by the cron.** When the cron sees a fileid disappear from `listfolder`, it calls `deletepublink(linkid)` and clears `media/<uuid>` + `fileid-index/<fileid>`. No abandoned public links accumulate in pCloud's "Public Links" panel.
 - **The home page HTML is `Cache-Control: private` (or `no-store`).** Per-user content; never publicly cached. Verify with `curl -I` on the deploy preview after any change to the home loader.
 - When using `gh` CLI, make sure that the active user is the one who owns the repo.
@@ -183,6 +184,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - **Sign pCloud URLs from the browser.** pCloud rejects `getfilelink` / `getthumblink` calls from browser origins with code 7010 "Invalid link referer", regardless of the page's HTTPS scheme. The pCloud token must stay server-only.
 - **Embed the pCloud token or public-link `linkid` in HTML / JSON / loader cache.** The token and `linkid` are server-only. v9 relaxes this for `uuid` and the per-file public-link `code` (embedded in image thumb URLs as `?code=…`). The trade-off on `code` exposure: anyone who can read the page HTML can fetch the underlying image from pCloud directly. Acceptable for this single-user app; documented in §15. **Resolved `getpublinkdownload` CDN URLs do not reach the browser** — v10 found they're IP-bound, so videos go through `/api/video/<uuid>` and image-original downloads resolve a fresh URL via a server-fn at click time (consumed immediately by the same browser context).
 - **Public-cache the home page HTML.** Per-user content. `Cache-Control` must be `private` / `no-store` / absent — never `public, s-maxage=...`.
+- **Call any pCloud `collection_*` endpoint (v13).** `collection_details` / `collection_linkfiles` / `collection_unlinkfiles` were the v11/v12 plumbing for storing the curated set inside a pCloud collection. v13 moves that set to the `collection-cache` Netlify Blob, mutated only by `/admin/collection`. No part of the app — cron, loader, admin, route handlers — should touch `collection_*` again.
 - Push directly to `main` — open a PR from the version branch instead.
 
 ## 8. Open Questions (resolve before implementation)
@@ -486,3 +488,60 @@ For readers diffing this spec against v11:
 - §7 Boundaries: "Always do" gains the split-auth rule — `collection_*` always through the `PCLOUD_ADMIN_AUTH` (pCloud-native) client, never OAuth. "Never do" gains: never call `collection_*` with the OAuth `PCLOUD_TOKEN`.
 - §19 (v11): the admin grids documented there are superseded by §21 — `AdminCollectionGrid` is gone, "Añadir más" is now a navigable folder tree, and `fileid` (not `uuid`) is the wire id.
 - §21 (new): v12 acceptance criteria — split auth, live admin view, source-folder navigator, updated surface.
+
+## 23. v13 Acceptance Criteria
+
+Cumulative on top of §21 (v12). v13 demolishes the pCloud-collection layer entirely. The curated set now lives in the Netlify Blob the cron used to sync into; the admin route mutates it directly. Reads are faster (pure blob, no pCloud calls), edits are instant on `/` (no 04:00 UTC wait), and the v12 `PCLOUD_ADMIN_AUTH` + `PCLOUD_COLLECTION_ID` + `PCLOUD_SOURCE_FOLDER_ID` env vars are gone. Loader (`fetchTodayMemories`) is unchanged.
+
+**Storage model**
+
+- `collection-cache` Netlify Blob, key `collection/v1`, shape `{ refreshedAt: ISO, uuids: readonly string[] }`. Same shape as v11; the writer is different. `refreshedAt` records the last admin edit.
+- Semantics preserved from §19: `undefined` blob → loader falls back to `folder/v1`; `{ uuids: [] }` → render nothing (deliberate empty curation, not a missing-state).
+- **Single writer:** `/admin/collection`. The cron does **not** touch `collection-cache` (no read, no write). Restores the §7 single-writer invariant, just with admin in the writer slot instead of the cron.
+
+**No pCloud collection layer**
+
+- Zero calls to `collection_details`, `collection_linkfiles`, or `collection_unlinkfiles` anywhere in the app.
+- `PCLOUD_COLLECTION_ID` env var: removed.
+- `PCLOUD_ADMIN_AUTH` env var: removed (its only purpose was authorising `collection_*` — OAuth `PCLOUD_TOKEN` covers every other endpoint).
+- `PCLOUD_SOURCE_FOLDER_ID` env var: removed (the v12 source-folder navigator is gone).
+
+**Admin route (`/admin/collection`)**
+
+- Loader fan-outs to `getCollectionMedia()` + `getAdminFolderMedia()` in parallel. Both are pure blob reads — no pCloud roundtrip from this route.
+- Top section: `CollectionItemsGrid` over the curated set; each tile carries a per-uuid "Quitar" button that calls `removeFromCollection({ data: { uuids: [uuid] } })` and `router.invalidate()`.
+- Bottom section: `AdminCollectionGrid` — a flat multi-select grid over every file the cron has snapshotted from `PCLOUD_MEMORIES_FOLDER_ID`. Items already in the curated set are `aria-disabled` and excluded. Sticky footer with `Guardar (N)` / `Cancelar` (hidden when N=0) calls `addToCollection({ data: { uuids } })` and `router.invalidate()`.
+- **uuid is the wire id throughout the admin surface.** No fileid in the browser. `AdminFileItem = { uuid, name, kind, thumbUrl }`.
+- The "Los cambios aparecerán tras la próxima sincronización (04:00 UTC)" banner is **removed** — edits are instant.
+- `UnconfiguredBanner`, `SourceFolderMissingBanner`, `FolderNotPermittedBanner` are **removed** (no env var to misconfigure, no folder permission to enforce).
+
+**Picker scope trade-off**
+
+- The picker shows only files the cron has already snapshotted from `PCLOUD_MEMORIES_FOLDER_ID`. New pCloud uploads become curatable on the next 04:00 UTC cron run — matching the cadence on which they would become visible on `/` anyway.
+- Stale uuids in the collection blob (e.g. file deleted in pCloud → cron sweeps `media/<uuid>` → uuid still in `collection/v1`) are **not GC'd**. The loader already filters out uuids with no `mediaCache.lookup(uuid)` result, so the only effect is a tiny harmless accumulation.
+
+**Cron**
+
+- `refreshMemories(client, folderId, mediaCache, fileidIndex, folderCache, geocodeOpts?)` — the 7th `collectionOpts` parameter and the `CollectionOpts` / `CollectionStats` / `CollectionDetailsResponse` types are gone.
+- `RefreshResult.collectionStats` is gone; the corresponding `collection: linked=… alive=… missing=…` log line is gone.
+- `netlify/functions/refresh-memories.ts` reads only `PCLOUD_TOKEN` + `PCLOUD_MEMORIES_FOLDER_ID` (+ optional `GEOAPIFY_API_KEY` and `RECUERDEA_GEOCODE_MAX_PER_RUN`). The second pCloud client (built from `PCLOUD_ADMIN_AUTH`) is removed.
+
+**Surface delta**
+
+- `src/lib/admin/collection.{ts,server.ts}` — rewritten. `fetchCuratedItems(collection, media)`, `addUuidsToCollection(collection, uuids)`, `removeUuidsFromCollection(collection, uuids)`. Server-fns: `getCollectionMedia`, `addToCollection`, `removeFromCollection`. Zero pCloud imports.
+- `src/lib/admin/folder-media.{ts,server.ts}` (new) — `fetchAdminFolderMedia(folder, media)` reads `folder/v1` + per-uuid media-cache; `getAdminFolderMedia` server-fn. Zero pCloud imports.
+- `src/components/AdminCollectionGrid.tsx` (new) — uuid-keyed multi-select picker; replaces the v12 `AdminFolderNavigator`. Sticky `Guardar (N)` / `Cancelar` footer, blocked tiles dimmed + `aria-disabled`.
+- `src/components/CollectionItemsGrid.tsx` — props switch from `fileid` to `uuid`.
+- `src/lib/admin/source-folder.{ts,server.ts}` — **deleted**.
+- `src/components/AdminFolderNavigator.tsx` — **deleted**.
+
+## 24. v12 → v13 changes summary
+
+For readers diffing this spec against v12:
+
+- §1 / §2: unchanged.
+- §4 Project Structure: stays at v10 baseline. Admin file inventory lives in the version sections.
+- §7 Boundaries: "Always do" cron-writer bullet narrows back to `media/<uuid>` + `fileid-index/<fileid>` + `folder/v1` (no `collection/v1`). New bullet adds the admin route as sole writer of `collection/v1`. "Never do" gains: never call any pCloud `collection_*` endpoint.
+- §19 (v11): superseded by §23 — `PCLOUD_COLLECTION_ID` is gone, the cron no longer writes the collection blob, and the "04:00 UTC" banner is gone.
+- §21 (v12): superseded by §23 — `PCLOUD_ADMIN_AUTH` is gone, the source-folder navigator is gone, `fileid` is no longer the wire id in the admin surface, and admin reads are blob reads (not live `collection_details`).
+- §23 (new): v13 acceptance criteria — blob-only storage, admin sole writer, env-var demolition, instant edits, picker scoped to cached folder items.
