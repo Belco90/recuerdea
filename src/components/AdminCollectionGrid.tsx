@@ -1,7 +1,9 @@
 import type { AdminMediaItem } from '#/lib/admin/folder-media.server'
 
-import { Box, HStack, Image, SimpleGrid, Text } from '@chakra-ui/react'
+import { Box, HStack, Image, SimpleGrid, Text, chakra } from '@chakra-ui/react'
 import { Check, Play } from 'lucide-react'
+
+const TileButton = chakra('button')
 
 type AdminCollectionGridProps = {
 	items: readonly AdminMediaItem[]
@@ -30,9 +32,8 @@ export function AdminCollectionGrid({
 				const isSelected = selected.has(item.uuid)
 				const isDisabled = disabled.has(item.uuid)
 				return (
-					<Box
+					<TileButton
 						key={item.uuid}
-						as="button"
 						type="button"
 						aria-label={item.name}
 						aria-pressed={isSelected}
@@ -103,7 +104,7 @@ export function AdminCollectionGrid({
 						>
 							{captionFor(item)}
 						</Text>
-					</Box>
+					</TileButton>
 				)
 			})}
 		</SimpleGrid>
