@@ -40,7 +40,7 @@
 - [x] Admin server fns reach pCloud through the admin client; the
       OAuth client is no longer used for `collection_*`.
 - [ ] Cron with both env vars set: `[refresh-memories] collection:
-      linked=N alive=M missing=K` still appears.
+linked=N alive=M missing=K` still appears.
 - [ ] Cron with `PCLOUD_ADMIN_AUTH` unset logs the new skip warning
       and does not crash.
 
@@ -48,50 +48,50 @@
 
 ## Phase 2 — Decouple admin display from memories cache
 
-- [ ] Define `AdminFileItem = { fileid: number; name: string; kind:
+- [x] Define `AdminFileItem = { fileid: number; name: string; kind:
 'image' | 'video' | 'other'; thumbUrl: string | null }` in
       `src/lib/admin/collection.server.ts`. Export it.
-- [ ] Rewrite `fetchCollectionMedia(client)`:
-  - [ ] Call `collection_details({ collectionid, showfiles: 1 })`.
-  - [ ] Build a `fileids` array. If non-empty, call
+- [x] Rewrite `fetchCollectionMedia(client)`:
+  - [x] Call `collection_details({ collectionid, showfiles: 1 })`.
+  - [x] Build a `fileids` array. If non-empty, call
         `client.call<ThumbResult[]>('getthumbslinks', { fileids: csv,
 size: '320x320', crop: 1, type: 'jpg' })`.
-  - [ ] Return `AdminFileItem[]` keyed by fileid with `thumbUrl` map.
-- [ ] Rewrite `linkFilesToCollectionRaw(client, fileids: readonly
+  - [x] Return `AdminFileItem[]` keyed by fileid with `thumbUrl` map.
+- [x] Rewrite `linkFilesToCollectionRaw(client, fileids: readonly
 number[])` and `unlinkFilesFromCollectionRaw(client, fileids)`:
-  - [ ] Empty array → TypeError.
-  - [ ] Non-integer entry → TypeError.
-  - [ ] CSV join + `client.call('collection_linkfiles' | 'collection_unlinkfiles', ...)`.
-- [ ] Update `src/lib/admin/collection.ts`:
-  - [ ] Drop the `fileidIndex` + `mediaCache` deps from `makeDeps()`.
-  - [ ] Wrappers' input validator now requires
+  - [x] Empty array → TypeError.
+  - [x] Non-integer entry → TypeError.
+  - [x] CSV join + `client.call('collection_linkfiles' | 'collection_unlinkfiles', ...)`.
+- [x] Update `src/lib/admin/collection.ts`:
+  - [x] Drop the `fileidIndex` + `mediaCache` deps from `makeDeps()`.
+  - [x] Wrappers' input validator now requires
         `{ fileids: readonly number[] }` (positive integers).
-- [ ] Rewrite `src/components/CollectionItemsGrid.tsx`:
-  - [ ] Accept `items: readonly AdminFileItem[]`,
+- [x] Rewrite `src/components/CollectionItemsGrid.tsx`:
+  - [x] Accept `items: readonly AdminFileItem[]`,
         `onRemove: (fileid: number) => void`,
         `pending?: ReadonlySet<number>`.
-  - [ ] Render `name` instead of year caption (or no caption — owner
+  - [x] Render `name` instead of year caption (or no caption — owner
         preference; default to "no caption" for minimal noise).
-  - [ ] Fallback box when `thumbUrl` is null.
-- [ ] Rewrite `src/components/CollectionItemsGrid.browser.test.tsx`
+  - [x] Fallback box when `thumbUrl` is null.
+- [x] Rewrite `src/components/CollectionItemsGrid.browser.test.tsx`
       for the new shape.
-- [ ] Rewrite `src/lib/admin/collection.server.test.ts`:
-  - [ ] Drop fileidIndex + mediaCache mocks.
-  - [ ] `fetchCollectionMedia`: mock `collection_details` returning N
+- [x] Rewrite `src/lib/admin/collection.server.test.ts`:
+  - [x] Drop fileidIndex + mediaCache mocks.
+  - [x] `fetchCollectionMedia`: mock `collection_details` returning N
         files; mock `getthumbslinks` returning N urls; assert
         `AdminFileItem[]` shape and thumb mapping.
-  - [ ] `linkFilesToCollectionRaw`: assert CSV; assert TypeError on
+  - [x] `linkFilesToCollectionRaw`: assert CSV; assert TypeError on
         empty / non-integer.
-  - [ ] `unlinkFilesFromCollectionRaw`: symmetric.
-- [ ] `pnpm test && pnpm type-check && pnpm lint && pnpm format:check`.
+  - [x] `unlinkFilesFromCollectionRaw`: symmetric.
+- [x] `pnpm test && pnpm type-check && pnpm lint && pnpm format:check`.
 
 ### Acceptance — Phase 2
 
-- [ ] `/admin/collection` top section shows the current collection
+- [x] `/admin/collection` top section shows the current collection
       contents read live from pCloud — no folder-cache, no media-cache.
-- [ ] "Quitar" removes via `collection_unlinkfiles`; UI refreshes via
+- [x] "Quitar" removes via `collection_unlinkfiles`; UI refreshes via
       `router.invalidate()`.
-- [ ] `fileid` (not `uuid`) is the id on the wire and in the UI.
+- [x] `fileid` (not `uuid`) is the id on the wire and in the UI.
 
 ### Checkpoint A — Phases 1 + 2
 

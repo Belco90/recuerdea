@@ -1,21 +1,15 @@
-import type { AdminMediaItem } from '#/lib/admin/folder-media.server'
+import type { AdminFileItem } from '#/lib/admin/collection.server'
 
 import { Box, Button, HStack, Image, SimpleGrid, Stack, Text } from '@chakra-ui/react'
 import { Play, Trash2 } from 'lucide-react'
 
 type CollectionItemsGridProps = {
-	items: readonly AdminMediaItem[]
-	pending?: ReadonlySet<string>
-	onRemove: (uuid: string) => void
+	items: readonly AdminFileItem[]
+	pending?: ReadonlySet<number>
+	onRemove: (fileid: number) => void
 }
 
-const EMPTY = new Set<string>()
-
-function captionFor(item: AdminMediaItem): string {
-	if (!item.captureDate) return 'sin fecha'
-	const year = new Date(item.captureDate).getFullYear()
-	return Number.isFinite(year) ? String(year) : 'sin fecha'
-}
+const EMPTY = new Set<number>()
 
 export function CollectionItemsGrid({
 	items,
@@ -25,10 +19,10 @@ export function CollectionItemsGrid({
 	return (
 		<SimpleGrid columns={{ base: 2, sm: 3, md: 4 }} gap={3}>
 			{items.map((item) => {
-				const isPending = pending.has(item.uuid)
+				const isPending = pending.has(item.fileid)
 				return (
 					<Stack
-						key={item.uuid}
+						key={item.fileid}
 						gap={0}
 						border="1px solid"
 						borderColor="line"
@@ -37,14 +31,29 @@ export function CollectionItemsGrid({
 						bg="paper"
 					>
 						<Box position="relative" w="full" aspectRatio="square" bg="bg.muted">
-							<Image
-								src={item.thumbUrl}
-								alt=""
-								loading="lazy"
-								w="full"
-								h="full"
-								objectFit="cover"
-							/>
+							{item.thumbUrl ? (
+								<Image
+									src={item.thumbUrl}
+									alt=""
+									loading="lazy"
+									w="full"
+									h="full"
+									objectFit="cover"
+								/>
+							) : (
+								<Box
+									w="full"
+									h="full"
+									display="flex"
+									alignItems="center"
+									justifyContent="center"
+									color="ink.muted"
+									fontSize="xs"
+									fontFamily="mono"
+								>
+									sin miniatura
+								</Box>
+							)}
 							{item.kind === 'video' && (
 								<HStack
 									position="absolute"
@@ -73,15 +82,16 @@ export function CollectionItemsGrid({
 							fontFamily="mono"
 							color="ink.muted"
 							textAlign="center"
+							truncate
 						>
-							{captionFor(item)}
+							{item.name}
 						</Text>
 						<Button
 							size="xs"
 							variant="ghost"
 							color="ink.muted"
 							disabled={isPending}
-							onClick={() => onRemove(item.uuid)}
+							onClick={() => onRemove(item.fileid)}
 							aria-label={`Quitar ${item.name}`}
 							my={1}
 							mx={2}

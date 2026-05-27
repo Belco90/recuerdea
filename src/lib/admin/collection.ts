@@ -1,22 +1,22 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import type { AdminMediaItem } from './folder-media.server'
+import type { AdminFileItem } from './collection.server'
 
-export type { AdminMediaItem }
+export type { AdminFileItem }
 
 export type CollectionMediaResult =
-	| { status: 'ok'; items: AdminMediaItem[] }
+	| { status: 'ok'; items: AdminFileItem[] }
 	| { status: 'unconfigured' }
 
-type LinkInput = { uuids: readonly string[] }
+type FileidsInput = { fileids: readonly number[] }
 
-function parseLinkInput(input: unknown): LinkInput | null {
+function parseFileidsInput(input: unknown): FileidsInput | null {
 	if (!input || typeof input !== 'object') return null
 	const obj = input as Record<string, unknown>
-	if (!Array.isArray(obj.uuids)) return null
-	if (obj.uuids.length === 0) return null
-	if (!obj.uuids.every((u): u is string => typeof u === 'string' && u.length > 0)) return null
-	return { uuids: obj.uuids }
+	if (!Array.isArray(obj.fileids)) return null
+	if (obj.fileids.length === 0) return null
+	if (!obj.fileids.every((f): f is number => Number.isInteger(f) && (f as number) > 0)) return null
+	return { fileids: obj.fileids as readonly number[] }
 }
 
 async function gateAdmin(): Promise<void> {
@@ -26,19 +26,11 @@ async function gateAdmin(): Promise<void> {
 	if (!user.isAdmin) throw new Error('forbidden')
 }
 
-async function makeDeps() {
+async function makeClient() {
 	const token = process.env.PCLOUD_ADMIN_AUTH
 	if (!token) throw new Error('PCLOUD_ADMIN_AUTH is not set')
 	const { createClient } = await import('pcloud-kit')
-	const { createFileidIndex } = await import('../cache/fileid-index')
-	const { getFileidIndexStore } = await import('../cache/fileid-index.server')
-	const { createMediaCache } = await import('../cache/media-cache')
-	const { getMediaCacheStore } = await import('../cache/media-cache.server')
-	return {
-		client: createClient({ token, type: 'pcloud' }),
-		fileidIndex: createFileidIndex(getFileidIndexStore()),
-		mediaCache: createMediaCache(getMediaCacheStore()),
-	}
+	return createClient({ token, type: 'pcloud' })
 }
 
 export const getCollectionMedia = createServerFn({ method: 'GET' }).handler(
@@ -46,8 +38,8 @@ export const getCollectionMedia = createServerFn({ method: 'GET' }).handler(
 		await gateAdmin()
 		const { CollectionIdMissingError, fetchCollectionMedia } = await import('./collection.server')
 		try {
-			const { client, fileidIndex, mediaCache } = await makeDeps()
-			const items = await fetchCollectionMedia(client, fileidIndex, mediaCache)
+			const client = await makeClient()
+			const items = await fetchCollectionMedia(client)
 			return { status: 'ok', items }
 		} catch (e) {
 			if (e instanceof CollectionIdMissingError) return { status: 'unconfigured' }
@@ -57,21 +49,21 @@ export const getCollectionMedia = createServerFn({ method: 'GET' }).handler(
 )
 
 export const linkFilesToCollection = createServerFn({ method: 'POST' })
-	.inputValidator((input: unknown): LinkInput | null => parseLinkInput(input))
+	.inputValidator((input: unknown): FileidsInput | null => parseFileidsInput(input))
 	.handler(async ({ data }): Promise<void> => {
 		if (!data) throw new Error('invalid input')
 		await gateAdmin()
-		const { client, mediaCache } = await makeDeps()
+		const client = await makeClient()
 		const { linkFilesToCollectionRaw } = await import('./collection.server')
-		await linkFilesToCollectionRaw(client, mediaCache, data.uuids)
+		await linkFilesToCollectionRaw(client, data.fileids)
 	})
 
 export const unlinkFilesFromCollection = createServerFn({ method: 'POST' })
-	.inputValidator((input: unknown): LinkInput | null => parseLinkInput(input))
+	.inputValidator((input: unknown): FileidsInput | null => parseFileidsInput(input))
 	.handler(async ({ data }): Promise<void> => {
 		if (!data) throw new Error('invalid input')
 		await gateAdmin()
-		const { client, mediaCache } = await makeDeps()
+		const client = await makeClient()
 		const { unlinkFilesFromCollectionRaw } = await import('./collection.server')
-		await unlinkFilesFromCollectionRaw(client, mediaCache, data.uuids)
+		await unlinkFilesFromCollectionRaw(client, data.fileids)
 	})

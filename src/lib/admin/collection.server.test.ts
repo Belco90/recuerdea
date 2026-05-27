@@ -2,11 +2,6 @@ import type { Client, FileMetadata } from 'pcloud-kit'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { FileidIndexStore } from '../cache/fileid-index'
-import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
-
-import { createFileidIndex } from '../cache/fileid-index'
-import { createMediaCache } from '../cache/media-cache'
 import {
 	CollectionIdMissingError,
 	assertCollectionId,
@@ -14,36 +9,6 @@ import {
 	linkFilesToCollectionRaw,
 	unlinkFilesFromCollectionRaw,
 } from './collection.server'
-
-function makeMediaStore(entries: Record<string, CachedMedia> = {}) {
-	const data = new Map(Object.entries(entries))
-	return {
-		get: vi.fn<MediaCacheStore['get']>(async (uuid) => data.get(uuid)),
-		set: vi.fn<MediaCacheStore['set']>(async (uuid, value) => {
-			data.set(uuid, value)
-		}),
-		delete: vi.fn<MediaCacheStore['delete']>(async (uuid) => {
-			data.delete(uuid)
-		}),
-		list: vi.fn<MediaCacheStore['list']>(async () => Array.from(data.keys())),
-		data,
-	}
-}
-
-function makeFileidStore(entries: Record<number, string> = {}) {
-	const data = new Map<number, { uuid: string }>()
-	for (const [k, v] of Object.entries(entries)) data.set(Number(k), { uuid: v })
-	return {
-		get: vi.fn<FileidIndexStore['get']>(async (fileid) => data.get(fileid)),
-		set: vi.fn<FileidIndexStore['set']>(async (fileid, value) => {
-			data.set(fileid, value)
-		}),
-		delete: vi.fn<FileidIndexStore['delete']>(async (fileid) => {
-			data.delete(fileid)
-		}),
-		data,
-	}
-}
 
 function makeClient(impl: (method: string, params: unknown) => Promise<unknown>): Client {
 	return {
@@ -53,11 +18,11 @@ function makeClient(impl: (method: string, params: unknown) => Promise<unknown>)
 	} as unknown as Client
 }
 
-function makeFile(fileid: number, name = `f-${fileid}.jpg`): FileMetadata {
+function makeFile(fileid: number, overrides: Partial<FileMetadata> = {}): FileMetadata {
 	return {
 		fileid,
 		parentfolderid: 0,
-		name,
+		name: `f-${fileid}.jpg`,
 		isfolder: false,
 		size: 0,
 		contenttype: 'image/jpeg',
@@ -68,41 +33,20 @@ function makeFile(fileid: number, name = `f-${fileid}.jpg`): FileMetadata {
 		icon: '',
 		created: '',
 		modified: '',
+		...overrides,
 	}
 }
 
-const imageA: CachedMedia = {
-	fileid: 100,
-	hash: 'h-100',
-	code: 'CODE-A',
-	linkid: 1000,
-	kind: 'image',
-	contenttype: 'image/jpeg',
-	name: 'a.jpg',
-	captureDate: '2024-04-27T14:30:00.000Z',
-	width: 4032,
-	height: 3024,
-	location: null,
-	place: null,
+function thumbEntry(fileid: number, path = `/p-${fileid}`) {
+	return {
+		result: 0,
+		fileid,
+		path,
+		hosts: ['eapi-cdn.pcloud.com'],
+		size: '320x320',
+		expires: 'Wed, 28 May 2026 00:00:00 +0000',
+	}
 }
-
-const imageB: CachedMedia = {
-	fileid: 200,
-	hash: 'h-200',
-	code: 'CODE-B',
-	linkid: 2000,
-	kind: 'image',
-	contenttype: 'image/jpeg',
-	name: 'b.jpg',
-	captureDate: '2024-06-15T09:00:00.000Z',
-	width: null,
-	height: null,
-	location: null,
-	place: null,
-}
-
-const thumb320 = (code: string) =>
-	`https://eapi.pcloud.com/getpubthumb?code=${encodeURIComponent(code)}&size=320x320`
 
 beforeEach(() => {
 	vi.stubEnv('PCLOUD_COLLECTION_ID', '99')
@@ -131,102 +75,137 @@ describe('assertCollectionId', () => {
 })
 
 describe('fetchCollectionMedia', () => {
-	it('maps collection fileids → uuids → cached media into AdminMediaItem[]', async () => {
+	it('maps collection_details + getthumbslinks into AdminFileItem[]', async () => {
+		const calls: Array<{ method: string; params: unknown }> = []
 		const client = makeClient(async (method, params) => {
-			expect(method).toBe('collection_details')
-			expect(params).toEqual({ collectionid: 99, showfiles: 1 })
-			return { collection: { items: 2, contents: [makeFile(100), makeFile(200)] } }
+			calls.push({ method, params })
+			if (method === 'collection_details') {
+				return {
+					collection: {
+						items: 2,
+						contents: [
+							makeFile(100, { name: 'a.jpg', contenttype: 'image/jpeg' }),
+							makeFile(200, { name: 'b.mp4', contenttype: 'video/mp4' }),
+						],
+					},
+				}
+			}
+			if (method === 'getthumbslinks') {
+				return { thumbs: [thumbEntry(100, '/abc'), thumbEntry(200, '/def')] }
+			}
+			throw new Error(`unexpected method: ${method}`)
 		})
-		const fileidIndex = createFileidIndex(makeFileidStore({ 100: 'uuid-a', 200: 'uuid-b' }))
-		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA, 'uuid-b': imageB }))
 
-		const result = await fetchCollectionMedia(client, fileidIndex, mediaCache)
+		const result = await fetchCollectionMedia(client)
 
+		expect(calls[0]).toEqual({
+			method: 'collection_details',
+			params: { collectionid: 99, showfiles: 1 },
+		})
+		expect(calls[1]).toEqual({
+			method: 'getthumbslinks',
+			params: { fileids: '100,200', size: '320x320', crop: 1, type: 'jpg' },
+		})
 		expect(result).toEqual([
-			{
-				uuid: 'uuid-a',
-				kind: 'image',
-				name: 'a.jpg',
-				captureDate: '2024-04-27T14:30:00.000Z',
-				fileid: 100,
-				thumbUrl: thumb320('CODE-A'),
-			},
-			{
-				uuid: 'uuid-b',
-				kind: 'image',
-				name: 'b.jpg',
-				captureDate: '2024-06-15T09:00:00.000Z',
-				fileid: 200,
-				thumbUrl: thumb320('CODE-B'),
-			},
+			{ fileid: 100, name: 'a.jpg', kind: 'image', thumbUrl: 'https://eapi-cdn.pcloud.com/abc' },
+			{ fileid: 200, name: 'b.mp4', kind: 'video', thumbUrl: 'https://eapi-cdn.pcloud.com/def' },
 		])
 	})
 
-	it('skips fileids that have no entry in the fileid-index', async () => {
-		const client = makeClient(async () => ({
-			collection: { items: 2, contents: [makeFile(100), makeFile(999)] },
-		}))
-		const fileidIndex = createFileidIndex(makeFileidStore({ 100: 'uuid-a' }))
-		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA }))
+	it('marks non-image/video files as kind="other"', async () => {
+		const client = makeClient(async (method) => {
+			if (method === 'collection_details') {
+				return {
+					collection: {
+						items: 1,
+						contents: [makeFile(100, { name: 'doc.pdf', contenttype: 'application/pdf' })],
+					},
+				}
+			}
+			return { thumbs: [thumbEntry(100)] }
+		})
 
-		const result = await fetchCollectionMedia(client, fileidIndex, mediaCache)
+		const result = await fetchCollectionMedia(client)
 
-		expect(result.map((m) => m.uuid)).toEqual(['uuid-a'])
+		expect(result[0]?.kind).toBe('other')
 	})
 
-	it('skips uuids that have no entry in the media cache', async () => {
-		const client = makeClient(async () => ({
-			collection: { items: 2, contents: [makeFile(100), makeFile(200)] },
-		}))
-		const fileidIndex = createFileidIndex(makeFileidStore({ 100: 'uuid-a', 200: 'uuid-ghost' }))
-		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA }))
+	it('returns thumbUrl=null when a file is missing from the thumbs response', async () => {
+		const client = makeClient(async (method) => {
+			if (method === 'collection_details') {
+				return {
+					collection: {
+						items: 2,
+						contents: [makeFile(100), makeFile(200)],
+					},
+				}
+			}
+			return { thumbs: [thumbEntry(100)] }
+		})
 
-		const result = await fetchCollectionMedia(client, fileidIndex, mediaCache)
+		const result = await fetchCollectionMedia(client)
 
-		expect(result.map((m) => m.uuid)).toEqual(['uuid-a'])
+		expect(result.map((m) => ({ fileid: m.fileid, thumbUrl: m.thumbUrl }))).toEqual([
+			{ fileid: 100, thumbUrl: 'https://eapi-cdn.pcloud.com/p-100' },
+			{ fileid: 200, thumbUrl: null },
+		])
 	})
 
-	it('returns [] when the collection has no items', async () => {
-		const client = makeClient(async () => ({ collection: {} }))
-		const fileidIndex = createFileidIndex(makeFileidStore())
-		const mediaCache = createMediaCache(makeMediaStore())
+	it('returns thumbUrl=null when an entry has result != 0', async () => {
+		const client = makeClient(async (method) => {
+			if (method === 'collection_details') {
+				return {
+					collection: { items: 1, contents: [makeFile(100)] },
+				}
+			}
+			return { thumbs: [{ ...thumbEntry(100), result: 2009 }] }
+		})
 
-		expect(await fetchCollectionMedia(client, fileidIndex, mediaCache)).toEqual([])
+		const result = await fetchCollectionMedia(client)
+
+		expect(result[0]?.thumbUrl).toBeNull()
 	})
 
-	it('returns [] for the real empty-collection shape (`items: 0`, no `contents`)', async () => {
-		// Regression for "items is not iterable": pCloud returns `items` as the
-		// numeric count, not the file array, and omits `contents` entirely when
-		// the collection has zero files.
-		const client = makeClient(async () => ({ collection: { items: 0 } }))
-		const fileidIndex = createFileidIndex(makeFileidStore())
-		const mediaCache = createMediaCache(makeMediaStore())
+	it('returns [] for an empty collection without calling getthumbslinks', async () => {
+		const calls: string[] = []
+		const client = makeClient(async (method) => {
+			calls.push(method)
+			if (method === 'collection_details') return { collection: { items: 0 } }
+			throw new Error(`unexpected method: ${method}`)
+		})
 
-		expect(await fetchCollectionMedia(client, fileidIndex, mediaCache)).toEqual([])
+		const result = await fetchCollectionMedia(client)
+
+		expect(result).toEqual([])
+		expect(calls).toEqual(['collection_details'])
+	})
+
+	it('handles the `collection.contents` field being absent', async () => {
+		const client = makeClient(async (method) => {
+			if (method === 'collection_details') return { collection: {} }
+			throw new Error(`unexpected method: ${method}`)
+		})
+
+		expect(await fetchCollectionMedia(client)).toEqual([])
 	})
 
 	it('throws CollectionIdMissingError when PCLOUD_COLLECTION_ID is unset', async () => {
 		vi.stubEnv('PCLOUD_COLLECTION_ID', '')
 		const client = makeClient(async () => ({ collection: { items: 0 } }))
-		const fileidIndex = createFileidIndex(makeFileidStore())
-		const mediaCache = createMediaCache(makeMediaStore())
 
-		await expect(fetchCollectionMedia(client, fileidIndex, mediaCache)).rejects.toThrow(
-			CollectionIdMissingError,
-		)
+		await expect(fetchCollectionMedia(client)).rejects.toThrow(CollectionIdMissingError)
 	})
 })
 
 describe('linkFilesToCollectionRaw', () => {
-	it('resolves uuids → fileids and calls collection_linkfiles with a CSV', async () => {
+	it('calls collection_linkfiles with a CSV of fileids', async () => {
 		const calls: Array<{ method: string; params: unknown }> = []
 		const client = makeClient(async (method, params) => {
 			calls.push({ method, params })
 			return { result: 0 }
 		})
-		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA, 'uuid-b': imageB }))
 
-		await linkFilesToCollectionRaw(client, mediaCache, ['uuid-a', 'uuid-b'])
+		await linkFilesToCollectionRaw(client, [100, 200])
 
 		expect(calls).toEqual([
 			{
@@ -236,30 +215,27 @@ describe('linkFilesToCollectionRaw', () => {
 		])
 	})
 
-	it('throws TypeError when uuids is empty', async () => {
+	it('throws TypeError when fileids is empty', async () => {
 		const client = makeClient(async () => ({ result: 0 }))
-		const mediaCache = createMediaCache(makeMediaStore())
-
-		await expect(linkFilesToCollectionRaw(client, mediaCache, [])).rejects.toThrow(TypeError)
+		await expect(linkFilesToCollectionRaw(client, [])).rejects.toThrow(TypeError)
 	})
 
-	it('throws when a uuid has no entry in the media cache', async () => {
+	it('throws TypeError when fileids contains a non-integer', async () => {
 		const client = makeClient(async () => ({ result: 0 }))
-		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA }))
+		await expect(linkFilesToCollectionRaw(client, [1.5])).rejects.toThrow(TypeError)
+	})
 
-		await expect(
-			linkFilesToCollectionRaw(client, mediaCache, ['uuid-a', 'uuid-ghost']),
-		).rejects.toThrow(/uuid-ghost/)
+	it('throws TypeError when fileids contains a non-positive integer', async () => {
+		const client = makeClient(async () => ({ result: 0 }))
+		await expect(linkFilesToCollectionRaw(client, [0])).rejects.toThrow(TypeError)
+		await expect(linkFilesToCollectionRaw(client, [-1])).rejects.toThrow(TypeError)
 	})
 
 	it('throws CollectionIdMissingError when env var is unset', async () => {
 		vi.stubEnv('PCLOUD_COLLECTION_ID', '')
 		const client = makeClient(async () => ({ result: 0 }))
-		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA }))
 
-		await expect(linkFilesToCollectionRaw(client, mediaCache, ['uuid-a'])).rejects.toThrow(
-			CollectionIdMissingError,
-		)
+		await expect(linkFilesToCollectionRaw(client, [100])).rejects.toThrow(CollectionIdMissingError)
 	})
 })
 
@@ -270,9 +246,8 @@ describe('unlinkFilesFromCollectionRaw', () => {
 			calls.push({ method, params })
 			return { result: 0 }
 		})
-		const mediaCache = createMediaCache(makeMediaStore({ 'uuid-a': imageA }))
 
-		await unlinkFilesFromCollectionRaw(client, mediaCache, ['uuid-a'])
+		await unlinkFilesFromCollectionRaw(client, [100])
 
 		expect(calls).toEqual([
 			{
@@ -282,10 +257,13 @@ describe('unlinkFilesFromCollectionRaw', () => {
 		])
 	})
 
-	it('throws TypeError when uuids is empty', async () => {
+	it('throws TypeError when fileids is empty', async () => {
 		const client = makeClient(async () => ({ result: 0 }))
-		const mediaCache = createMediaCache(makeMediaStore())
+		await expect(unlinkFilesFromCollectionRaw(client, [])).rejects.toThrow(TypeError)
+	})
 
-		await expect(unlinkFilesFromCollectionRaw(client, mediaCache, [])).rejects.toThrow(TypeError)
+	it('throws TypeError when fileids contains a non-integer', async () => {
+		const client = makeClient(async () => ({ result: 0 }))
+		await expect(unlinkFilesFromCollectionRaw(client, [1.5])).rejects.toThrow(TypeError)
 	})
 })

@@ -1,15 +1,9 @@
-import { AdminCollectionGrid } from '#/components/AdminCollectionGrid'
 import { AppShell } from '#/components/AppShell'
 import { CollectionItemsGrid } from '#/components/CollectionItemsGrid'
 import { Topbar } from '#/components/Topbar'
-import {
-	getCollectionMedia,
-	linkFilesToCollection,
-	unlinkFilesFromCollection,
-} from '#/lib/admin/collection'
-import { getAdminFolderMedia } from '#/lib/admin/folder-media'
+import { getCollectionMedia, unlinkFilesFromCollection } from '#/lib/admin/collection'
 import { getServerUser } from '#/lib/auth/auth'
-import { Alert, Box, Button, Container, Heading, HStack, Stack, Text } from '@chakra-ui/react'
+import { Alert, Box, Container, Heading, Stack, Text } from '@chakra-ui/react'
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 
@@ -21,58 +15,30 @@ export const Route = createFileRoute('/admin/collection')({
 		return { user }
 	},
 	loader: async () => {
-		const [collection, folder] = await Promise.all([getCollectionMedia(), getAdminFolderMedia()])
-		return { collection, folder }
+		const collection = await getCollectionMedia()
+		return { collection }
 	},
 	component: AdminCollectionPage,
 })
 
 function AdminCollectionPage() {
-	const { collection, folder } = Route.useLoaderData()
+	const { collection } = Route.useLoaderData()
 	const router = useRouter()
-	const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
-	const [showAddPanel, setShowAddPanel] = useState(false)
-	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
-	const [saving, setSaving] = useState(false)
+	const [pending, setPending] = useState<ReadonlySet<number>>(() => new Set())
 
 	const collectionItems = collection.status === 'ok' ? collection.items : []
-	const inCollection = new Set(collectionItems.map((m) => m.uuid))
-	const canMutate = collection.status === 'ok'
 
-	function toggleSelection(uuid: string) {
-		if (inCollection.has(uuid)) return
-		setSelected((prev) => {
-			const next = new Set(prev)
-			if (next.has(uuid)) next.delete(uuid)
-			else next.add(uuid)
-			return next
-		})
-	}
-
-	async function handleRemove(uuid: string) {
-		setPending((prev) => new Set(prev).add(uuid))
+	async function handleRemove(fileid: number) {
+		setPending((prev) => new Set(prev).add(fileid))
 		try {
-			await unlinkFilesFromCollection({ data: { uuids: [uuid] } })
+			await unlinkFilesFromCollection({ data: { fileids: [fileid] } })
 			await router.invalidate()
 		} finally {
 			setPending((prev) => {
 				const next = new Set(prev)
-				next.delete(uuid)
+				next.delete(fileid)
 				return next
 			})
-		}
-	}
-
-	async function handleSave() {
-		if (selected.size === 0) return
-		setSaving(true)
-		try {
-			await linkFilesToCollection({ data: { uuids: [...selected] } })
-			setSelected(new Set())
-			setShowAddPanel(false)
-			await router.invalidate()
-		} finally {
-			setSaving(false)
 		}
 	}
 
@@ -92,8 +58,7 @@ function AdminCollectionPage() {
 						Curación de colección
 					</Heading>
 					<Text color="ink.muted" fontSize="sm">
-						Selecciona qué fotos y vídeos participan en la página principal. La carpeta supervisada
-						tiene {folder.length} archivo{folder.length === 1 ? '' : 's'}.
+						Selecciona qué fotos y vídeos participan en la página principal.
 					</Text>
 				</Stack>
 
@@ -123,59 +88,6 @@ function AdminCollectionPage() {
 						)}
 					</Stack>
 				)}
-
-				{canMutate && (
-					<Stack gap={4}>
-						<HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
-							<Heading as="h2" fontSize="lg" color="ink">
-								{showAddPanel ? `Selecciona archivos (${folder.length})` : 'Añadir más'}
-							</Heading>
-							{showAddPanel ? (
-								<HStack gap={2}>
-									<Button
-										variant="ghost"
-										size="sm"
-										onClick={() => {
-											setShowAddPanel(false)
-											setSelected(new Set())
-										}}
-										disabled={saving}
-									>
-										Cancelar
-									</Button>
-									<Button
-										colorPalette="accent"
-										size="sm"
-										onClick={handleSave}
-										disabled={selected.size === 0 || saving}
-									>
-										{saving ? 'Guardando…' : `Guardar (${selected.size})`}
-									</Button>
-								</HStack>
-							) : (
-								<Button
-									variant="outline"
-									size="sm"
-									onClick={() => setShowAddPanel(true)}
-									disabled={folder.length === 0}
-								>
-									Añadir más
-								</Button>
-							)}
-						</HStack>
-						{showAddPanel &&
-							(folder.length === 0 ? (
-								<EmptyFolder />
-							) : (
-								<AdminCollectionGrid
-									items={folder}
-									selected={selected}
-									disabled={inCollection}
-									onToggle={toggleSelection}
-								/>
-							))}
-					</Stack>
-				)}
 			</Container>
 		</AppShell>
 	)
@@ -193,25 +105,7 @@ function EmptyCollection() {
 			color="ink.muted"
 		>
 			<Text fontSize="sm">
-				La colección está vacía. Añade fotos o vídeos desde la cuadrícula inferior.
-			</Text>
-		</Box>
-	)
-}
-
-function EmptyFolder() {
-	return (
-		<Box
-			borderWidth="1px"
-			borderStyle="dashed"
-			borderColor="line"
-			borderRadius="md"
-			p={8}
-			textAlign="center"
-			color="ink.muted"
-		>
-			<Text fontSize="sm">
-				No hay archivos en la caché. Ejecuta el cron de sincronización y vuelve a cargar la página.
+				La colección está vacía. La interfaz para añadir archivos llegará en la siguiente fase.
 			</Text>
 		</Box>
 	)
