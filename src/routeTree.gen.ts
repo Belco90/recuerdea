@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminCollectionRouteImport } from './routes/admin/collection'
 import { Route as ApiVideoUuidRouteImport } from './routes/api/video/$uuid'
 
 const LoginRoute = LoginRouteImport.update({
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminCollectionRoute = AdminCollectionRouteImport.update({
+  id: '/admin/collection',
+  path: '/admin/collection',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiVideoUuidRoute = ApiVideoUuidRouteImport.update({
   id: '/api/video/$uuid',
   path: '/api/video/$uuid',
@@ -32,30 +38,34 @@ const ApiVideoUuidRoute = ApiVideoUuidRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/admin/collection': typeof AdminCollectionRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/admin/collection': typeof AdminCollectionRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/admin/collection': typeof AdminCollectionRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/api/video/$uuid'
+  fullPaths: '/' | '/login' | '/admin/collection' | '/api/video/$uuid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/api/video/$uuid'
-  id: '__root__' | '/' | '/login' | '/api/video/$uuid'
+  to: '/' | '/login' | '/admin/collection' | '/api/video/$uuid'
+  id: '__root__' | '/' | '/login' | '/admin/collection' | '/api/video/$uuid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  AdminCollectionRoute: typeof AdminCollectionRoute
   ApiVideoUuidRoute: typeof ApiVideoUuidRoute
 }
 
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/collection': {
+      id: '/admin/collection'
+      path: '/admin/collection'
+      fullPath: '/admin/collection'
+      preLoaderRoute: typeof AdminCollectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/video/$uuid': {
       id: '/api/video/$uuid'
       path: '/api/video/$uuid'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  AdminCollectionRoute: AdminCollectionRoute,
   ApiVideoUuidRoute: ApiVideoUuidRoute,
 }
 export const routeTree = rootRouteImport
