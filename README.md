@@ -25,6 +25,7 @@ The full architecture, acceptance criteria, and boundary rules live in [`SPEC.md
   - `PCLOUD_MEMORIES_FOLDER_ID` — pCloud folder id to scan.
   - `GEOAPIFY_API_KEY` — for the cron's reverse-geocoding pass.
   - Optional: `RECUERDEA_GEOCODE_MAX_PER_RUN` (default 200).
+  - Optional: `PCLOUD_COLLECTION_ID` — pCloud collection id used by `/admin/collection` to curate which folder items participate in the home page. Unset ⇒ home falls back to the raw folder snapshot.
 
 ## Getting started
 
