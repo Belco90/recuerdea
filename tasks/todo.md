@@ -1,10 +1,11 @@
 # v13 — Curated collection moves to Netlify Blob
 
 > Drop the pCloud collection layer (`PCLOUD_COLLECTION_ID` + `PCLOUD_ADMIN_AUTH`
-> + `collection_*` API calls). Admin route becomes the sole writer of the
-> existing `collection-cache` Netlify Blob. Edits are instant on the home page;
-> cron stops touching the collection blob. Loader is unchanged. See
-> `tasks/plan.md` for full rationale and dependency graph.
+>
+> - `collection_*` API calls). Admin route becomes the sole writer of the
+>   existing `collection-cache` Netlify Blob. Edits are instant on the home page;
+>   cron stops touching the collection blob. Loader is unchanged. See
+>   `tasks/plan.md` for full rationale and dependency graph.
 
 ## Phase 1 — Blob-backed storage primitives
 
@@ -25,6 +26,7 @@
   - [ ] Re-export `AdminFileItem`
 
 ### Checkpoint A
+
 - [ ] `pnpm test -- src/lib/admin/collection.server` green
 - [ ] `pnpm type-check` clean
 
@@ -61,6 +63,7 @@
   - [ ] No references to `getAdminSourceFolder`, `AdminFolderNavigator`, `?folderid`
 
 ### Checkpoint B — Admin path end-to-end
+
 - [ ] `pnpm type-check` clean
 - [ ] `pnpm test:unit` clean
 - [ ] `pnpm test:browser` clean
@@ -84,6 +87,7 @@
   - [ ] Call `refreshMemories(...)` with the new signature
 
 ### Checkpoint C — Cron clean
+
 - [ ] `pnpm test -- src/lib/memories/refresh-memories.server` green
 - [ ] `pnpm invoke:refresh-memories` on `pnpm dev:netlify` runs end-to-end; no `collection:` line in summary
 
@@ -119,6 +123,7 @@
   - [ ] `curl -I` deploy-preview `/` → `Cache-Control: private` or `no-store`
 
 ### Final checkpoint
+
 - [ ] Branch named (e.g. `v13-blob-curation`)
 - [ ] PR open targeting `main`
 - [ ] SPEC.md matches the working tree
