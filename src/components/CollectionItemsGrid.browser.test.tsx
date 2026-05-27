@@ -7,21 +7,21 @@ import { render } from '../../test/test-utils'
 import { CollectionItemsGrid } from './CollectionItemsGrid'
 
 const imageItem: AdminFileItem = {
-	fileid: 100,
+	uuid: 'uuid-A',
 	name: '2024.jpg',
 	kind: 'image',
 	thumbUrl: 'https://example.test/thumb-2024.jpg',
 }
 
 const videoItem: AdminFileItem = {
-	fileid: 200,
+	uuid: 'uuid-B',
 	name: '2018.mp4',
 	kind: 'video',
 	thumbUrl: 'https://example.test/thumb-2018.jpg',
 }
 
 const itemMissingThumb: AdminFileItem = {
-	fileid: 300,
+	uuid: 'uuid-C',
 	name: 'noThumb.jpg',
 	kind: 'image',
 	thumbUrl: null,
@@ -36,17 +36,17 @@ describe('CollectionItemsGrid', () => {
 		await expect.element(page.getByText('2018.mp4')).toBeVisible()
 	})
 
-	it('renders a "Quitar" button per tile and calls onRemove with the fileid', async () => {
-		const onRemove = vi.fn<(fileid: number) => void>()
+	it('renders a "Quitar" button per tile and calls onRemove with the uuid', async () => {
+		const onRemove = vi.fn<(uuid: string) => void>()
 		await render(<CollectionItemsGrid items={[imageItem]} onRemove={onRemove} />)
 		await userEvent.click(page.getByRole('button', { name: /Quitar.*2024\.jpg/ }))
-		expect(onRemove).toHaveBeenCalledWith(100)
+		expect(onRemove).toHaveBeenCalledWith('uuid-A')
 	})
 
 	it('disables the Quitar button for items in the pending set', async () => {
-		const onRemove = vi.fn<(fileid: number) => void>()
+		const onRemove = vi.fn<(uuid: string) => void>()
 		await render(
-			<CollectionItemsGrid items={[imageItem]} pending={new Set([100])} onRemove={onRemove} />,
+			<CollectionItemsGrid items={[imageItem]} pending={new Set(['uuid-A'])} onRemove={onRemove} />,
 		)
 		const btn = page
 			.getByRole('button', { name: /Quitar.*2024\.jpg/ })

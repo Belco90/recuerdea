@@ -5,11 +5,11 @@ import { Play, Trash2 } from 'lucide-react'
 
 type CollectionItemsGridProps = {
 	items: readonly AdminFileItem[]
-	pending?: ReadonlySet<number>
-	onRemove: (fileid: number) => void
+	pending?: ReadonlySet<string>
+	onRemove: (uuid: string) => void
 }
 
-const EMPTY = new Set<number>()
+const EMPTY = new Set<string>()
 
 export function CollectionItemsGrid({
 	items,
@@ -19,10 +19,10 @@ export function CollectionItemsGrid({
 	return (
 		<SimpleGrid columns={{ base: 2, sm: 3, md: 4 }} gap={3}>
 			{items.map((item) => {
-				const isPending = pending.has(item.fileid)
+				const isPending = pending.has(item.uuid)
 				return (
 					<Stack
-						key={item.fileid}
+						key={item.uuid}
 						gap={0}
 						border="1px solid"
 						borderColor="line"
@@ -91,7 +91,7 @@ export function CollectionItemsGrid({
 							variant="ghost"
 							color="ink.muted"
 							disabled={isPending}
-							onClick={() => onRemove(item.fileid)}
+							onClick={() => onRemove(item.uuid)}
 							aria-label={`Quitar ${item.name}`}
 							my={1}
 							mx={2}
