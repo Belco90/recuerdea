@@ -404,3 +404,48 @@ For readers diffing this spec against v9:
 - §7 Boundaries: "Always do" gains a separate bullet for routing video bytes through `/api/video/<uuid>` (next to the v9 image-URL rule). "Never do" tightens the no-embed rule — `getpublinkdownload` CDN URLs do not reach the browser; videos use the proxy and image downloads consume a freshly resolved URL on-demand.
 - §17 (new): v10 acceptance criteria — file.created capture date, newest-year-first sort, `/api/video/<uuid>` proxy, square thumbnail crop, account drawer, identity cookie patch, Vitest unit/browser split.
 - §15 (v9) and earlier acceptance sections: left as historical record. Where v10 changes the rule, the current truth lives in §7 and §17.
+
+## 19. v11 Acceptance Criteria
+
+Cumulative on top of §17 (v10). v11 introduces curated collections — the home page can opt-in to a pCloud collection as the uuid whitelist for the date filter, leaving everything outside of that collection out of the on-this-day view. A new admin-only route lets the owner curate that collection from the browser.
+
+**Curation model**
+
+- A single pCloud collection is bound via `PCLOUD_COLLECTION_ID` (server-only env var, optional). When unset the home page falls back to the raw folder snapshot (preserves §15 / §17 behavior). When set, every cron run reads the collection's contents via `client.call('collection_details', { collectionid, showfiles: 1 })`, intersects the fileids with the alive uuids the cron just wrote, and persists the result as `collection/v1` in a new Blobs store `collection-cache` (`{ refreshedAt: ISO, uuids: readonly string[] }`).
+- `fetchTodayMemories` reads the collection snapshot first. If present (even when empty), those uuids are the candidate set fed through the existing month/day filter. If absent, it falls back to the folder snapshot — same code path as v9/v10.
+- An empty collection snapshot means "show nothing", not "fall back". This is intentional: the cron writing an empty `collection/v1` after the curator unlinks everything is a _result_, not a missing-state.
+
+**Admin route**
+
+- `/admin/collection` is a TanStack Start route gated by `beforeLoad` that calls `loadServerUser()` and (a) redirects unauthenticated visitors to `/login`, (b) redirects authenticated non-admins to `/`. Admin status is derived from Netlify Identity's `app_metadata.roles` containing `"admin"`. The same gate is exposed to client code via `useIdentity().isAdmin`, which `Topbar`'s `AccountDrawer` uses to show an "Administración" link.
+- The route's loader fetches `getCollectionMedia()` + `getAdminFolderMedia()` in parallel. Top section: the current collection, rendered as a tile grid with a per-tile "Quitar" button. Bottom section: an "Añadir más" toggle that opens a multi-select grid of every cached folder item; tiles already in the collection are rendered as `disabled` and excluded from selection. "Guardar (N)" submits the selection via `linkFilesToCollection` and `router.invalidate()`s both grids.
+- When `PCLOUD_COLLECTION_ID` is unset, `getCollectionMedia` returns `{ status: 'unconfigured' }` (a tagged result, not a thrown error). The route renders an alert telling the curator to set the env var; the folder grid section is hidden because there's nowhere to add items to.
+- A persistent info banner under the heading says "Los cambios aparecerán en la página principal tras la próxima sincronización (04:00 UTC)." Without this, the asymmetry between a successful save and the home page's still-stale state would be confusing.
+
+**Write boundaries**
+
+- The cron remains the **only writer** for `media/<uuid>`, `fileid-index/<fileid>`, `folder/v1`, and **the new `collection/v1`**. Admin mutations call pCloud directly (`collection_linkfiles` / `collection_unlinkfiles`); the cache catches up on the next 04:00 UTC run. This keeps the v4 single-writer invariant intact and avoids a separate write path that could race the cron.
+- The admin route is the **only place in the app** where `fileid` reaches the browser. SPEC §7's "fileid stays server-side" boundary still applies to the public app; admin mutations need the fileid round-trip and the bounded blast-radius (admin-only route, server-validated role) is acceptable.
+
+**Cron extension**
+
+- `refreshMemories(...)` accepts an optional 7th argument `collectionOpts?: { cache: CollectionCache; collectionid: number }`. When omitted (env var unset), the cron is unchanged. When provided, after writing the folder snapshot the cron calls `collection_details`, maps each fileid → uuid via the fileid-index, drops uuids not in the alive set, and persists the result. The return type gains `collectionStats: { linked, alive } | null` so the cron log can surface `collection: linked=N alive=N missing=N` without leaking ids.
+
+**New surface**
+
+- `src/lib/cache/collection-cache.{ts,server.ts}` — mirror of `folder-cache.{ts,server.ts}`, store name `collection-cache`, key `collection/v1`.
+- `src/lib/admin/collection.{ts,server.ts}` — `fetchCollectionMedia`, `linkFilesToCollectionRaw`, `unlinkFilesFromCollectionRaw`, `assertCollectionId()`, plus their `createServerFn` wrappers (auth + admin gated).
+- `src/lib/admin/folder-media.{ts,server.ts}` — read-only listing of every cached folder item for the admin grid (no date filter; reuses `folder/v1` + `media/<uuid>`).
+- `src/routes/admin/collection.tsx` — route component + gate.
+- `src/components/{AdminCollectionGrid,CollectionItemsGrid}.tsx` — the two tile-grid variants (multi-select + remove).
+
+## 20. v10 → v11 changes summary
+
+For readers diffing this spec against v10:
+
+- §1 Objective: still single-user; the curation step is now an authoring affordance for the same owner.
+- §2 Acceptance Criteria: unchanged. The home page still surfaces "on this day". v11 just narrows the candidate set when `PCLOUD_COLLECTION_ID` is configured.
+- §4 Project Structure: adds `routes/admin/collection.tsx`; `lib/cache/collection-cache.{ts,server.ts}`; `lib/admin/{collection,folder-media}.{ts,server.ts}`; `components/{AdminCollectionGrid,CollectionItemsGrid}.tsx`.
+- §7 Boundaries: "Always do" gains the collection-cache to the cron's writer set. "Never do" gains an admin-only carve-out for fileid (still server-side for the public app). "Ask first" unchanged.
+- §17 (v10): unchanged.
+- §19 (new): v11 acceptance criteria — curation model, admin route, write boundaries, cron extension, new surface.

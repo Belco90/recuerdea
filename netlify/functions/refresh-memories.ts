@@ -1,3 +1,5 @@
+import { createCollectionCache } from '#/lib/cache/collection-cache'
+import { getCollectionCacheStore } from '#/lib/cache/collection-cache.server'
 import { createFileidIndex } from '#/lib/cache/fileid-index'
 import { getFileidIndexStore } from '#/lib/cache/fileid-index.server'
 import { createFolderCache } from '#/lib/cache/folder-cache'
@@ -9,14 +11,23 @@ import { connectLambda } from '@netlify/blobs'
 import { schedule } from '@netlify/functions'
 import { createClient } from 'pcloud-kit'
 
-function getEnvConfig(): { token: string; folderId: number } {
+function getEnvConfig(): { token: string; folderId: number; collectionId: number | null } {
 	const token = process.env.PCLOUD_TOKEN
 	const folderIdRaw = process.env.PCLOUD_MEMORIES_FOLDER_ID
 	if (!token) throw new Error('PCLOUD_TOKEN is not set')
 	if (!folderIdRaw) throw new Error('PCLOUD_MEMORIES_FOLDER_ID is not set')
 	const folderId = Number(folderIdRaw)
 	if (!Number.isInteger(folderId)) throw new Error('PCLOUD_MEMORIES_FOLDER_ID must be an integer')
-	return { token, folderId }
+
+	const collectionIdRaw = process.env.PCLOUD_COLLECTION_ID
+	let collectionId: number | null = null
+	if (collectionIdRaw) {
+		const parsed = Number(collectionIdRaw)
+		if (!Number.isInteger(parsed)) throw new Error('PCLOUD_COLLECTION_ID must be an integer')
+		collectionId = parsed
+	}
+
+	return { token, folderId, collectionId }
 }
 
 export const handler = schedule('0 4,22 * * *', async (event) => {
@@ -30,11 +41,12 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 	// to the shape `connectLambda` expects.
 	connectLambda(event as unknown as Parameters<typeof connectLambda>[0])
 
-	const { token, folderId } = getEnvConfig()
+	const { token, folderId, collectionId } = getEnvConfig()
 	const client = createClient({ token })
 	const mediaCache = createMediaCache(getMediaCacheStore())
 	const fileidIndex = createFileidIndex(getFileidIndexStore())
 	const folderCache = createFolderCache(getFolderCacheStore())
+	const collectionCache = createCollectionCache(getCollectionCacheStore())
 
 	const apiKey = process.env.GEOAPIFY_API_KEY
 	const capRaw = process.env.RECUERDEA_GEOCODE_MAX_PER_RUN
@@ -42,6 +54,10 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 	if (!apiKey) {
 		// eslint-disable-next-line no-console
 		console.warn('[refresh] geocode skipped: no api key')
+	}
+	if (!collectionId) {
+		// eslint-disable-next-line no-console
+		console.warn('[refresh] collection snapshot skipped: PCLOUD_COLLECTION_ID unset')
 	}
 
 	const result = await refreshMemories(
@@ -51,6 +67,7 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 		fileidIndex,
 		folderCache,
 		apiKey ? { apiKey, cap } : undefined,
+		collectionId ? { cache: collectionCache, collectionid: collectionId } : undefined,
 	)
 
 	const e = result.extractCounts
@@ -74,6 +91,13 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 		// eslint-disable-next-line no-console
 		console.log(
 			`[refresh-memories] geocode failures: auth=${f.auth} suspended=${f.suspended} ratelimit=${f.ratelimit} server=${f.server} network=${f.network} parse=${f.parse}`,
+		)
+	}
+	if (result.collectionStats) {
+		const c = result.collectionStats
+		// eslint-disable-next-line no-console
+		console.log(
+			`[refresh-memories] collection: linked=${c.linked} alive=${c.alive} missing=${c.linked - c.alive}`,
 		)
 	}
 	return { statusCode: 200 }
