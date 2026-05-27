@@ -89,8 +89,7 @@ export async function fetchTodayMemories(today: {
 
 	// Curated collection wins when it exists (even when empty — an empty
 	// collection means "show nothing", not "fall back"). Folder snapshot is
-	// the boot/rollback fallback: before the first Phase-4 cron run, or when
-	// `PCLOUD_COLLECTION_ID` is unset.
+	// the boot/rollback fallback: before the admin has curated anything.
 	const collectionSnap = await collectionCache.lookup()
 	const uuids = collectionSnap?.uuids
 	if (!uuids) {
