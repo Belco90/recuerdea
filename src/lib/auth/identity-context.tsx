@@ -9,7 +9,13 @@ import { hardNavigate } from '../utils/navigation'
 type IdentityValue = {
 	user: User | null
 	ready: boolean
+	isAdmin: boolean
 	logout: () => Promise<void>
+}
+
+function deriveIsAdmin(user: User | null): boolean {
+	if (!user) return false
+	return user.role === 'admin' || (user.roles?.includes('admin') ?? false)
 }
 
 const IdentityContext = createContext<IdentityValue | null>(null)
@@ -39,7 +45,10 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
 		hardNavigate('/login')
 	}, [])
 
-	const value = useMemo(() => ({ user, ready, logout }), [user, ready, logout])
+	const value = useMemo(
+		() => ({ user, ready, isAdmin: deriveIsAdmin(user), logout }),
+		[user, ready, logout],
+	)
 
 	return <IdentityContext value={value}>{children}</IdentityContext>
 }
