@@ -4,6 +4,10 @@ import type { AdminMediaItem } from './folder-media.server'
 
 export type { AdminMediaItem }
 
+export type CollectionMediaResult =
+	| { status: 'ok'; items: AdminMediaItem[] }
+	| { status: 'unconfigured' }
+
 type LinkInput = { uuids: readonly string[] }
 
 function parseLinkInput(input: unknown): LinkInput | null {
@@ -38,11 +42,17 @@ async function makeDeps() {
 }
 
 export const getCollectionMedia = createServerFn({ method: 'GET' }).handler(
-	async (): Promise<AdminMediaItem[]> => {
+	async (): Promise<CollectionMediaResult> => {
 		await gateAdmin()
-		const { client, fileidIndex, mediaCache } = await makeDeps()
-		const { fetchCollectionMedia } = await import('./collection.server')
-		return fetchCollectionMedia(client, fileidIndex, mediaCache)
+		const { CollectionIdMissingError, fetchCollectionMedia } = await import('./collection.server')
+		try {
+			const { client, fileidIndex, mediaCache } = await makeDeps()
+			const items = await fetchCollectionMedia(client, fileidIndex, mediaCache)
+			return { status: 'ok', items }
+		} catch (e) {
+			if (e instanceof CollectionIdMissingError) return { status: 'unconfigured' }
+			throw e
+		}
 	},
 )
 
