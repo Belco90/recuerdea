@@ -2,10 +2,14 @@ import { AdminCollectionGrid } from '#/components/AdminCollectionGrid'
 import { AppShell } from '#/components/AppShell'
 import { CollectionItemsGrid } from '#/components/CollectionItemsGrid'
 import { Topbar } from '#/components/Topbar'
-import { getCollectionMedia, unlinkFilesFromCollection } from '#/lib/admin/collection'
+import {
+	getCollectionMedia,
+	linkFilesToCollection,
+	unlinkFilesFromCollection,
+} from '#/lib/admin/collection'
 import { getAdminFolderMedia } from '#/lib/admin/folder-media'
 import { getServerUser } from '#/lib/auth/auth'
-import { Alert, Box, Container, Heading, Stack, Text } from '@chakra-ui/react'
+import { Alert, Box, Button, Container, Heading, HStack, Stack, Text } from '@chakra-ui/react'
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
 import { useState } from 'react'
 
@@ -27,9 +31,23 @@ function AdminCollectionPage() {
 	const { collection, folder } = Route.useLoaderData()
 	const router = useRouter()
 	const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set())
+	const [showAddPanel, setShowAddPanel] = useState(false)
+	const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+	const [saving, setSaving] = useState(false)
 
 	const collectionItems = collection.status === 'ok' ? collection.items : []
 	const inCollection = new Set(collectionItems.map((m) => m.uuid))
+	const canMutate = collection.status === 'ok'
+
+	function toggleSelection(uuid: string) {
+		if (inCollection.has(uuid)) return
+		setSelected((prev) => {
+			const next = new Set(prev)
+			if (next.has(uuid)) next.delete(uuid)
+			else next.add(uuid)
+			return next
+		})
+	}
 
 	async function handleRemove(uuid: string) {
 		setPending((prev) => new Set(prev).add(uuid))
@@ -45,11 +63,24 @@ function AdminCollectionPage() {
 		}
 	}
 
+	async function handleSave() {
+		if (selected.size === 0) return
+		setSaving(true)
+		try {
+			await linkFilesToCollection({ data: { uuids: [...selected] } })
+			setSelected(new Set())
+			setShowAddPanel(false)
+			await router.invalidate()
+		} finally {
+			setSaving(false)
+		}
+	}
+
 	return (
 		<AppShell>
 			<Topbar />
 			<Container as="main" maxW="1080px" px={{ base: 4, md: 4.5 }} pt={8} pb={20}>
-				<Stack gap={2} mb={8}>
+				<Stack gap={2} mb={6}>
 					<Heading
 						as="h1"
 						fontFamily="heading"
@@ -65,6 +96,14 @@ function AdminCollectionPage() {
 						tiene {folder.length} archivo{folder.length === 1 ? '' : 's'}.
 					</Text>
 				</Stack>
+
+				<Alert.Root status="info" mb={8}>
+					<Alert.Indicator />
+					<Alert.Description fontSize="sm">
+						Los cambios aparecerán en la página principal tras la próxima sincronización (04:00
+						UTC).
+					</Alert.Description>
+				</Alert.Root>
 
 				{collection.status === 'unconfigured' ? (
 					<UnconfiguredBanner />
@@ -85,16 +124,58 @@ function AdminCollectionPage() {
 					</Stack>
 				)}
 
-				<Stack gap={4}>
-					<Heading as="h2" fontSize="lg" color="ink">
-						Todos los archivos ({folder.length})
-					</Heading>
-					{folder.length === 0 ? (
-						<EmptyFolder />
-					) : (
-						<AdminCollectionGrid items={folder} disabled={inCollection} onToggle={() => {}} />
-					)}
-				</Stack>
+				{canMutate && (
+					<Stack gap={4}>
+						<HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
+							<Heading as="h2" fontSize="lg" color="ink">
+								{showAddPanel ? `Selecciona archivos (${folder.length})` : 'Añadir más'}
+							</Heading>
+							{showAddPanel ? (
+								<HStack gap={2}>
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={() => {
+											setShowAddPanel(false)
+											setSelected(new Set())
+										}}
+										disabled={saving}
+									>
+										Cancelar
+									</Button>
+									<Button
+										colorPalette="accent"
+										size="sm"
+										onClick={handleSave}
+										disabled={selected.size === 0 || saving}
+									>
+										{saving ? 'Guardando…' : `Guardar (${selected.size})`}
+									</Button>
+								</HStack>
+							) : (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setShowAddPanel(true)}
+									disabled={folder.length === 0}
+								>
+									Añadir más
+								</Button>
+							)}
+						</HStack>
+						{showAddPanel &&
+							(folder.length === 0 ? (
+								<EmptyFolder />
+							) : (
+								<AdminCollectionGrid
+									items={folder}
+									selected={selected}
+									disabled={inCollection}
+									onToggle={toggleSelection}
+								/>
+							))}
+					</Stack>
+				)}
 			</Container>
 		</AppShell>
 	)
