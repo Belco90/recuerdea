@@ -6,5 +6,6 @@ declare namespace NodeJS {
 		PCLOUD_MEMORIES_FOLDER_ID: string
 		PCLOUD_COLLECTION_ID?: string
 		PCLOUD_ADMIN_AUTH?: string
+		PCLOUD_SOURCE_FOLDER_ID?: string
 	}
 }

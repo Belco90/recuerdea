@@ -103,62 +103,62 @@ number[])` and `unlinkFilesFromCollectionRaw(client, fileids)`:
 
 ## Phase 3 — Source folder navigation
 
-- [ ] Add `PCLOUD_SOURCE_FOLDER_ID: string` (optional) to `src/env.d.ts`.
-- [ ] Document `PCLOUD_SOURCE_FOLDER_ID` in `README.md`.
-- [ ] New `src/lib/admin/source-folder.server.ts`:
-  - [ ] `SourceFolderIdMissingError` + `assertSourceFolderId()`
+- [x] Add `PCLOUD_SOURCE_FOLDER_ID: string` (optional) to `src/env.d.ts`.
+- [x] Document `PCLOUD_SOURCE_FOLDER_ID` in `README.md`.
+- [x] New `src/lib/admin/source-folder.server.ts`:
+  - [x] `SourceFolderIdMissingError` + `assertSourceFolderId()`
         (mirror `CollectionIdMissingError`).
-  - [ ] `FolderNotPermittedError` for the "outside the source root"
+  - [x] `FolderNotPermittedError` for the "outside the source root"
         case.
-  - [ ] `AdminFolderListing` type as described in the plan.
-  - [ ] `fetchAdminSourceFolder(client, { folderid? })` — defaults to
+  - [x] `AdminFolderListing` type as described in the plan.
+  - [x] `fetchAdminSourceFolder(client, { folderid? })` — defaults to
         source root; lists current via `listfolder({ folderid, noshares:
 1 })`; walks parents for breadcrumbs (cap 10); filters files to
         image/video contenttype; batches `getthumbslinks`.
-  - [ ] Asserts that the requested folder is the source root or has
+  - [x] Asserts that the requested folder is the source root or has
         the source root in its ancestor chain; otherwise throws
         `FolderNotPermittedError`.
-- [ ] New `src/lib/admin/source-folder.ts`:
-  - [ ] `getAdminSourceFolder` createServerFn wrapper, auth + admin
+- [x] New `src/lib/admin/source-folder.ts`:
+  - [x] `getAdminSourceFolder` createServerFn wrapper, auth + admin
         gated, accepts `{ folderid?: number }`.
-  - [ ] Catches `SourceFolderIdMissingError` and
+  - [x] Catches `SourceFolderIdMissingError` and
         `FolderNotPermittedError` into tagged result variants.
-- [ ] New `src/components/AdminFolderNavigator.tsx`:
-  - [ ] Breadcrumb row (first crumb labelled "Raíz") with click →
+- [x] New `src/components/AdminFolderNavigator.tsx`:
+  - [x] Breadcrumb row (first crumb labelled "Raíz") with click →
         `onNavigate(folderid)`.
-  - [ ] Subfolder grid (folder icon + name, full tile click =
+  - [x] Subfolder grid (folder icon + name, full tile click =
         navigate).
-  - [ ] File grid (square tile, thumb, Play overlay for video, checkbox
+  - [x] File grid (square tile, thumb, Play overlay for video, checkbox
         overlay for selection). Disabled when fileid is in
         `blocked: ReadonlySet<number>`.
-  - [ ] Sticky footer: `Guardar (N)`, `Cancelar` (clears selection).
+  - [x] Sticky footer: `Guardar (N)`, `Cancelar` (clears selection).
         Hidden when N=0.
-- [ ] New `src/components/AdminFolderNavigator.browser.test.tsx`:
-  - [ ] Breadcrumb click fires `onNavigate`.
-  - [ ] Subfolder click fires `onNavigate`.
-  - [ ] File click fires `onToggle(fileid)`; footer count updates.
-  - [ ] Save calls `onSave([...fileids])`; Cancel calls `onCancel`.
-  - [ ] Blocked file has `aria-disabled` and ignores clicks.
-- [ ] New `src/lib/admin/source-folder.server.test.ts`:
-  - [ ] Lists current folder: filters image/video correctly.
-  - [ ] Breadcrumbs: walks N parents, stops at source root.
-  - [ ] `getthumbslinks`: batched once with full CSV; thumbs mapped
+- [x] New `src/components/AdminFolderNavigator.browser.test.tsx`:
+  - [x] Breadcrumb click fires `onNavigate`.
+  - [x] Subfolder click fires `onNavigate`.
+  - [x] File click fires `onToggle(fileid)`; footer count updates.
+  - [x] Save calls `onSave([...fileids])`; Cancel calls `onCancel`.
+  - [x] Blocked file has `aria-disabled` and ignores clicks.
+- [x] New `src/lib/admin/source-folder.server.test.ts`:
+  - [x] Lists current folder: filters image/video correctly.
+  - [x] Breadcrumbs: walks N parents, stops at source root.
+  - [x] `getthumbslinks`: batched once with full CSV; thumbs mapped
         by fileid.
-  - [ ] `FolderNotPermittedError` when requested folderid not in
+  - [x] `FolderNotPermittedError` when requested folderid not in
         source-root chain.
-  - [ ] `SourceFolderIdMissingError` when env unset.
-- [ ] Update `src/routes/admin/collection.tsx`:
-  - [ ] `validateSearch: (s) => ({ folderid: Number.isFinite(Number(
+  - [x] `SourceFolderIdMissingError` when env unset.
+- [x] Update `src/routes/admin/collection.tsx`:
+  - [x] `validateSearch: (s) => ({ folderid: Number.isFinite(Number(
 s?.folderid)) ? Number(s.folderid) : undefined })`.
-  - [ ] Loader: `Promise.all([getCollectionMedia(),
+  - [x] Loader: `Promise.all([getCollectionMedia(),
 getAdminSourceFolder({ data: { folderid: search.folderid } })])`.
-  - [ ] Component state: `picked: Map<number, AdminFileItem>`.
-  - [ ] Renders `<CollectionItemsGrid>` for the top section.
-  - [ ] Renders `<AdminFolderNavigator>` with: - `listing` from loader data - `blocked` = Set of collection items' fileids - `picked` = selection state - `onNavigate` = router.navigate({ search: { folderid } }) - `onToggle` = mutate picked - `onSave` = call `linkFilesToCollection({ data: { fileids:
+  - [x] Component state: `picked: Map<number, AdminFileItem>`.
+  - [x] Renders `<CollectionItemsGrid>` for the top section.
+  - [x] Renders `<AdminFolderNavigator>` with: - `listing` from loader data - `blocked` = Set of collection items' fileids - `picked` = selection state - `onNavigate` = router.navigate({ search: { folderid } }) - `onToggle` = mutate picked - `onSave` = call `linkFilesToCollection({ data: { fileids:
 [...picked.keys()] } })` → reset picked → router.invalidate() - `onCancel` = reset picked
-  - [ ] Add tagged banner branches for `source-folder-id-missing`
+  - [x] Add tagged banner branches for `source-folder-id-missing`
         and `folder-not-permitted`.
-- [ ] `pnpm test && pnpm type-check && pnpm lint && pnpm format:check`.
+- [x] `pnpm test && pnpm type-check && pnpm lint && pnpm format:check`.
 
 ### Acceptance — Phase 3
 

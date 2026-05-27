@@ -27,6 +27,7 @@ The full architecture, acceptance criteria, and boundary rules live in [`SPEC.md
   - Optional: `RECUERDEA_GEOCODE_MAX_PER_RUN` (default 200).
   - Optional: `PCLOUD_COLLECTION_ID` — pCloud collection id used by `/admin/collection` to curate which folder items participate in the home page. Unset ⇒ home falls back to the raw folder snapshot.
   - Optional (required with `PCLOUD_COLLECTION_ID`): `PCLOUD_ADMIN_AUTH` — pCloud-native auth token (not OAuth) used for every `collection_*` call from `/admin/collection` and from the cron's collection snapshot. Mint via pCloud's `getauth` endpoint: `curl -sG "https://eapi.pcloud.com/userinfo" --data-urlencode "getauth=1" --data-urlencode "username=<EMAIL>" --data-urlencode "password=<PASSWORD>"` → grab `.auth`. Unset ⇒ admin route's collection ops are blocked and the cron logs `collection snapshot skipped: PCLOUD_ADMIN_AUTH unset`.
+  - Optional (required for `/admin/collection`'s "Añadir más" navigator): `PCLOUD_SOURCE_FOLDER_ID` — pCloud folder id that scopes the file picker. The admin can navigate subfolders below it but cannot escape outside the tree. Typically equal to `PCLOUD_MEMORIES_FOLDER_ID`.
 
 ## Getting started
 
