@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminCollectionRouteImport } from './routes/admin/collection'
 import { Route as ApiVideoUuidRouteImport } from './routes/api/video/$uuid'
+import { Route as ApiAdminThumbFileidRouteImport } from './routes/api/admin/thumb/$fileid'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -34,18 +35,25 @@ const ApiVideoUuidRoute = ApiVideoUuidRouteImport.update({
   path: '/api/video/$uuid',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAdminThumbFileidRoute = ApiAdminThumbFileidRouteImport.update({
+  id: '/api/admin/thumb/$fileid',
+  path: '/api/admin/thumb/$fileid',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/admin/collection': typeof AdminCollectionRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
+  '/api/admin/thumb/$fileid': typeof ApiAdminThumbFileidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/admin/collection': typeof AdminCollectionRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
+  '/api/admin/thumb/$fileid': typeof ApiAdminThumbFileidRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +61,30 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/admin/collection': typeof AdminCollectionRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
+  '/api/admin/thumb/$fileid': typeof ApiAdminThumbFileidRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/admin/collection' | '/api/video/$uuid'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/admin/collection'
+    | '/api/video/$uuid'
+    | '/api/admin/thumb/$fileid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/admin/collection' | '/api/video/$uuid'
-  id: '__root__' | '/' | '/login' | '/admin/collection' | '/api/video/$uuid'
+  to:
+    | '/'
+    | '/login'
+    | '/admin/collection'
+    | '/api/video/$uuid'
+    | '/api/admin/thumb/$fileid'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/admin/collection'
+    | '/api/video/$uuid'
+    | '/api/admin/thumb/$fileid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +92,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   AdminCollectionRoute: typeof AdminCollectionRoute
   ApiVideoUuidRoute: typeof ApiVideoUuidRoute
+  ApiAdminThumbFileidRoute: typeof ApiAdminThumbFileidRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +125,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiVideoUuidRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin/thumb/$fileid': {
+      id: '/api/admin/thumb/$fileid'
+      path: '/api/admin/thumb/$fileid'
+      fullPath: '/api/admin/thumb/$fileid'
+      preLoaderRoute: typeof ApiAdminThumbFileidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +140,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   AdminCollectionRoute: AdminCollectionRoute,
   ApiVideoUuidRoute: ApiVideoUuidRoute,
+  ApiAdminThumbFileidRoute: ApiAdminThumbFileidRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

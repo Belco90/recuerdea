@@ -4,7 +4,7 @@ export type SourceFileItem = {
 	fileid: number
 	name: string
 	kind: 'image' | 'video' | 'other'
-	thumbUrl: string | null
+	thumbUrl: string
 }
 
 export type AdminFolderListing = {
@@ -39,19 +39,8 @@ export function assertSourceFolderId(): number {
 
 const ROOT_LABEL = 'Raíz'
 const MAX_BREADCRUMB_DEPTH = 10
-// Bound the fileids CSV that goes on each getthumbslinks URL. Past a few hundred
-// ids, pCloud closes the connection mid-request (surfaces as `fetch failed`).
-const THUMBS_CHUNK_SIZE = 100
 
 type ListfolderResponse = { metadata: FolderMetadata }
-type ThumbsLinksResponse = {
-	thumbs: ReadonlyArray<{
-		result: number
-		fileid: number
-		path?: string
-		hosts?: ReadonlyArray<string>
-	}>
-}
 
 function kindFromContenttype(ct: string): 'image' | 'video' | 'other' {
 	if (ct.startsWith('image/')) return 'image'
@@ -102,41 +91,16 @@ async function buildBreadcrumbs(
 	return crumbs
 }
 
-async function buildFiles(
-	client: Client,
-	files: readonly FileMetadata[],
-): Promise<SourceFileItem[]> {
-	if (files.length === 0) return []
-	const thumbByFileid = new Map<number, string>()
-	for (let i = 0; i < files.length; i += THUMBS_CHUNK_SIZE) {
-		const chunk = files.slice(i, i + THUMBS_CHUNK_SIZE)
-		try {
-			// eslint-disable-next-line no-await-in-loop
-			const thumbs = await client.call<ThumbsLinksResponse>('getthumbslinks', {
-				fileids: chunk.map((f) => f.fileid).join(','),
-				size: '320x320',
-				crop: 1,
-				type: 'jpg',
-			})
-			for (const t of thumbs.thumbs) {
-				if (t.result !== 0) continue
-				const host = t.hosts?.[0]
-				if (!host || !t.path) continue
-				thumbByFileid.set(t.fileid, `https://${host}${t.path}`)
-			}
-		} catch (err) {
-			// A single bad chunk shouldn't take down the whole listing; affected
-			// files just render without a thumbnail.
-			const msg = err instanceof Error ? err.message : String(err)
-			// eslint-disable-next-line no-console
-			console.warn(`[source-folder] getthumbslinks chunk ${i}–${i + chunk.length} failed: ${msg}`)
-		}
-	}
+// Thumbnails route through `/api/admin/thumb/<fileid>` because pCloud's
+// `getthumblink` / `getthumbslinks` URLs are IP-bound (SPEC §17): the SSR
+// can mint them but the browser's IP won't match, so it can't fetch them
+// directly.
+function buildFiles(files: readonly FileMetadata[]): SourceFileItem[] {
 	return files.map((f) => ({
 		fileid: f.fileid,
 		name: f.name,
 		kind: kindFromContenttype(f.contenttype),
-		thumbUrl: thumbByFileid.get(f.fileid) ?? null,
+		thumbUrl: `/api/admin/thumb/${f.fileid}`,
 	}))
 }
 
@@ -166,7 +130,7 @@ export async function fetchAdminSourceFolder(
 		}
 	}
 
-	const files = await buildFiles(client, mediaFiles)
+	const files = buildFiles(mediaFiles)
 
 	return {
 		folderid: target,

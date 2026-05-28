@@ -53,17 +53,6 @@ function makeFile(fileid: number, overrides: Partial<FileMetadata> = {}): FileMe
 	}
 }
 
-function thumbEntry(fileid: number, path = `/p-${fileid}`) {
-	return {
-		result: 0,
-		fileid,
-		path,
-		hosts: ['eapi-cdn.pcloud.com'],
-		size: '320x320',
-		expires: 'Wed, 28 May 2026 00:00:00 +0000',
-	}
-}
-
 beforeEach(() => {
 	vi.stubEnv('PCLOUD_SOURCE_FOLDER_ID', String(ROOT_ID))
 })
@@ -136,9 +125,6 @@ describe('fetchAdminSourceFolder', () => {
 					}),
 				}
 			}
-			if (method === 'getthumbslinks') {
-				return { thumbs: [thumbEntry(100), thumbEntry(200)] }
-			}
 			throw new Error(`unexpected method: ${method}`)
 		})
 
@@ -153,21 +139,21 @@ describe('fetchAdminSourceFolder', () => {
 				fileid: 100,
 				name: 'photo.jpg',
 				kind: 'image',
-				thumbUrl: 'https://eapi-cdn.pcloud.com/p-100',
+				thumbUrl: '/api/admin/thumb/100',
 			},
 			{
 				fileid: 200,
 				name: 'clip.mp4',
 				kind: 'video',
-				thumbUrl: 'https://eapi-cdn.pcloud.com/p-200',
+				thumbUrl: '/api/admin/thumb/200',
 			},
 		])
 	})
 
-	it('batches getthumbslinks once with the full CSV', async () => {
-		const calls: Array<{ method: string; params: unknown }> = []
-		const client = makeClient(async (method, params) => {
-			calls.push({ method, params })
+	it('only calls listfolder — thumbnails resolve through the proxy route', async () => {
+		const methodsSeen: string[] = []
+		const client = makeClient(async (method) => {
+			methodsSeen.push(method)
 			if (method === 'listfolder') {
 				return {
 					metadata: makeFolder(ROOT_ID, {
@@ -179,39 +165,12 @@ describe('fetchAdminSourceFolder', () => {
 					}),
 				}
 			}
-			return { thumbs: [thumbEntry(100), thumbEntry(200)] }
-		})
-
-		await fetchAdminSourceFolder(client)
-
-		const thumbCalls = calls.filter((c) => c.method === 'getthumbslinks')
-		expect(thumbCalls).toHaveLength(1)
-		expect(thumbCalls[0]?.params).toEqual({
-			fileids: '100,200',
-			size: '320x320',
-			crop: 1,
-			type: 'jpg',
-		})
-	})
-
-	it('skips getthumbslinks when the folder has no media', async () => {
-		const calls: string[] = []
-		const client = makeClient(async (method) => {
-			calls.push(method)
-			if (method === 'listfolder') {
-				return {
-					metadata: makeFolder(ROOT_ID, {
-						parentfolderid: 0,
-						contents: [makeFolder(11)],
-					}),
-				}
-			}
 			throw new Error(`unexpected method: ${method}`)
 		})
 
 		await fetchAdminSourceFolder(client)
 
-		expect(calls).toEqual(['listfolder'])
+		expect(new Set(methodsSeen)).toEqual(new Set(['listfolder']))
 	})
 
 	it('builds breadcrumbs by walking up to the source root', async () => {
@@ -290,86 +249,30 @@ describe('fetchAdminSourceFolder', () => {
 		await expect(fetchAdminSourceFolder(client)).rejects.toThrow(SourceFolderIdMissingError)
 	})
 
-	it('chunks getthumbslinks when the folder has more than 100 media files', async () => {
+	it('scales to large folders without per-file pCloud calls', async () => {
 		const fileCount = 250
 		const files = Array.from({ length: fileCount }, (_, i) =>
 			makeFile(1000 + i, { contenttype: 'image/jpeg' }),
 		)
-		const calls: Array<{ method: string; params: unknown }> = []
-		const client = makeClient(async (method, params) => {
-			calls.push({ method, params })
-			if (method === 'listfolder') {
-				return {
-					metadata: makeFolder(ROOT_ID, { parentfolderid: 0, contents: files }),
-				}
-			}
-			if (method === 'getthumbslinks') {
-				const ids = (params as { fileids: string }).fileids.split(',').map(Number)
-				return { thumbs: ids.map((id) => thumbEntry(id)) }
-			}
-			throw new Error(`unexpected method: ${method}`)
-		})
-
-		const result = await fetchAdminSourceFolder(client)
-
-		const thumbCalls = calls.filter((c) => c.method === 'getthumbslinks')
-		expect(thumbCalls.length).toBeGreaterThan(1)
-		for (const c of thumbCalls) {
-			const ids = (c.params as { fileids: string }).fileids.split(',')
-			expect(ids.length).toBeLessThanOrEqual(100)
-		}
-		expect(result.files).toHaveLength(fileCount)
-		expect(result.files.every((f) => f.thumbUrl !== null)).toBe(true)
-	})
-
-	it('isolates a single getthumbslinks chunk failure from the rest of the listing', async () => {
-		const fileCount = 250
-		const files = Array.from({ length: fileCount }, (_, i) =>
-			makeFile(1000 + i, { contenttype: 'image/jpeg' }),
-		)
-		let thumbCall = 0
-		const client = makeClient(async (method, params) => {
-			if (method === 'listfolder') {
-				return {
-					metadata: makeFolder(ROOT_ID, { parentfolderid: 0, contents: files }),
-				}
-			}
-			if (method === 'getthumbslinks') {
-				thumbCall++
-				if (thumbCall === 2) throw new Error('fetch failed')
-				const ids = (params as { fileids: string }).fileids.split(',').map(Number)
-				return { thumbs: ids.map((id) => thumbEntry(id)) }
-			}
-			throw new Error(`unexpected method: ${method}`)
-		})
-
-		const result = await fetchAdminSourceFolder(client)
-
-		expect(result.files).toHaveLength(fileCount)
-		const withThumb = result.files.filter((f) => f.thumbUrl !== null)
-		const withoutThumb = result.files.filter((f) => f.thumbUrl === null)
-		expect(withThumb.length).toBeGreaterThan(0)
-		expect(withoutThumb.length).toBeGreaterThan(0)
-	})
-
-	it('returns thumbUrl=null when a file is missing from the thumbs response', async () => {
+		const methodsSeen: string[] = []
 		const client = makeClient(async (method) => {
+			methodsSeen.push(method)
 			if (method === 'listfolder') {
-				return {
-					metadata: makeFolder(ROOT_ID, {
-						parentfolderid: 0,
-						contents: [makeFile(100), makeFile(200)],
-					}),
-				}
+				return { metadata: makeFolder(ROOT_ID, { parentfolderid: 0, contents: files }) }
 			}
-			return { thumbs: [thumbEntry(100)] }
+			throw new Error(`unexpected method: ${method}`)
 		})
 
 		const result = await fetchAdminSourceFolder(client)
 
-		expect(result.files.map((f) => ({ fileid: f.fileid, thumbUrl: f.thumbUrl }))).toEqual([
-			{ fileid: 100, thumbUrl: 'https://eapi-cdn.pcloud.com/p-100' },
-			{ fileid: 200, thumbUrl: null },
-		])
+		expect(result.files).toHaveLength(fileCount)
+		expect(result.files[0]).toEqual({
+			fileid: 1000,
+			name: 'f-1000.jpg',
+			kind: 'image',
+			thumbUrl: '/api/admin/thumb/1000',
+		})
+		// One listfolder call for the target; no per-file API calls.
+		expect(methodsSeen).toEqual(['listfolder'])
 	})
 })
