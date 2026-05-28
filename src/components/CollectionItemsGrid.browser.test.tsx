@@ -1,4 +1,4 @@
-import type { AdminFileItem } from '#/lib/admin/collection.server'
+import type { CollectionItem } from '#/lib/admin/collection.server'
 
 import { describe, expect, it, vi } from 'vitest'
 import { page, userEvent } from 'vitest/browser'
@@ -6,22 +6,25 @@ import { page, userEvent } from 'vitest/browser'
 import { render } from '../../test/test-utils'
 import { CollectionItemsGrid } from './CollectionItemsGrid'
 
-const imageItem: AdminFileItem = {
+const imageItem: CollectionItem = {
 	uuid: 'uuid-A',
+	fileid: 100,
 	name: '2024.jpg',
 	kind: 'image',
 	thumbUrl: 'https://example.test/thumb-2024.jpg',
 }
 
-const videoItem: AdminFileItem = {
+const videoItem: CollectionItem = {
 	uuid: 'uuid-B',
+	fileid: 200,
 	name: '2018.mp4',
 	kind: 'video',
 	thumbUrl: 'https://example.test/thumb-2018.jpg',
 }
 
-const itemMissingThumb: AdminFileItem = {
+const itemMissingThumb: CollectionItem = {
 	uuid: 'uuid-C',
+	fileid: 300,
 	name: 'noThumb.jpg',
 	kind: 'image',
 	thumbUrl: null,

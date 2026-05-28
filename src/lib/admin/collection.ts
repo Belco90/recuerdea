@@ -1,12 +1,22 @@
 import { createServerFn } from '@tanstack/react-start'
 
-import type { AdminFileItem } from './collection.server'
+import type { CollectionItem } from './collection.server'
 
-export type { AdminFileItem }
+export type { CollectionItem }
 
-export type CollectionMediaResult = { status: 'ok'; items: AdminFileItem[] }
+export type CollectionMediaResult = { status: 'ok'; items: CollectionItem[] }
 
+type FileidsInput = { fileids: readonly number[] }
 type UuidsInput = { uuids: readonly string[] }
+
+function parseFileidsInput(input: unknown): FileidsInput | null {
+	if (!input || typeof input !== 'object') return null
+	const obj = input as Record<string, unknown>
+	if (!Array.isArray(obj.fileids)) return null
+	if (obj.fileids.length === 0) return null
+	if (!obj.fileids.every((f): f is number => Number.isInteger(f) && (f as number) > 0)) return null
+	return { fileids: obj.fileids as readonly number[] }
+}
 
 function parseUuidsInput(input: unknown): UuidsInput | null {
 	if (!input || typeof input !== 'object') return null
@@ -24,13 +34,23 @@ async function gateAdmin(): Promise<void> {
 	if (!user.isAdmin) throw new Error('forbidden')
 }
 
+async function makeClient() {
+	const token = process.env.PCLOUD_TOKEN
+	if (!token) throw new Error('PCLOUD_TOKEN is not set')
+	const { createClient } = await import('pcloud-kit')
+	return createClient({ token })
+}
+
 async function makeStores() {
 	const { createCollectionCache } = await import('../cache/collection-cache')
 	const { getCollectionCacheStore } = await import('../cache/collection-cache.server')
+	const { createFileidIndex } = await import('../cache/fileid-index')
+	const { getFileidIndexStore } = await import('../cache/fileid-index.server')
 	const { createMediaCache } = await import('../cache/media-cache')
 	const { getMediaCacheStore } = await import('../cache/media-cache.server')
 	return {
 		collection: createCollectionCache(getCollectionCacheStore()),
+		fileidIndex: createFileidIndex(getFileidIndexStore()),
 		media: createMediaCache(getMediaCacheStore()),
 	}
 }
@@ -46,13 +66,14 @@ export const getCollectionMedia = createServerFn({ method: 'GET' }).handler(
 )
 
 export const addToCollection = createServerFn({ method: 'POST' })
-	.inputValidator((input: unknown): UuidsInput | null => parseUuidsInput(input))
+	.inputValidator((input: unknown): FileidsInput | null => parseFileidsInput(input))
 	.handler(async ({ data }): Promise<void> => {
 		if (!data) throw new Error('invalid input')
 		await gateAdmin()
-		const { addUuidsToCollection } = await import('./collection.server')
-		const { collection } = await makeStores()
-		await addUuidsToCollection(collection, data.uuids)
+		const { addFileidsToCollection } = await import('./collection.server')
+		const client = await makeClient()
+		const { collection, fileidIndex, media } = await makeStores()
+		await addFileidsToCollection(client, fileidIndex, media, collection, data.fileids)
 	})
 
 export const removeFromCollection = createServerFn({ method: 'POST' })

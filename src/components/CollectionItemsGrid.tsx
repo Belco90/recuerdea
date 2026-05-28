@@ -1,10 +1,10 @@
-import type { AdminFileItem } from '#/lib/admin/collection.server'
+import type { CollectionItem } from '#/lib/admin/collection.server'
 
 import { Box, Button, HStack, Image, SimpleGrid, Stack, Text } from '@chakra-ui/react'
 import { Play, Trash2 } from 'lucide-react'
 
 type CollectionItemsGridProps = {
-	items: readonly AdminFileItem[]
+	items: readonly CollectionItem[]
 	pending?: ReadonlySet<string>
 	onRemove: (uuid: string) => void
 }
