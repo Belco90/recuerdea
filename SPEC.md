@@ -56,9 +56,17 @@ src/
     __root.tsx
     index.tsx       # Home route — beforeLoad auth gate + loader + Home component (composes Topbar, AdminDateOverride, Hero, Timeline / YearSection / Polaroid, EmptyState, Lightbox)
     login.tsx       # Netlify Identity login + invite/recovery callbacks (analog-album layout — v5)
+    admin/
+      collection.tsx      # Layout route — admin gate + curated-collection loader + shared chrome (AppShell + Topbar + heading) + <Outlet />. v14.
+      collection/
+        index.tsx         # /admin/collection leaf — curated grid + "Añadir más" link. v14.
+        add.tsx           # /admin/collection/add leaf — AdminFolderNavigator picker (validateSearch ?folderid=, source-folder loader, picked state, save/cancel handlers). v14.
     api/
       video/
-        $uuid.ts    # GET /api/video/:uuid[?download=1] — auth-gated, byte-streams pCloud video bytes; range forwarded for stream, stripped for download. v9 demolished /api/memory/<uuid>; v10 reintroduced this narrower proxy because `getpublinkdownload` URLs are IP-bound (see §17).
+        $uuid.ts          # GET /api/video/:uuid[?download=1] — auth-gated, byte-streams pCloud video bytes; range forwarded for stream, stripped for download. v9 demolished /api/memory/<uuid>; v10 reintroduced this narrower proxy because `getpublinkdownload` URLs are IP-bound (see §17).
+      admin/
+        thumb/
+          $fileid.ts      # GET /api/admin/thumb/:fileid — auth-gated proxy: mints `getthumblink` server-side and pipes bytes back as image/jpeg. Used by the source-folder navigator because pCloud thumb URLs are IP-bound (SPEC §17). v14.
   components/       # Reusable presentational React components (PascalCase per file). All Chakra-native — v5.
     AppShell.tsx          # Page-level Box wrapper (paper bg lives on body via globalCss)
     Wordmark.tsx          # Italic Fraunces "Recuerdea" wordmark with rotated R + accent dot
@@ -552,12 +560,20 @@ Cumulative on top of §23 (v13). v14 restores the v12-style **navigable view of 
 
 Files picked from outside `PCLOUD_MEMORIES_FOLDER_ID` get **lazy-minted** at admin save time (stat + getfilepublink, no range-fetch extraction). The cron sweep reads `collection/v1` so those lazy-minted uuids aren't deleted on the next run. The home loader and the curated-grid section are unchanged.
 
+**Route layout**
+
+- `src/routes/admin/collection.tsx` is a **layout** route: it owns the admin `beforeLoad` gate, the curated-collection loader (`getCollectionMedia()`), and the shared chrome (`AppShell` + `Topbar` + page heading). It renders `<Outlet />` and nothing else of substance.
+- `src/routes/admin/collection/index.tsx` is the `/admin/collection` leaf — curated grid + remove + a Chakra-styled `<Link to="/admin/collection/add">` button ("Añadir más").
+- `src/routes/admin/collection/add.tsx` is the `/admin/collection/add` leaf — the picker. Owns its own search-param + source-folder loader; reads the curated list from the parent loader via `useLoaderData({ from: '/admin/collection' })` to compute `blocked`.
+
 **Picker shape**
 
-- `/admin/collection?folderid=N` (search param, validated as non-negative integer; defaults to source root when absent).
-- Loader fans out to `getCollectionMedia()` + `getAdminSourceFolder({ folderid })` in parallel.
-- Picker is `AdminFolderNavigator`: breadcrumbs row → subfolder grid → file grid → sticky `Guardar (N)` / `Cancelar` footer. Sub-folder clicks navigate via `?folderid`; file clicks toggle selection. Picks survive folder navigation (route state is `Map<fileid, SourceFileItem>`).
-- `blocked: Set<fileid>` computed client-side from `collectionItems.map(m => m.fileid)`. CollectionItem carries `fileid` for this reason.
+- `/admin/collection/add?folderid=N` (search param, validated as non-negative integer; defaults to source root when absent).
+- Loader fetches `getAdminSourceFolder({ folderid })`. The curated list (for `blocked`) comes from the parent layout's loader; the picker route does not re-fetch it.
+- Picker is `AdminFolderNavigator`: breadcrumbs row → subfolder grid → file grid → sticky `Guardar (N)` / `Cancelar` footer. Sub-folder clicks navigate via `?folderid`; file clicks toggle selection. Picks survive folder navigation within `/add` (route state is `Map<fileid, SourceFileItem>`); they are discarded on Save (after navigating back) or Cancel.
+- Save: `addToCollection({ fileids })` → `await router.invalidate()` → `router.navigate({ to: '/admin/collection' })`. The curated grid renders the new items immediately on landing.
+- Cancel: `router.navigate({ to: '/admin/collection' })`. No persisted picked state.
+- `blocked: Set<fileid>` computed client-side from `collection.items.map(m => m.fileid)`. CollectionItem carries `fileid` for this reason.
 
 **Wire format**
 
@@ -595,14 +611,15 @@ Files picked from outside `PCLOUD_MEMORIES_FOLDER_ID` get **lazy-minted** at adm
 
 **Banner copy**
 
-- Replaces v13's empty heading region with: "Los cambios aparecen inmediatamente en la página principal." — matches reality. The v11 "04:00 UTC" banner stays retired.
+- `/admin/collection` (curated view) shows the info alert: "Los cambios aparecen inmediatamente en la página principal." — matches reality. The v11 "04:00 UTC" banner stays retired.
+- `/admin/collection/add` (picker) keeps `SourceFolderMissingBanner` (when `PCLOUD_SOURCE_FOLDER_ID` is unset) and `FolderNotPermittedBanner` (when the requested folder is outside the source-root subtree).
 
 ## 26. v13 → v14 changes summary
 
 For readers diffing this spec against v13:
 
 - §1 / §2: unchanged.
-- §4 Project Structure: stays at v10 baseline.
+- §4 Project Structure: adds `routes/admin/` (layout + `index.tsx` curated grid + `add.tsx` picker) and `routes/api/admin/thumb/$fileid.ts` (IP-bound thumbnail proxy).
 - §7 Boundaries: "Always do" cron-writer bullet stays as `media/<uuid>` + `fileid-index/<fileid>` + `folder/v1`. The admin-writer bullet is annotated with the v14 fact that the cron is now a **read-only consumer** of `collection/v1`.
 - §23 (v13): superseded by §25 for the picker scope — the flat-grid picker is gone, replaced by a navigable view of `PCLOUD_SOURCE_FOLDER_ID`. Storage shape + admin-writer rule from v13 are still current.
-- §25 (new): v14 acceptance criteria — navigator restored, fileid wire format with lazy-mint, cron sweep protection, env var restored.
+- §25 (new): v14 acceptance criteria — navigator restored, fileid wire format with lazy-mint, cron sweep protection, env var restored. The picker page lives at `/admin/collection/add`; `/admin/collection` is the curated-list view. Source-folder thumbnails proxy through `/api/admin/thumb/<fileid>` because `getthumblink` URLs are IP-bound (§17).
