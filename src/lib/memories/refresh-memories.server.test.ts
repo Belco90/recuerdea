@@ -1262,4 +1262,152 @@ describe('refreshMemories', () => {
 			error.mockRestore()
 		})
 	})
+
+	describe('collection reader (sweep protection)', () => {
+		type CSnap = { refreshedAt: string; uuids: readonly string[] }
+		function makeReader(snapshot: CSnap | undefined) {
+			return {
+				lookup: vi.fn<() => Promise<CSnap | undefined>>().mockResolvedValue(snapshot),
+			}
+		}
+
+		it('no reader: sweep behaves like v13 (no curated uuids spared)', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			fileidStore.data.set(999, { uuid: 'curated-uuid' })
+			mediaStore.data.set('curated-uuid', {
+				fileid: 999,
+				hash: 'h-curated',
+				code: 'C',
+				linkid: 9990,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'curated.jpg',
+				captureDate: null,
+				width: null,
+				height: null,
+				location: null,
+				place: null,
+			})
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+			)
+
+			expect(result.removed).toBe(1)
+			expect(mediaStore.delete).toHaveBeenCalledWith('curated-uuid')
+		})
+
+		it('reader returns undefined: sweep behaves like v13', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			fileidStore.data.set(999, { uuid: 'curated-uuid' })
+			mediaStore.data.set('curated-uuid', {
+				fileid: 999,
+				hash: 'h-curated',
+				code: 'C',
+				linkid: 9990,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'curated.jpg',
+				captureDate: null,
+				width: null,
+				height: null,
+				location: null,
+				place: null,
+			})
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				undefined,
+				makeReader(undefined),
+			)
+
+			expect(result.removed).toBe(1)
+			expect(mediaStore.delete).toHaveBeenCalledWith('curated-uuid')
+		})
+
+		it('reader returns curated uuid outside memories folder: uuid is spared from sweep', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			fileidStore.data.set(999, { uuid: 'curated-uuid' })
+			mediaStore.data.set('curated-uuid', {
+				fileid: 999,
+				hash: 'h-curated',
+				code: 'C',
+				linkid: 9990,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'curated.jpg',
+				captureDate: null,
+				width: null,
+				height: null,
+				location: null,
+				place: null,
+			})
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				undefined,
+				makeReader({ refreshedAt: '2026-05-28T00:00:00.000Z', uuids: ['curated-uuid'] }),
+			)
+
+			expect(result.removed).toBe(0)
+			expect(mediaStore.delete).not.toHaveBeenCalled()
+			expect(mediaStore.data.get('curated-uuid')).toBeDefined()
+		})
+
+		it('reader returns empty list: sweep behaves like v13', async () => {
+			const mediaStore = makeMediaStore()
+			const fileidStore = makeFileidStore()
+			const folderStore = makeFolderStore()
+			fileidStore.data.set(999, { uuid: 'orphan' })
+			mediaStore.data.set('orphan', {
+				fileid: 999,
+				hash: 'h-orphan',
+				code: 'C',
+				linkid: 9990,
+				kind: 'image',
+				contenttype: 'image/jpeg',
+				name: 'gone.jpg',
+				captureDate: null,
+				width: null,
+				height: null,
+				location: null,
+				place: null,
+			})
+			const client = fakeClient({ files: [jpegA] })
+
+			const result = await refreshMemories(
+				client,
+				42,
+				createMediaCache(mediaStore),
+				createFileidIndex(fileidStore),
+				createFolderCache(folderStore),
+				undefined,
+				makeReader({ refreshedAt: '2026-05-28T00:00:00.000Z', uuids: [] }),
+			)
+
+			expect(result.removed).toBe(1)
+			expect(mediaStore.delete).toHaveBeenCalledWith('orphan')
+		})
+	})
 })
