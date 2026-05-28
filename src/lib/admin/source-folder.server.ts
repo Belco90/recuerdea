@@ -39,6 +39,9 @@ export function assertSourceFolderId(): number {
 
 const ROOT_LABEL = 'Raíz'
 const MAX_BREADCRUMB_DEPTH = 10
+// Bound the fileids CSV that goes on each getthumbslinks URL. Past a few hundred
+// ids, pCloud closes the connection mid-request (surfaces as `fetch failed`).
+const THUMBS_CHUNK_SIZE = 100
 
 type ListfolderResponse = { metadata: FolderMetadata }
 type ThumbsLinksResponse = {
@@ -104,19 +107,30 @@ async function buildFiles(
 	files: readonly FileMetadata[],
 ): Promise<SourceFileItem[]> {
 	if (files.length === 0) return []
-	const fileids = files.map((f) => f.fileid)
-	const thumbs = await client.call<ThumbsLinksResponse>('getthumbslinks', {
-		fileids: fileids.join(','),
-		size: '320x320',
-		crop: 1,
-		type: 'jpg',
-	})
 	const thumbByFileid = new Map<number, string>()
-	for (const t of thumbs.thumbs) {
-		if (t.result !== 0) continue
-		const host = t.hosts?.[0]
-		if (!host || !t.path) continue
-		thumbByFileid.set(t.fileid, `https://${host}${t.path}`)
+	for (let i = 0; i < files.length; i += THUMBS_CHUNK_SIZE) {
+		const chunk = files.slice(i, i + THUMBS_CHUNK_SIZE)
+		try {
+			// eslint-disable-next-line no-await-in-loop
+			const thumbs = await client.call<ThumbsLinksResponse>('getthumbslinks', {
+				fileids: chunk.map((f) => f.fileid).join(','),
+				size: '320x320',
+				crop: 1,
+				type: 'jpg',
+			})
+			for (const t of thumbs.thumbs) {
+				if (t.result !== 0) continue
+				const host = t.hosts?.[0]
+				if (!host || !t.path) continue
+				thumbByFileid.set(t.fileid, `https://${host}${t.path}`)
+			}
+		} catch (err) {
+			// A single bad chunk shouldn't take down the whole listing; affected
+			// files just render without a thumbnail.
+			const msg = err instanceof Error ? err.message : String(err)
+			// eslint-disable-next-line no-console
+			console.warn(`[source-folder] getthumbslinks chunk ${i}–${i + chunk.length} failed: ${msg}`)
+		}
 	}
 	return files.map((f) => ({
 		fileid: f.fileid,

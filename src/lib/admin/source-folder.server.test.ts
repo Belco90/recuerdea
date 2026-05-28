@@ -290,6 +290,68 @@ describe('fetchAdminSourceFolder', () => {
 		await expect(fetchAdminSourceFolder(client)).rejects.toThrow(SourceFolderIdMissingError)
 	})
 
+	it('chunks getthumbslinks when the folder has more than 100 media files', async () => {
+		const fileCount = 250
+		const files = Array.from({ length: fileCount }, (_, i) =>
+			makeFile(1000 + i, { contenttype: 'image/jpeg' }),
+		)
+		const calls: Array<{ method: string; params: unknown }> = []
+		const client = makeClient(async (method, params) => {
+			calls.push({ method, params })
+			if (method === 'listfolder') {
+				return {
+					metadata: makeFolder(ROOT_ID, { parentfolderid: 0, contents: files }),
+				}
+			}
+			if (method === 'getthumbslinks') {
+				const ids = (params as { fileids: string }).fileids.split(',').map(Number)
+				return { thumbs: ids.map((id) => thumbEntry(id)) }
+			}
+			throw new Error(`unexpected method: ${method}`)
+		})
+
+		const result = await fetchAdminSourceFolder(client)
+
+		const thumbCalls = calls.filter((c) => c.method === 'getthumbslinks')
+		expect(thumbCalls.length).toBeGreaterThan(1)
+		for (const c of thumbCalls) {
+			const ids = (c.params as { fileids: string }).fileids.split(',')
+			expect(ids.length).toBeLessThanOrEqual(100)
+		}
+		expect(result.files).toHaveLength(fileCount)
+		expect(result.files.every((f) => f.thumbUrl !== null)).toBe(true)
+	})
+
+	it('isolates a single getthumbslinks chunk failure from the rest of the listing', async () => {
+		const fileCount = 250
+		const files = Array.from({ length: fileCount }, (_, i) =>
+			makeFile(1000 + i, { contenttype: 'image/jpeg' }),
+		)
+		let thumbCall = 0
+		const client = makeClient(async (method, params) => {
+			if (method === 'listfolder') {
+				return {
+					metadata: makeFolder(ROOT_ID, { parentfolderid: 0, contents: files }),
+				}
+			}
+			if (method === 'getthumbslinks') {
+				thumbCall++
+				if (thumbCall === 2) throw new Error('fetch failed')
+				const ids = (params as { fileids: string }).fileids.split(',').map(Number)
+				return { thumbs: ids.map((id) => thumbEntry(id)) }
+			}
+			throw new Error(`unexpected method: ${method}`)
+		})
+
+		const result = await fetchAdminSourceFolder(client)
+
+		expect(result.files).toHaveLength(fileCount)
+		const withThumb = result.files.filter((f) => f.thumbUrl !== null)
+		const withoutThumb = result.files.filter((f) => f.thumbUrl === null)
+		expect(withThumb.length).toBeGreaterThan(0)
+		expect(withoutThumb.length).toBeGreaterThan(0)
+	})
+
 	it('returns thumbUrl=null when a file is missing from the thumbs response', async () => {
 		const client = makeClient(async (method) => {
 			if (method === 'listfolder') {
