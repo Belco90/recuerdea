@@ -41,6 +41,7 @@
   - [ ] Re-export `CollectionItem`
 
 ### Checkpoint A
+
 - [ ] `pnpm test -- src/lib/admin/collection.server` green
 - [ ] `pnpm type-check` clean
 
@@ -57,6 +58,7 @@
   - [ ] No writes to `collection/v1`
 
 ### Checkpoint B — Cron clean
+
 - [ ] `pnpm test -- src/lib/memories/refresh-memories.server` green
 - [ ] `pnpm invoke:refresh-memories` end-to-end OK
 
@@ -73,6 +75,7 @@
   - [ ] Replace v13's no-banner with: "Los cambios aparecen inmediatamente en la página principal."
 
 ### Checkpoint C — End-to-end
+
 - [ ] `pnpm type-check` clean
 - [ ] `pnpm test:unit` / `test:browser` green
 - [ ] Manual `pnpm dev:netlify`: navigate folders, pick across folders, save, current-collection grid updates without reload
@@ -104,6 +107,7 @@
   - [ ] `curl -I` deploy-preview `/` → `Cache-Control: private`/`no-store`
 
 ### Final checkpoint
+
 - [ ] All checkpoints A/B/C green
 - [ ] PR open targeting `main`
 - [ ] SPEC.md matches the working tree
