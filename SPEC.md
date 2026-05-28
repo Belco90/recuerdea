@@ -156,7 +156,7 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - **Resolve image URLs server-side in the loader (v9).** The home loader builds direct `https://eapi.pcloud.com/getpubthumb?code=${code}&size=${size}` URLs per item — `640x640` → `MemoryItem.thumbUrl`, `1025x1025` → `MemoryItem.lightboxUrl`. The `getpubthumb` endpoint serves bytes statelessly (no signed URL, no IP binding), so the browser can render `<img src>` directly. Per-file public-link `code` reaches the browser via the URL — explicitly relaxed from earlier versions; see "Never do" below.
 - **Route video bytes through the `/api/video/<uuid>` proxy (v10).** Videos can't use the v9 direct-CDN trick because `getpublinkdownload` URLs are IP-bound — the URL the SSR mints is rejected when the browser fetches it from a different IP. Instead `MemoryItem.mediaUrl` is `/api/video/<uuid>` and the auth-gated route handler resolves the pCloud CDN URL server-side and pipes bytes back, forwarding the browser's `Range` header so HTML5 `<video>` seeks work. Image originals (download button) use a one-off `getMediaDownloadUrl({ uuid })` server-fn → CDN URL → client-side `fetch` → `Blob` → `<a download>` (image CDN URLs from `getpublinkdownload` work in the browser when fetched right after resolution; videos can't rely on that timing because they need a stable `<video src>`). The video proxy adds `?download=1` to force a full-file response with `Content-Disposition: attachment`. The wider v4 `/api/memory/<uuid>` byte-streaming proxy stays demolished — only video bytes go through a function.
 - **The cron is the only writer for `media/<uuid>`, `fileid-index/<fileid>`, and `folder/v1`.** Loader and route handlers are read-only against those stores. Pre-prod, the cron must be triggered manually via the Netlify dashboard so the snapshot exists before users hit the page.
-- **The admin route at `/admin/collection` is the sole writer of `collection/v1` (v13).** The cron does not read or write the collection blob. Admin edits land instantly on `/` — no waiting for the next cron run.
+- **The admin route at `/admin/collection` is the sole writer of `collection/v1` (v13).** Admin edits land instantly on `/` — no waiting for the next cron run. **The cron reads `collection/v1` (v14)** to spare curated uuids from sweep when those files live outside the memories folder (lazy-minted at admin save time). The single-writer invariant holds: only the admin route writes; the cron is a read-only consumer.
 - **Public-link lifecycle is owned by the cron.** When the cron sees a fileid disappear from `listfolder`, it calls `deletepublink(linkid)` and clears `media/<uuid>` + `fileid-index/<fileid>`. No abandoned public links accumulate in pCloud's "Public Links" panel.
 - **The home page HTML is `Cache-Control: private` (or `no-store`).** Per-user content; never publicly cached. Verify with `curl -I` on the deploy preview after any change to the home loader.
 - When using `gh` CLI, make sure that the active user is the one who owns the repo.
@@ -545,3 +545,64 @@ For readers diffing this spec against v12:
 - §19 (v11): superseded by §23 — `PCLOUD_COLLECTION_ID` is gone, the cron no longer writes the collection blob, and the "04:00 UTC" banner is gone.
 - §21 (v12): superseded by §23 — `PCLOUD_ADMIN_AUTH` is gone, the source-folder navigator is gone, `fileid` is no longer the wire id in the admin surface, and admin reads are blob reads (not live `collection_details`).
 - §23 (new): v13 acceptance criteria — blob-only storage, admin sole writer, env-var demolition, instant edits, picker scoped to cached folder items.
+
+## 25. v14 Acceptance Criteria
+
+Cumulative on top of §23 (v13). v14 restores the v12-style **navigable view of `PCLOUD_SOURCE_FOLDER_ID`** as the "Añadir más" picker on top of v13's blob-backed storage. v13's flat grid over the memories-folder snapshot is gone — it was a misreading of the design intent during v13 build-out.
+
+Files picked from outside `PCLOUD_MEMORIES_FOLDER_ID` get **lazy-minted** at admin save time (stat + getfilepublink, no range-fetch extraction). The cron sweep reads `collection/v1` so those lazy-minted uuids aren't deleted on the next run. The home loader and the curated-grid section are unchanged.
+
+**Picker shape**
+
+- `/admin/collection?folderid=N` (search param, validated as non-negative integer; defaults to source root when absent).
+- Loader fans out to `getCollectionMedia()` + `getAdminSourceFolder({ folderid })` in parallel.
+- Picker is `AdminFolderNavigator`: breadcrumbs row → subfolder grid → file grid → sticky `Guardar (N)` / `Cancelar` footer. Sub-folder clicks navigate via `?folderid`; file clicks toggle selection. Picks survive folder navigation (route state is `Map<fileid, SourceFileItem>`).
+- `blocked: Set<fileid>` computed client-side from `collectionItems.map(m => m.fileid)`. CollectionItem carries `fileid` for this reason.
+
+**Wire format**
+
+- `addToCollection({ fileids: number[] })`. Server resolves each fileid → uuid via fileid-index; lazy-mints when missing.
+- `removeFromCollection({ uuids: string[] })` — unchanged (removed items always have a uuid).
+- The blob still stores uuids — loader path unchanged.
+
+**Lazy-mint (`lazyMintFile`)**
+
+- Short-circuits when fileid-index already has the fileid (no pCloud calls).
+- For unknown fileids: 1× `stat({ fileid })` (hash, contenttype, name, created) + 1× `getfilepublink({ fileid })` (code, linkid). No range-fetch extractor — `width`, `height`, `location`, `place` stay `null` on the lazy-minted entry.
+- captureDate parsed from pCloud's `file.created` (matches the cron path).
+- Writes `media/<uuid>` + `fileid-index/<fileid>` atomically before returning.
+
+**Cron sweep protection**
+
+- `refreshMemories(...)` accepts an optional 7th `collectionReader?: CollectionReader` parameter (read-only view of `collection/v1`).
+- Sweep: `protectedSet = new Set([...aliveUuids, ...(curated ?? [])])`. Curated-but-non-memories uuids never get marked stale.
+- Read-only access — the admin route remains the sole writer of `collection/v1`. The §7 single-writer invariant holds.
+- When `collectionReader` is omitted (or returns undefined), sweep behavior is byte-identical to v13.
+
+**Coverage trade-off**
+
+- Lazy-minted entries outside the memories folder never get re-extracted: width/height stay null; geocoding never runs against them. UI degrades gracefully (no place caption, browser handles natural sizing). v15 may widen cron coverage to iterate curated uuids.
+
+**Surface**
+
+- Restored: `src/lib/admin/source-folder.{ts,server.ts}` (uses `PCLOUD_TOKEN` OAuth, not the dropped `PCLOUD_ADMIN_AUTH`), `src/components/AdminFolderNavigator.tsx`.
+- Renamed type: `AdminFileItem` (v13) → `CollectionItem` (v14, uuid + fileid + name + kind + thumbUrl).
+- New type: `SourceFileItem` (fileid + name + kind + thumbUrl) — what `fetchAdminSourceFolder` returns; no uuid yet.
+- New helpers: `lazyMintFile`, `addFileidsToCollection` in `collection.server.ts`. `addUuidsToCollection` is removed.
+- Deleted: `src/lib/admin/folder-media.{ts,server.ts}`, `src/components/AdminCollectionGrid.tsx` (v13 flat picker).
+- `PCLOUD_SOURCE_FOLDER_ID` env var: restored (optional; absence triggers a banner).
+- `PCLOUD_ADMIN_AUTH` / `PCLOUD_COLLECTION_ID` env vars: still gone.
+
+**Banner copy**
+
+- Replaces v13's empty heading region with: "Los cambios aparecen inmediatamente en la página principal." — matches reality. The v11 "04:00 UTC" banner stays retired.
+
+## 26. v13 → v14 changes summary
+
+For readers diffing this spec against v13:
+
+- §1 / §2: unchanged.
+- §4 Project Structure: stays at v10 baseline.
+- §7 Boundaries: "Always do" cron-writer bullet stays as `media/<uuid>` + `fileid-index/<fileid>` + `folder/v1`. The admin-writer bullet is annotated with the v14 fact that the cron is now a **read-only consumer** of `collection/v1`.
+- §23 (v13): superseded by §25 for the picker scope — the flat-grid picker is gone, replaced by a navigable view of `PCLOUD_SOURCE_FOLDER_ID`. Storage shape + admin-writer rule from v13 are still current.
+- §25 (new): v14 acceptance criteria — navigator restored, fileid wire format with lazy-mint, cron sweep protection, env var restored.
