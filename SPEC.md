@@ -85,7 +85,7 @@ src/
       identity-context.tsx      # IdentityProvider + useIdentity hook
     memories/                   # pCloud-backed memory pipeline
       pcloud.ts                 # createServerFn wrapper for getTodayMemories — returns MemoryItem[]
-      pcloud.server.ts          # Loader — reads from folder-cache + media-cache only; builds thumb URLs synchronously; videos point at /api/video/<uuid>. No listfolder, no pCloud client.
+      pcloud.server.ts          # Loader — reads from collection-cache + media-cache only; builds thumb URLs synchronously; videos point at /api/video/<uuid>. No listfolder, no pCloud client.
       pcloud-urls.server.ts     # buildThumbUrl (stateless `getpubthumb?code=…&size=…`) + resolveMediaUrl (server-side `getpublinkdownload`) — v9
       refresh-memories.server.ts# Cron orchestrator: lists folder, ensures public links, writes caches, sweeps deleted files — v4
       video-stream.server.ts    # Pure handler for /api/video/$uuid: auth gate, cache lookup, range-forwarded byte-stream or download response — v10
@@ -98,8 +98,6 @@ src/
       media-cache.server.ts
       fileid-index.ts           # Pure (fileid → uuid) sidecar abstraction
       fileid-index.server.ts
-      folder-cache.ts           # Pure folder-listing snapshot abstraction
-      folder-cache.server.ts
     media-meta/                 # Dimensions + GPS extraction from bytes; called from refresh-memories.server. Capture date now comes from pCloud `file.created` (v10) — extractors no longer return it.
       exif.ts                   # EXIF extraction (extractImageMeta) — width/height + GPS lat/lng
       video-meta.ts             # MP4/MOV moov walker (extractVideoMeta) — width/height (tkhd) + GPS (udta.©xyz)
@@ -163,8 +161,8 @@ Path alias `#/*` → `./src/*` (declared in `package.json` `imports`).
 - **Branch-per-version (v4+)**: do v4 work on a `v4` branch, v5 on `v5`, etc. PRs target `main` so Netlify spins a deploy preview per PR. `main` is protected — no direct pushes. Smoke the deploy preview before merge.
 - **Resolve image URLs server-side in the loader (v9).** The home loader builds direct `https://eapi.pcloud.com/getpubthumb?code=${code}&size=${size}` URLs per item — `640x640` → `MemoryItem.thumbUrl`, `1025x1025` → `MemoryItem.lightboxUrl`. The `getpubthumb` endpoint serves bytes statelessly (no signed URL, no IP binding), so the browser can render `<img src>` directly. Per-file public-link `code` reaches the browser via the URL — explicitly relaxed from earlier versions; see "Never do" below.
 - **Route video bytes through the `/api/video/<uuid>` proxy (v10).** Videos can't use the v9 direct-CDN trick because `getpublinkdownload` URLs are IP-bound — the URL the SSR mints is rejected when the browser fetches it from a different IP. Instead `MemoryItem.mediaUrl` is `/api/video/<uuid>` and the auth-gated route handler resolves the pCloud CDN URL server-side and pipes bytes back, forwarding the browser's `Range` header so HTML5 `<video>` seeks work. Image originals (download button) use a one-off `getMediaDownloadUrl({ uuid })` server-fn → CDN URL → client-side `fetch` → `Blob` → `<a download>` (image CDN URLs from `getpublinkdownload` work in the browser when fetched right after resolution; videos can't rely on that timing because they need a stable `<video src>`). The video proxy adds `?download=1` to force a full-file response with `Content-Disposition: attachment`. The wider v4 `/api/memory/<uuid>` byte-streaming proxy stays demolished — only video bytes go through a function.
-- **The cron is the only writer for `media/<uuid>`, `fileid-index/<fileid>`, and `folder/v1`.** Loader and route handlers are read-only against those stores. Pre-prod, the cron must be triggered manually via the Netlify dashboard so the snapshot exists before users hit the page.
-- **The admin route at `/admin/collection` is the sole writer of `collection/v1` (v13).** Admin edits land instantly on `/` — no waiting for the next cron run. **The cron reads `collection/v1` (v14)** to spare curated uuids from sweep when those files live outside the memories folder (lazy-minted at admin save time). The single-writer invariant holds: only the admin route writes; the cron is a read-only consumer.
+- **The cron is the only writer for `media/<uuid>` and `fileid-index/<fileid>`.** Loader and route handlers are read-only against those stores.
+- **The admin route at `/admin/collection` is the sole writer of `collection/v1` (v13).** Admin edits land instantly on `/` — no waiting for the next cron run. **The cron reads `collection/v1` (v14)** to spare curated uuids from sweep when those files live outside the memories folder (lazy-minted at admin save time). The single-writer invariant holds: only the admin route writes; the cron is a read-only consumer. **The home loader reads `collection/v1` as the sole source of uuids (v15)** — there is no folder-snapshot fallback. `undefined` is a boot state (admin hasn't curated yet) and the loader logs a warning + renders empty; `{ uuids: [] }` is a deliberate empty curation and renders empty silently.
 - **Public-link lifecycle is owned by the cron.** When the cron sees a fileid disappear from `listfolder`, it calls `deletepublink(linkid)` and clears `media/<uuid>` + `fileid-index/<fileid>`. No abandoned public links accumulate in pCloud's "Public Links" panel.
 - **The home page HTML is `Cache-Control: private` (or `no-store`).** Per-user content; never publicly cached. Verify with `curl -I` on the deploy preview after any change to the home loader.
 - When using `gh` CLI, make sure that the active user is the one who owns the repo.
@@ -504,7 +502,7 @@ Cumulative on top of §21 (v12). v13 demolishes the pCloud-collection layer enti
 **Storage model**
 
 - `collection-cache` Netlify Blob, key `collection/v1`, shape `{ refreshedAt: ISO, uuids: readonly string[] }`. Same shape as v11; the writer is different. `refreshedAt` records the last admin edit.
-- Semantics preserved from §19: `undefined` blob → loader falls back to `folder/v1`; `{ uuids: [] }` → render nothing (deliberate empty curation, not a missing-state).
+- Semantics (v15): `collection/v1` is the **sole** source of uuids for `fetchTodayMemories`. `undefined` blob → loader logs a warning and renders empty (boot state, before any admin curation); `{ uuids: [] }` → renders empty silently (deliberate empty curation). The v13 fallback to `folder/v1` is gone — the cron no longer writes `folder/v1`, and the `folder-cache` module is removed.
 - **Single writer:** `/admin/collection`. The cron does **not** touch `collection-cache` (no read, no write). Restores the §7 single-writer invariant, just with admin in the writer slot instead of the cron.
 
 **No pCloud collection layer**
@@ -530,7 +528,7 @@ Cumulative on top of §21 (v12). v13 demolishes the pCloud-collection layer enti
 
 **Cron**
 
-- `refreshMemories(client, folderId, mediaCache, fileidIndex, folderCache, geocodeOpts?)` — the 7th `collectionOpts` parameter and the `CollectionOpts` / `CollectionStats` / `CollectionDetailsResponse` types are gone.
+- `refreshMemories(client, folderId, mediaCache, fileidIndex, geocodeOpts?, collectionReader?)` — the v13 `folderCache` parameter is gone in v15 (cron no longer writes `folder/v1`); the v14 `collectionReader` (read-only view of `collection/v1`) is preserved so sweep still protects curated uuids.
 - `RefreshResult.collectionStats` is gone; the corresponding `collection: linked=… alive=… missing=…` log line is gone.
 - `netlify/functions/refresh-memories.ts` reads only `PCLOUD_TOKEN` + `PCLOUD_MEMORIES_FOLDER_ID` (+ optional `GEOAPIFY_API_KEY` and `RECUERDEA_GEOCODE_MAX_PER_RUN`). The second pCloud client (built from `PCLOUD_ADMIN_AUTH`) is removed.
 
@@ -590,14 +588,21 @@ Files picked from outside `PCLOUD_MEMORIES_FOLDER_ID` get **lazy-minted** at adm
 
 **Cron sweep protection**
 
-- `refreshMemories(...)` accepts an optional 7th `collectionReader?: CollectionReader` parameter (read-only view of `collection/v1`).
+- `refreshMemories(...)` accepts an optional `collectionReader?: CollectionReader` parameter (read-only view of `collection/v1`).
 - Sweep: `protectedSet = new Set([...aliveUuids, ...(curated ?? [])])`. Curated-but-non-memories uuids never get marked stale.
 - Read-only access — the admin route remains the sole writer of `collection/v1`. The §7 single-writer invariant holds.
-- When `collectionReader` is omitted (or returns undefined), sweep behavior is byte-identical to v13.
+- When `collectionReader` is omitted (or returns undefined), sweep treats only the memories-folder snapshot as alive.
 
 **Coverage trade-off**
 
-- Lazy-minted entries outside the memories folder never get re-extracted: width/height stay null; geocoding never runs against them. UI degrades gracefully (no place caption, browser handles natural sizing). v15 may widen cron coverage to iterate curated uuids.
+- Lazy-minted entries outside the memories folder never get re-extracted: width/height stay null; geocoding never runs against them. UI degrades gracefully (no place caption, browser handles natural sizing). Future work may widen cron coverage to iterate curated uuids.
+
+**Loader: collection/v1 is the sole source (v15)**
+
+- `fetchTodayMemories` reads only `collection/v1`. The v13 fallback to `folder/v1` is gone; the cron no longer writes `folder/v1`; the `folder-cache` module (`src/lib/cache/folder-cache.{ts,server.ts}`) is deleted.
+- `undefined` blob → `console.warn('[pcloud] collection blob missing — admin has not curated yet')` and render empty (boot state).
+- `{ uuids: [] }` → render empty silently (deliberate empty curation).
+- `refreshMemories(...)` signature drops the v13 `folderCache: FolderCache` parameter. Cron writes only `media/<uuid>` and `fileid-index/<fileid>`.
 
 **Surface**
 
@@ -620,6 +625,6 @@ For readers diffing this spec against v13:
 
 - §1 / §2: unchanged.
 - §4 Project Structure: adds `routes/admin/` (layout + `index.tsx` curated grid + `add.tsx` picker) and `routes/api/admin/thumb/$fileid.ts` (IP-bound thumbnail proxy).
-- §7 Boundaries: "Always do" cron-writer bullet stays as `media/<uuid>` + `fileid-index/<fileid>` + `folder/v1`. The admin-writer bullet is annotated with the v14 fact that the cron is now a **read-only consumer** of `collection/v1`.
-- §23 (v13): superseded by §25 for the picker scope — the flat-grid picker is gone, replaced by a navigable view of `PCLOUD_SOURCE_FOLDER_ID`. Storage shape + admin-writer rule from v13 are still current.
-- §25 (new): v14 acceptance criteria — navigator restored, fileid wire format with lazy-mint, cron sweep protection, env var restored. The picker page lives at `/admin/collection/add`; `/admin/collection` is the curated-list view. Source-folder thumbnails proxy through `/api/admin/thumb/<fileid>` because `getthumblink` URLs are IP-bound (§17).
+- §7 Boundaries: "Always do" cron-writer bullet narrows to `media/<uuid>` + `fileid-index/<fileid>` (v15: `folder/v1` is gone — see §25 Loader section). The admin-writer bullet is annotated with the v14 fact that the cron is now a **read-only consumer** of `collection/v1`, plus the v15 fact that the home loader reads `collection/v1` as the sole source of uuids.
+- §23 (v13): superseded by §25 for the picker scope (flat-grid → navigable view of `PCLOUD_SOURCE_FOLDER_ID`) and for the loader semantics (v15: no `folder/v1` fallback). Storage shape + admin-writer rule from v13 are still current.
+- §25 (new): v14 + v15 acceptance criteria — navigator restored, fileid wire format with lazy-mint, cron sweep protection, env var restored, and (v15) `collection/v1` as the sole loader source with the `folder-cache` module deleted. The picker page lives at `/admin/collection/add`; `/admin/collection` is the curated-list view. Source-folder thumbnails proxy through `/api/admin/thumb/<fileid>` because `getthumblink` URLs are IP-bound (§17).

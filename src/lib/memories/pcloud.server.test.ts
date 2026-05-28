@@ -1,19 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CollectionCacheStore, CollectionSnapshot } from '../cache/collection-cache'
-import type { FolderCacheStore, FolderSnapshot } from '../cache/folder-cache'
 import type { CachedMedia, MediaCacheStore } from '../cache/media-cache'
 
 import { getCollectionCacheStore } from '../cache/collection-cache.server'
-import { getFolderCacheStore } from '../cache/folder-cache.server'
 import { getMediaCacheStore } from '../cache/media-cache.server'
 import { fetchTodayMemories } from './pcloud.server'
 
-vi.mock('../cache/folder-cache.server')
 vi.mock('../cache/media-cache.server')
 vi.mock('../cache/collection-cache.server')
 
-const mockedGetFolderCacheStore = vi.mocked(getFolderCacheStore)
 const mockedGetMediaCacheStore = vi.mocked(getMediaCacheStore)
 const mockedGetCollectionCacheStore = vi.mocked(getCollectionCacheStore)
 
@@ -45,17 +41,6 @@ function makeMediaStore(entries: Record<string, CachedMedia> = {}) {
 		}),
 		list: vi.fn<MediaCacheStore['list']>(async () => Array.from(data.keys())),
 		data,
-	}
-}
-
-function makeFolderStore(snapshot: FolderSnapshot | undefined = undefined) {
-	const state: { value: FolderSnapshot | undefined } = { value: snapshot }
-	return {
-		get: vi.fn<FolderCacheStore['get']>(async () => state.value),
-		set: vi.fn<FolderCacheStore['set']>(async (next) => {
-			state.value = next
-		}),
-		state,
 	}
 }
 
@@ -119,13 +104,13 @@ const undatedD: CachedMedia = {
 	place: null,
 }
 
+function snap(uuids: readonly string[]): CollectionSnapshot {
+	return { refreshedAt: '2026-04-29T04:00:00.000Z', uuids }
+}
+
 beforeEach(() => {
-	mockedGetFolderCacheStore.mockReset()
 	mockedGetMediaCacheStore.mockReset()
 	mockedGetCollectionCacheStore.mockReset()
-	// Default: no collection snapshot — tests that don't opt in keep the
-	// pre-Phase-4 behavior (folder snapshot is the source of truth).
-	mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(undefined))
 })
 
 afterEach(() => {
@@ -133,8 +118,8 @@ afterEach(() => {
 })
 
 describe('fetchTodayMemories', () => {
-	it('returns [] and warns when the folder snapshot is missing', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(makeFolderStore(undefined))
+	it('returns [] and warns when the collection blob is missing', async () => {
+		mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(undefined))
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore())
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -144,12 +129,20 @@ describe('fetchTodayMemories', () => {
 		expect(warn).toHaveBeenCalledOnce()
 	})
 
+	it('returns [] silently when the collection snapshot is empty (curated nothing)', async () => {
+		mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(snap([])))
+		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageA }))
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+		const result = await fetchTodayMemories({ month: 4, day: 27 })
+
+		expect(result).toEqual([])
+		expect(warn).not.toHaveBeenCalled()
+	})
+
 	it('attaches direct getpubthumb URLs on images and proxy mediaUrl on videos', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({
-				refreshedAt: '2026-04-29T04:00:00.000Z',
-				uuids: ['uuid-a', 'uuid-b', 'uuid-c'],
-			}),
+		mockedGetCollectionCacheStore.mockReturnValue(
+			makeCollectionStore(snap(['uuid-a', 'uuid-b', 'uuid-c'])),
 		)
 		mockedGetMediaCacheStore.mockReturnValue(
 			makeMediaStore({
@@ -190,9 +183,7 @@ describe('fetchTodayMemories', () => {
 	})
 
 	it('passes through null width/height for legacy entries', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({ refreshedAt: '2026-04-29T04:00:00.000Z', uuids: ['uuid-b'] }),
-		)
+		mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(snap(['uuid-b'])))
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-b': imageB }))
 
 		const result = await fetchTodayMemories({ month: 6, day: 15 })
@@ -214,9 +205,7 @@ describe('fetchTodayMemories', () => {
 
 	it('passes through place from CachedMedia to MemoryItem', async () => {
 		const imageWithPlace: CachedMedia = { ...imageA, place: 'Madrid, España' }
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({ refreshedAt: '2026-04-29T04:00:00.000Z', uuids: ['uuid-a'] }),
-		)
+		mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(snap(['uuid-a'])))
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageWithPlace }))
 
 		const result = await fetchTodayMemories({ month: 4, day: 27 })
@@ -228,12 +217,7 @@ describe('fetchTodayMemories', () => {
 	it('breaks ties by fileid ascending when years match', async () => {
 		const sameYearOlderFileid: CachedMedia = { ...imageA, fileid: 50 }
 		const sameYearLaterFileid: CachedMedia = { ...imageA, fileid: 999, name: 'z.jpg' }
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({
-				refreshedAt: '2026-04-29T04:00:00.000Z',
-				uuids: ['uuid-z', 'uuid-a'],
-			}),
-		)
+		mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(snap(['uuid-z', 'uuid-a'])))
 		mockedGetMediaCacheStore.mockReturnValue(
 			makeMediaStore({
 				'uuid-z': sameYearLaterFileid,
@@ -247,11 +231,8 @@ describe('fetchTodayMemories', () => {
 	})
 
 	it('skips uuids whose media-cache entry is missing', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({
-				refreshedAt: '2026-04-29T04:00:00.000Z',
-				uuids: ['uuid-a', 'uuid-missing'],
-			}),
+		mockedGetCollectionCacheStore.mockReturnValue(
+			makeCollectionStore(snap(['uuid-a', 'uuid-missing'])),
 		)
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageA }))
 
@@ -261,9 +242,7 @@ describe('fetchTodayMemories', () => {
 	})
 
 	it('skips items whose captureDate is null', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({ refreshedAt: '2026-04-29T04:00:00.000Z', uuids: ['uuid-d'] }),
-		)
+		mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(snap(['uuid-d'])))
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-d': undatedD }))
 
 		const result = await fetchTodayMemories({ month: 4, day: 27 })
@@ -272,72 +251,11 @@ describe('fetchTodayMemories', () => {
 	})
 
 	it('returns [] when no item matches today', async () => {
-		mockedGetFolderCacheStore.mockReturnValue(
-			makeFolderStore({ refreshedAt: '2026-04-29T04:00:00.000Z', uuids: ['uuid-b'] }),
-		)
+		mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(snap(['uuid-b'])))
 		mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-b': imageB }))
 
 		const result = await fetchTodayMemories({ month: 4, day: 27 })
 
 		expect(result).toEqual([])
-	})
-
-	describe('with collection snapshot', () => {
-		it('narrows to the collection uuids, ignoring folder uuids that are not curated', async () => {
-			mockedGetCollectionCacheStore.mockReturnValue(
-				makeCollectionStore({
-					refreshedAt: '2026-04-29T04:00:00.000Z',
-					uuids: ['uuid-a'],
-				}),
-			)
-			mockedGetFolderCacheStore.mockReturnValue(
-				makeFolderStore({
-					refreshedAt: '2026-04-29T04:00:00.000Z',
-					uuids: ['uuid-a', 'uuid-c'],
-				}),
-			)
-			mockedGetMediaCacheStore.mockReturnValue(
-				makeMediaStore({ 'uuid-a': imageA, 'uuid-c': videoC }),
-			)
-
-			const result = await fetchTodayMemories({ month: 4, day: 27 })
-
-			expect(result.map((m) => m.uuid)).toEqual(['uuid-a'])
-		})
-
-		it('returns [] when the collection snapshot is empty (curated nothing)', async () => {
-			mockedGetCollectionCacheStore.mockReturnValue(
-				makeCollectionStore({
-					refreshedAt: '2026-04-29T04:00:00.000Z',
-					uuids: [],
-				}),
-			)
-			mockedGetFolderCacheStore.mockReturnValue(
-				makeFolderStore({
-					refreshedAt: '2026-04-29T04:00:00.000Z',
-					uuids: ['uuid-a'],
-				}),
-			)
-			mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageA }))
-
-			const result = await fetchTodayMemories({ month: 4, day: 27 })
-
-			expect(result).toEqual([])
-		})
-
-		it('falls back to the folder snapshot when no collection snapshot exists', async () => {
-			mockedGetCollectionCacheStore.mockReturnValue(makeCollectionStore(undefined))
-			mockedGetFolderCacheStore.mockReturnValue(
-				makeFolderStore({
-					refreshedAt: '2026-04-29T04:00:00.000Z',
-					uuids: ['uuid-a'],
-				}),
-			)
-			mockedGetMediaCacheStore.mockReturnValue(makeMediaStore({ 'uuid-a': imageA }))
-
-			const result = await fetchTodayMemories({ month: 4, day: 27 })
-
-			expect(result.map((m) => m.uuid)).toEqual(['uuid-a'])
-		})
 	})
 })

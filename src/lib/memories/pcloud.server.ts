@@ -2,8 +2,6 @@ import type { CachedMedia } from '../cache/media-cache'
 
 import { createCollectionCache } from '../cache/collection-cache'
 import { getCollectionCacheStore } from '../cache/collection-cache.server'
-import { createFolderCache } from '../cache/folder-cache'
-import { getFolderCacheStore } from '../cache/folder-cache.server'
 import { createMediaCache } from '../cache/media-cache'
 import { getMediaCacheStore } from '../cache/media-cache.server'
 import { buildThumbUrl } from './pcloud-urls.server'
@@ -84,22 +82,17 @@ export async function fetchTodayMemories(today: {
 	day: number
 }): Promise<MemoryItem[]> {
 	const collectionCache = createCollectionCache(getCollectionCacheStore())
-	const folderCache = createFolderCache(getFolderCacheStore())
 	const mediaCache = createMediaCache(getMediaCacheStore())
 
-	// Curated collection wins when it exists (even when empty — an empty
-	// collection means "show nothing", not "fall back"). Folder snapshot is
-	// the boot/rollback fallback: before the admin has curated anything.
+	// `collection/v1` is the single source of truth. `undefined` is a boot
+	// state (admin hasn't curated yet) — warn so it surfaces in logs.
+	// `{ uuids: [] }` is a deliberate empty curation — render empty silently.
 	const collectionSnap = await collectionCache.lookup()
 	const uuids = collectionSnap?.uuids
 	if (!uuids) {
-		const folderSnap = await folderCache.lookup()
-		if (!folderSnap) {
-			// eslint-disable-next-line no-console
-			console.warn('[pcloud] folder snapshot missing — cron has not run yet')
-			return []
-		}
-		return matchAndBuild(folderSnap.uuids, mediaCache, today)
+		// eslint-disable-next-line no-console
+		console.warn('[pcloud] collection blob missing — admin has not curated yet')
+		return []
 	}
 
 	return matchAndBuild(uuids, mediaCache, today)

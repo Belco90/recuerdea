@@ -2,7 +2,6 @@ import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 
 import type { CollectionSnapshot } from '../cache/collection-cache'
 import type { FileidIndex } from '../cache/fileid-index'
-import type { FolderCache } from '../cache/folder-cache'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
 import type { ReverseGeocodeResult } from '../media-meta/geoapify.server'
 
@@ -249,7 +248,6 @@ export async function refreshMemories(
 	folderId: number,
 	mediaCache: MediaCache,
 	fileidIndex: FileidIndex,
-	folderCache: FolderCache,
 	geocodeOpts?: GeocodeOpts,
 	collectionReader?: CollectionReader,
 ): Promise<RefreshResult> {
@@ -280,12 +278,6 @@ export async function refreshMemories(
 	const allCachedUuids = await mediaCache.listUuids()
 	const staleUuids = allCachedUuids.filter((uuid) => !protectedSet.has(uuid))
 	await Promise.all(staleUuids.map((uuid) => sweepUuid(client, uuid, mediaCache, fileidIndex)))
-
-	const refreshedAt = new Date().toISOString()
-	await folderCache.remember({
-		refreshedAt,
-		uuids: aliveUuids,
-	})
 
 	const geocodeResult = geocodeOpts
 		? await runGeocodePass(aliveUuids, aliveCached, mediaCache, geocodeOpts)
