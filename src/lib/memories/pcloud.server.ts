@@ -1,7 +1,7 @@
 import type { CachedMedia } from '../cache/media-cache'
 
-import { createFolderCache } from '../cache/folder-cache'
-import { getFolderCacheStore } from '../cache/folder-cache.server'
+import { createCollectionCache } from '../cache/collection-cache'
+import { getCollectionCacheStore } from '../cache/collection-cache.server'
 import { createMediaCache } from '../cache/media-cache'
 import { getMediaCacheStore } from '../cache/media-cache.server'
 import { buildThumbUrl } from './pcloud-urls.server'
@@ -81,18 +81,30 @@ export async function fetchTodayMemories(today: {
 	month: number
 	day: number
 }): Promise<MemoryItem[]> {
-	const folderCache = createFolderCache(getFolderCacheStore())
+	const collectionCache = createCollectionCache(getCollectionCacheStore())
 	const mediaCache = createMediaCache(getMediaCacheStore())
 
-	const snapshot = await folderCache.lookup()
-	if (!snapshot) {
+	// `collection/v1` is the single source of truth. `undefined` is a boot
+	// state (admin hasn't curated yet) — warn so it surfaces in logs.
+	// `{ uuids: [] }` is a deliberate empty curation — render empty silently.
+	const collectionSnap = await collectionCache.lookup()
+	const uuids = collectionSnap?.uuids
+	if (!uuids) {
 		// eslint-disable-next-line no-console
-		console.warn('[pcloud] folder snapshot missing — cron has not run yet')
+		console.warn('[pcloud] collection blob missing — admin has not curated yet')
 		return []
 	}
 
+	return matchAndBuild(uuids, mediaCache, today)
+}
+
+async function matchAndBuild(
+	uuids: readonly string[],
+	mediaCache: ReturnType<typeof createMediaCache>,
+	today: { month: number; day: number },
+): Promise<MemoryItem[]> {
 	const lookups = await Promise.all(
-		snapshot.uuids.map(async (uuid): Promise<Match | null> => {
+		uuids.map(async (uuid): Promise<Match | null> => {
 			const meta = await mediaCache.lookup(uuid)
 			if (!meta) return null
 			const capture = tryParseDate(meta.captureDate)

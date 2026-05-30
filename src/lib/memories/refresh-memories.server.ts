@@ -1,7 +1,7 @@
 import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
 
+import type { CollectionSnapshot } from '../cache/collection-cache'
 import type { FileidIndex } from '../cache/fileid-index'
-import type { FolderCache } from '../cache/folder-cache'
 import type { CachedMedia, MediaCache } from '../cache/media-cache'
 import type { ReverseGeocodeResult } from '../media-meta/geoapify.server'
 
@@ -29,6 +29,14 @@ export type GeocodeOpts = {
 	sleepMs?: number
 	sleep?: (ms: number) => Promise<void>
 	geocoder?: Geocoder
+}
+
+// Read-only view of the collection blob. Passed into refreshMemories so the
+// sweep can spare curated uuids that aren't in the memories-folder snapshot.
+// Single-writer invariant preserved: this is read-only; only the admin route
+// writes to `collection/v1`.
+export type CollectionReader = {
+	lookup(): Promise<CollectionSnapshot | undefined>
 }
 
 const ZERO_FAILURES: Record<FailureReason, number> = {
@@ -240,8 +248,8 @@ export async function refreshMemories(
 	folderId: number,
 	mediaCache: MediaCache,
 	fileidIndex: FileidIndex,
-	folderCache: FolderCache,
 	geocodeOpts?: GeocodeOpts,
+	collectionReader?: CollectionReader,
 ): Promise<RefreshResult> {
 	const files = await listMediaFiles(client, folderId)
 	const processed = await Promise.all(
@@ -261,14 +269,15 @@ export async function refreshMemories(
 	)
 
 	const aliveSet = new Set(aliveUuids)
+	// Curated uuids referenced by the collection blob are kept alive even
+	// when they aren't in the memories-folder snapshot — admin curation can
+	// reach files anywhere under PCLOUD_SOURCE_FOLDER_ID and those would
+	// otherwise be swept by the next pass.
+	const curatedSnapshot = collectionReader ? await collectionReader.lookup() : undefined
+	const protectedSet = new Set([...aliveSet, ...(curatedSnapshot?.uuids ?? [])])
 	const allCachedUuids = await mediaCache.listUuids()
-	const staleUuids = allCachedUuids.filter((uuid) => !aliveSet.has(uuid))
+	const staleUuids = allCachedUuids.filter((uuid) => !protectedSet.has(uuid))
 	await Promise.all(staleUuids.map((uuid) => sweepUuid(client, uuid, mediaCache, fileidIndex)))
-
-	await folderCache.remember({
-		refreshedAt: new Date().toISOString(),
-		uuids: aliveUuids,
-	})
 
 	const geocodeResult = geocodeOpts
 		? await runGeocodePass(aliveUuids, aliveCached, mediaCache, geocodeOpts)

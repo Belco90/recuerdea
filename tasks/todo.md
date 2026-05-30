@@ -1,67 +1,108 @@
-# Switch video URLs to `getvideolink` — todo
+# v15 — Demolish the refresh-memories cron
 
-> Replace `getpublinkdownload({ code })` with `getvideolink({ fileid, … })` on
-> the video play + download paths. Pass `contenttype=<meta.contenttype>` for
-> play, `forcedownload=1` for download. Proxy at `/api/video/<uuid>` stays —
-> `getvideolink` URLs are still IP-bound. Image downloads untouched.
->
-> Docs: <https://docs.pcloud.com/methods/streaming/getvideolink.html>
+> Admin curation already lazy-mints everything the home page needs
+> (`lazyMintFile`, SPEC §25). The daily scheduled function is dead
+> weight. Delete the cron and the modules that only existed for it.
+> Loader becomes collection-only. See `tasks/plan.md` for rationale,
+> trade-offs, and risks.
 
-## Phase 1 — Server-side helper
+## Phase 1 — Loader becomes collection-only
 
-- [ ] **Task 1** — `resolveVideoLink` helper + tests
-  - [ ] `src/lib/memories/pcloud-urls.server.ts`
-    - [ ] Export `resolveVideoLink(client, fileid, opts)` returning `https://${hosts[0]}${path}`
-    - [ ] Export `VideoLinkOpts = { contenttype?: string; forcedownload?: boolean }`
-    - [ ] When `forcedownload: true`, pass `forcedownload: 1` to `callRaw`; when absent/false, omit
-    - [ ] When `contenttype` set, pass through; when absent, omit
-    - [ ] Throws `TypeError('getvideolink: no hosts returned')` on empty `hosts` (parity with `resolveMediaUrl`)
-    - [ ] Propagates `callRaw` errors
-  - [ ] `src/lib/memories/pcloud-urls.server.test.ts`
-    - [ ] Asserts `callRaw('getvideolink', { fileid, contenttype })` for stream-style call
-    - [ ] Asserts `callRaw('getvideolink', { fileid, forcedownload: 1 })` for download-style call
-    - [ ] Asserts `callRaw('getvideolink', { fileid })` when both opts omitted
-    - [ ] Asserts `https://${hosts[0]}${path}` shape
-    - [ ] Asserts empty-hosts throw
-    - [ ] Asserts `callRaw` error propagation
+- [ ] **T1**: Drop `folder/v1` fallback in `src/lib/memories/pcloud.server.ts`
+  - [ ] Stop importing `createFolderCache` / `getFolderCacheStore`
+  - [ ] When `collection/v1` is absent → return `[]` + warn ("no curated collection yet")
+  - [ ] Update `pcloud.server.test.ts`: drop folder-store mocks and the
+        "falls back to folder snapshot" cases; add an "empty when
+        collection blob absent" case
 
-### ✅ Checkpoint 1 — helper green
+### Checkpoint A — Loader collection-only
 
-- [ ] `pnpm test:unit -- pcloud-urls.server` green
+- [ ] `pnpm test -- src/lib/memories/pcloud.server` green
 - [ ] `pnpm type-check` clean
 
-## Phase 2 — Wire into the proxy
+## Phase 2 — Cron demolition
 
-- [ ] **Task 2** — `video-stream.server.ts` uses `resolveVideoUrl` (fileid-based)
-  - [ ] `src/lib/memories/video-stream.server.ts`
-    - [ ] Replace `ResolveStreamUrl: (code) => Promise<string>` with `ResolveVideoUrl: (fileid: number, opts: { contenttype?: string; forcedownload?: boolean }) => Promise<string>`
-    - [ ] `VideoStreamDeps.resolveVideoUrl` replaces `resolveStreamUrl`
-    - [ ] Stream branch passes `{ contenttype: meta.contenttype }` to resolver
-    - [ ] Download branch passes `{ forcedownload: true }` to resolver
-    - [ ] All response shaping unchanged (range-forwarding, manual `content-type`, manual `Content-Disposition`, force-200 on download, 502 on errors)
-    - [ ] Resolver called with `meta.fileid` (not `meta.code`)
-  - [ ] `src/lib/memories/video-stream.server.test.ts`
-    - [ ] Update mocks for new resolver signature
-    - [ ] Stream test asserts resolver called with `(videoMeta.fileid, { contenttype: 'video/mp4' })`
-    - [ ] Download test asserts resolver called with `(videoMeta.fileid, { forcedownload: true })`
-    - [ ] All existing 401 / 400 / 404 / 502 / Range / Content-Disposition / UTF-8 filename tests stay green
+- [ ] **T2**: Delete the scheduled function + netlify.toml block
+  - [ ] `rm netlify/functions/refresh-memories.ts`
+  - [ ] Remove `[functions."refresh-memories"]` block from `netlify.toml`
+  - [ ] Remove the `netlify/functions/` directory if empty
 
-- [ ] **Task 3** — Route shell uses `resolveVideoLink`
-  - [ ] `src/routes/api/video/$uuid.ts`
-    - [ ] Replace `resolveMediaUrl` import with `resolveVideoLink`
-    - [ ] `resolveVideoUrl: async (fileid, opts) => { … resolveVideoLink(client, fileid, opts) }`
-    - [ ] No other change to the shell
+- [ ] **T3**: Delete `refresh-memories.server.{ts,test.ts}`
+  - [ ] `rm src/lib/memories/refresh-memories.server.ts`
+  - [ ] `rm src/lib/memories/refresh-memories.server.test.ts`
 
-### ✅ Checkpoint 2 — proxy on `getvideolink`
+### Checkpoint B — Cron gone
 
-- [ ] `pnpm test` (unit + browser) green
+- [ ] `grep -rn 'refresh-memories\|refreshMemories\|RefreshResult\|GeocodeOpts\|CollectionReader' src/ netlify/ test/ __mocks__/` returns nothing
 - [ ] `pnpm type-check` clean
+- [ ] `pnpm test` (both projects) green
+
+## Phase 3 — Orphan removal
+
+- [ ] **T4**: Delete `src/lib/cache/folder-cache.*`
+  - [ ] `rm src/lib/cache/folder-cache.ts`
+  - [ ] `rm src/lib/cache/folder-cache.server.ts`
+  - [ ] `rm src/lib/cache/folder-cache.test.ts`
+  - [ ] `rm src/lib/cache/folder-cache.server.test.ts`
+
+- [ ] **T5**: Delete `src/lib/media-meta/*`
+  - [ ] `rm -rf src/lib/media-meta`
+
+### Checkpoint C — Dead modules gone
+
+- [ ] `grep -rn 'folder-cache\|media-meta\|FolderCache\|FolderSnapshot\|extractImageMeta\|extractVideoMeta\|reverseGeocode\|geoapify' src/ netlify/ test/ __mocks__/` returns nothing
+- [ ] `pnpm type-check` clean
+- [ ] `pnpm test` green
+
+## Phase 4 — Dependencies + scripts
+
+- [ ] **T6**: `package.json` cleanup
+  - [ ] Remove `dependencies["@netlify/functions"]`
+  - [ ] Remove `dependencies.exifr`
+  - [ ] Remove `scripts["invoke:refresh-memories"]`
+
+- [ ] **T7**: `pnpm install` to regenerate the lockfile
+
+## Phase 5 — Env + docs
+
+- [ ] **T8**: `src/env.d.ts` — remove `PCLOUD_MEMORIES_FOLDER_ID`
+
+- [ ] **T9**: `README.md` rewrite
+  - [ ] Stack: drop scheduled-function line, drop Geoapify bullet, drop `folder/v1` mention
+  - [ ] Prerequisites: drop `PCLOUD_MEMORIES_FOLDER_ID`, `GEOAPIFY_API_KEY`, `RECUERDEA_GEOCODE_MAX_PER_RUN`, `PCLOUD_COLLECTION_ID`, `PCLOUD_ADMIN_AUTH`; `PCLOUD_SOURCE_FOLDER_ID` becomes the only pCloud folder env var
+  - [ ] Getting started: replace cron-trigger block with "navigate to `/admin/collection/add` and pick at least one file"
+  - [ ] Scripts table: drop `invoke:refresh-memories`
+  - [ ] Project layout: drop `media-meta/`, `refresh-memories` callout, `netlify/functions/` block, `folder-cache` mention
+  - [ ] Deployment: drop "trigger the cron once via the Netlify dashboard"
+
+- [ ] **T10**: `SPEC.md` rewrite
+  - [ ] New §27 (v15 Acceptance Criteria): collection-only loader; admin sole writer of `media/<uuid>` + `fileid-index/<fileid>` + `collection/v1`; null `width`/`height`/`location`/`place` on lazy-mint with documented UI degradation; public-link accumulation accepted; no cron, no `@netlify/functions`, no `exifr`, no Geoapify
+  - [ ] New §28 (v14 → v15 changes summary)
+  - [ ] §7 Boundaries: drop "cron sole writer" + "public-link lifecycle owned by cron" + "Never log any geo-derived data"; add "admin route sole writer" + "public links may accumulate (single-user trade-off)"; keep IP-bound URL + `Cache-Control: private` rules
+  - [ ] §4 Project Structure: drop `netlify/functions/refresh-memories.ts`, `refresh-memories.server.ts`, `media-meta/`, `folder-cache.*`; update `pcloud.server.ts` description
+  - [ ] §17: annotate EXIF/mvhd retirement rule as also covering `width`/`height` post-v15
+  - [ ] §23: annotate `folder/v1` fallback as superseded by §27
+
+### Checkpoint D — Repo clean
+
+- [ ] `pnpm type-check` clean
+- [ ] `pnpm test` (both projects) green
 - [ ] `pnpm lint` clean
 - [ ] `pnpm format:check` clean
-- [ ] Deploy-preview smoke: play a cached video; download the same video; both succeed; Network tab clean (no `another IP address` / `410 Gone`)
-- [ ] Downloaded file lands with the original filename (incl. accents)
+- [ ] `pnpm build` clean (after `rm -rf dist .netlify/blobs-serve`)
 
-## Open questions
+## Phase 6 — Smoke
 
-- [ ] (Optional) Drop the proxy's manual `'content-type'` override on the stream path? Default: keep.
-- [ ] (Optional) Add a one-line note to SPEC §17 about the pCloud method swap? Default: skip in this PR.
+- [ ] **T11**: Manual local smoke
+  - [ ] `pnpm dev:netlify` boots
+  - [ ] `/admin/collection/add` lists the source folder
+  - [ ] Pick + Save → `/` renders the curated item on its capture date
+  - [ ] Remove via `/admin/collection` → item drops from `/`
+
+- [ ] **T12**: `curl -I http://localhost:8888/` reports `Cache-Control: private` / `no-store`
+
+## Final checkpoint
+
+- [ ] All Checkpoints A/B/C/D green
+- [ ] PR open targeting `main`
+- [ ] SPEC.md matches the working tree

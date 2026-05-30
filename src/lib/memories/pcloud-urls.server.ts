@@ -17,7 +17,7 @@ import type { Client } from 'pcloud-kit'
 // pcloud-kit's callRaw throws PcloudApiError automatically on `result !== 0`,
 // so the helpers only handle the "success but empty hosts" edge case.
 
-export type ThumbSize = '640x640' | '1025x1025'
+export type ThumbSize = '320x320' | '640x640' | '1025x1025'
 
 type PublinkLink = {
 	hosts: readonly string[]

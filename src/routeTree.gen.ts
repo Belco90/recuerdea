@@ -11,7 +11,11 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminCollectionRouteImport } from './routes/admin/collection'
+import { Route as AdminCollectionIndexRouteImport } from './routes/admin/collection/index'
 import { Route as ApiVideoUuidRouteImport } from './routes/api/video/$uuid'
+import { Route as AdminCollectionAddRouteImport } from './routes/admin/collection/add'
+import { Route as ApiAdminThumbFileidRouteImport } from './routes/api/admin/thumb/$fileid'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -23,40 +27,94 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminCollectionRoute = AdminCollectionRouteImport.update({
+  id: '/admin/collection',
+  path: '/admin/collection',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminCollectionIndexRoute = AdminCollectionIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminCollectionRoute,
+} as any)
 const ApiVideoUuidRoute = ApiVideoUuidRouteImport.update({
   id: '/api/video/$uuid',
   path: '/api/video/$uuid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminCollectionAddRoute = AdminCollectionAddRouteImport.update({
+  id: '/add',
+  path: '/add',
+  getParentRoute: () => AdminCollectionRoute,
+} as any)
+const ApiAdminThumbFileidRoute = ApiAdminThumbFileidRouteImport.update({
+  id: '/api/admin/thumb/$fileid',
+  path: '/api/admin/thumb/$fileid',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/admin/collection': typeof AdminCollectionRouteWithChildren
+  '/admin/collection/add': typeof AdminCollectionAddRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
+  '/admin/collection/': typeof AdminCollectionIndexRoute
+  '/api/admin/thumb/$fileid': typeof ApiAdminThumbFileidRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/admin/collection/add': typeof AdminCollectionAddRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
+  '/admin/collection': typeof AdminCollectionIndexRoute
+  '/api/admin/thumb/$fileid': typeof ApiAdminThumbFileidRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/admin/collection': typeof AdminCollectionRouteWithChildren
+  '/admin/collection/add': typeof AdminCollectionAddRoute
   '/api/video/$uuid': typeof ApiVideoUuidRoute
+  '/admin/collection/': typeof AdminCollectionIndexRoute
+  '/api/admin/thumb/$fileid': typeof ApiAdminThumbFileidRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/api/video/$uuid'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/admin/collection'
+    | '/admin/collection/add'
+    | '/api/video/$uuid'
+    | '/admin/collection/'
+    | '/api/admin/thumb/$fileid'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/api/video/$uuid'
-  id: '__root__' | '/' | '/login' | '/api/video/$uuid'
+  to:
+    | '/'
+    | '/login'
+    | '/admin/collection/add'
+    | '/api/video/$uuid'
+    | '/admin/collection'
+    | '/api/admin/thumb/$fileid'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/admin/collection'
+    | '/admin/collection/add'
+    | '/api/video/$uuid'
+    | '/admin/collection/'
+    | '/api/admin/thumb/$fileid'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  AdminCollectionRoute: typeof AdminCollectionRouteWithChildren
   ApiVideoUuidRoute: typeof ApiVideoUuidRoute
+  ApiAdminThumbFileidRoute: typeof ApiAdminThumbFileidRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,6 +133,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/collection': {
+      id: '/admin/collection'
+      path: '/admin/collection'
+      fullPath: '/admin/collection'
+      preLoaderRoute: typeof AdminCollectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/collection/': {
+      id: '/admin/collection/'
+      path: '/'
+      fullPath: '/admin/collection/'
+      preLoaderRoute: typeof AdminCollectionIndexRouteImport
+      parentRoute: typeof AdminCollectionRoute
+    }
     '/api/video/$uuid': {
       id: '/api/video/$uuid'
       path: '/api/video/$uuid'
@@ -82,13 +154,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiVideoUuidRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/collection/add': {
+      id: '/admin/collection/add'
+      path: '/add'
+      fullPath: '/admin/collection/add'
+      preLoaderRoute: typeof AdminCollectionAddRouteImport
+      parentRoute: typeof AdminCollectionRoute
+    }
+    '/api/admin/thumb/$fileid': {
+      id: '/api/admin/thumb/$fileid'
+      path: '/api/admin/thumb/$fileid'
+      fullPath: '/api/admin/thumb/$fileid'
+      preLoaderRoute: typeof ApiAdminThumbFileidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
+
+interface AdminCollectionRouteChildren {
+  AdminCollectionAddRoute: typeof AdminCollectionAddRoute
+  AdminCollectionIndexRoute: typeof AdminCollectionIndexRoute
+}
+
+const AdminCollectionRouteChildren: AdminCollectionRouteChildren = {
+  AdminCollectionAddRoute: AdminCollectionAddRoute,
+  AdminCollectionIndexRoute: AdminCollectionIndexRoute,
+}
+
+const AdminCollectionRouteWithChildren = AdminCollectionRoute._addFileChildren(
+  AdminCollectionRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  AdminCollectionRoute: AdminCollectionRouteWithChildren,
   ApiVideoUuidRoute: ApiVideoUuidRoute,
+  ApiAdminThumbFileidRoute: ApiAdminThumbFileidRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

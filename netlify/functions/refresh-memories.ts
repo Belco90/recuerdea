@@ -1,7 +1,7 @@
+import { createCollectionCache } from '#/lib/cache/collection-cache'
+import { getCollectionCacheStore } from '#/lib/cache/collection-cache.server'
 import { createFileidIndex } from '#/lib/cache/fileid-index'
 import { getFileidIndexStore } from '#/lib/cache/fileid-index.server'
-import { createFolderCache } from '#/lib/cache/folder-cache'
-import { getFolderCacheStore } from '#/lib/cache/folder-cache.server'
 import { createMediaCache } from '#/lib/cache/media-cache'
 import { getMediaCacheStore } from '#/lib/cache/media-cache.server'
 import { refreshMemories } from '#/lib/memories/refresh-memories.server'
@@ -34,7 +34,10 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 	const client = createClient({ token })
 	const mediaCache = createMediaCache(getMediaCacheStore())
 	const fileidIndex = createFileidIndex(getFileidIndexStore())
-	const folderCache = createFolderCache(getFolderCacheStore())
+	// Read-only consumer of the collection blob. The admin route is the sole
+	// writer; the cron uses this snapshot to spare curated uuids from sweep
+	// (see SPEC §25).
+	const collectionCache = createCollectionCache(getCollectionCacheStore())
 
 	const apiKey = process.env.GEOAPIFY_API_KEY
 	const capRaw = process.env.RECUERDEA_GEOCODE_MAX_PER_RUN
@@ -49,8 +52,8 @@ export const handler = schedule('0 4,22 * * *', async (event) => {
 		folderId,
 		mediaCache,
 		fileidIndex,
-		folderCache,
 		apiKey ? { apiKey, cap } : undefined,
+		{ lookup: () => collectionCache.lookup() },
 	)
 
 	const e = result.extractCounts

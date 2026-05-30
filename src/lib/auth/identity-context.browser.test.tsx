@@ -48,6 +48,7 @@ function Consumer() {
 		<div>
 			<div>ready: {identity.ready ? 'true' : 'false'}</div>
 			<div>user: {identity.user ? identity.user.email : 'none'}</div>
+			<div>admin: {identity.isAdmin ? 'true' : 'false'}</div>
 			<button type="button" onClick={() => void identity.logout()}>
 				Log out
 			</button>
@@ -87,6 +88,52 @@ describe('IdentityProvider', () => {
 		resolveGetUser({ id: 'u1', email: 'me@test.com' } as User)
 		await expect.element(page.getByText('ready: true')).toBeVisible()
 		await expect.element(page.getByText('user: me@test.com')).toBeVisible()
+	})
+
+	it('exposes isAdmin=true when the user has role "admin"', async () => {
+		const { resolveGetUser } = setupNetlifyMocks()
+		await render(
+			<IdentityProvider>
+				<Consumer />
+			</IdentityProvider>,
+		)
+		resolveGetUser({ id: 'u1', email: 'a@test.com', role: 'admin' } as User)
+		await expect.element(page.getByText('admin: true')).toBeVisible()
+	})
+
+	it('exposes isAdmin=true when the user has roles array containing "admin"', async () => {
+		const { resolveGetUser } = setupNetlifyMocks()
+		await render(
+			<IdentityProvider>
+				<Consumer />
+			</IdentityProvider>,
+		)
+		resolveGetUser({ id: 'u1', email: 'a@test.com', roles: ['editor', 'admin'] } as User)
+		await expect.element(page.getByText('admin: true')).toBeVisible()
+	})
+
+	it('exposes isAdmin=false when no admin role is present', async () => {
+		const { resolveGetUser } = setupNetlifyMocks()
+		await render(
+			<IdentityProvider>
+				<Consumer />
+			</IdentityProvider>,
+		)
+		resolveGetUser({ id: 'u1', email: 'a@test.com', role: 'editor', roles: ['viewer'] } as User)
+		await expect.element(page.getByText('ready: true')).toBeVisible()
+		await expect.element(page.getByText('admin: false')).toBeVisible()
+	})
+
+	it('exposes isAdmin=false when there is no user', async () => {
+		const { resolveGetUser } = setupNetlifyMocks()
+		await render(
+			<IdentityProvider>
+				<Consumer />
+			</IdentityProvider>,
+		)
+		resolveGetUser(null)
+		await expect.element(page.getByText('ready: true')).toBeVisible()
+		await expect.element(page.getByText('admin: false')).toBeVisible()
 	})
 
 	it('updates user when onAuthChange fires', async () => {
