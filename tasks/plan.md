@@ -1,375 +1,435 @@
-# Implementation Plan: v14 — Source-folder navigator for the admin picker
+# v15 — Demolish the refresh-memories cron
 
 ## Overview
 
-v13 shipped the blob-backed curation storage but with the wrong picker — a flat grid of cached memories-folder items. The intended "Añadir más" UX is the v12-style **navigable view of `PCLOUD_SOURCE_FOLDER_ID`**: breadcrumbs, sub-folder grid, file grid, multi-select that survives navigation. v14 restores that navigator on top of v13's storage.
+v14 made admin curation the entry point for every memory: `lazyMintFile`
+writes `media/<uuid>` + `fileid-index/<fileid>` synchronously the moment a
+curator picks a file. That made the daily scheduled function redundant for
+the items that actually appear on `/`. The cron still does four things,
+none of which earn their complexity for this single-user, curated workload:
+
+1. Range-fetches each memories-folder file to extract `width` / `height` /
+   GPS via `exifr` + the hand-rolled mvhd walker.
+2. Reverse-geocodes GPS into Spanish place captions via Geoapify.
+3. Sweeps deleted files: clears `media/<uuid>` + `fileid-index/<fileid>`
+   and calls `deletepublink(linkid)` against pCloud.
+4. Snapshots the memories folder into `folder/v1` so the loader can fall
+   back to it when `collection/v1` is absent.
+
+v15 deletes the cron and every module that only existed to feed it. The
+home loader becomes a pure read against `collection/v1` + `media/<uuid>`.
+The admin route (via `lazyMintFile`) becomes the sole writer of every
+cache the app still has.
+
+## Architecture Decisions
+
+- **Loader is collection-only.** `collection/v1` absent → `/` renders the
+  empty state. No `folder/v1` fallback. Matches SPEC §23's
+  empty-collection semantics ("empty means 'show nothing'") extended to
+  cover the "never curated" case.
+- **`width` / `height` / `location` / `place` stay null forever** for any
+  item curated post-v15 (and for items already lazy-minted in v14).
+  `Polaroid` is already `objectFit: 'cover'` (SPEC §17), and the
+  `Lightbox` uses browser-natural sizing, so the visible degradation is:
+  no place caption under the polaroid, no "· {place}" suffix in the
+  lightbox header. Items the cron geocoded pre-v15 keep their `place`
+  field — we don't wipe the blob, so existing place captions survive
+  until the next admin save touches that file.
+- **`deletepublink` on file removal is dropped.** Public links accumulate
+  in pCloud's panel when files leave the source folder. Acceptable for a
+  single-user app; documented in SPEC §27 as a deliberate trade-off.
+  Existing rule in SPEC §7 ("No abandoned public links accumulate")
+  retires.
+- **Hash-based invalidation goes away.** If a file's bytes change in
+  pCloud, cached `code` / `linkid` / `name` / `captureDate` stay stale.
+  Acceptable for the same reason — edits in pCloud are rare for this
+  workload and the curator can always remove + re-add to refresh.
+- **Single-writer invariant preserved.** Admin route is the sole writer
+  of `media/<uuid>`, `fileid-index/<fileid>`, and `collection/v1`. The
+  `folder-cache` store stops being read or written and is deleted.
 
-Because the source folder can extend beyond `PCLOUD_MEMORIES_FOLDER_ID`, the picker can offer files the cron has not snapshotted. v14 lazy-mints those on save (`stat(fileid) + getfilepublink(fileid)` → uuid → write `media/<uuid>` + `fileid-index/<fileid>` → append to `collection/v1`). No range-fetch extraction on the save path; the lazy-minted entry's `width / height / location / place` stay `null`. The cron's sweep is updated to spare every uuid currently in the collection blob so lazy-minted-but-non-memories files survive future runs.
+## Open Questions
 
-The home loader and the curated-grid section are untouched.
+1. **Retire reverse-geocoding entirely** — the plan assumes yes. Existing
+   `place` values in `media/<uuid>` stay readable; new items get none.
+   If you want it kept, it would have to move into `lazyMintFile`
+   (latency hit at save time) or a manual admin-triggered batch.
+2. **Drop `PCLOUD_MEMORIES_FOLDER_ID`** — the plan assumes yes. After T2
+   nothing reads it. README's "typically equal to
+   `PCLOUD_SOURCE_FOLDER_ID`" guidance moves over to making
+   `PCLOUD_SOURCE_FOLDER_ID` the single folder env var.
+3. **Production data continuity.** Deploy-preview / prod blobs were
+   populated by the cron at some point. Confirm `collection/v1` has the
+   uuids you want before the merge — once the cron is gone there is no
+   way to repopulate `folder/v1`. If `collection/v1` is empty in prod,
+   the home page will be empty until admin curation runs against the
+   restored navigator.
 
-## Architecture decisions
+## Task List
 
-- **Two AdminFileItem variants.**
-  - `CollectionItem = { uuid, fileid, name, kind, thumbUrl }` — current-collection grid. Carries `fileid` so the route can compute the `blocked` set the navigator needs (intersect "files already in collection" with "files visible in this source-folder page").
-  - `SourceFileItem = { fileid, name, kind, thumbUrl }` — source-folder listing. No uuid yet — file may not have been minted.
-- **Wire format for save: fileids.** `addToCollection({ fileids: number[] })`. Server resolves each fileid → uuid via `fileid-index`; lazy-mints if missing. The blob still stores uuids — loader path unchanged.
-- **Lazy-mint scope.** Two pCloud calls per new file: `stat(fileid)` (hash, contenttype, name, created) and `getfilepublink(fileid)` (code, linkid). No range-fetch extractor → width/height/location stay null; place stays null. Acceptable trade-off — UI degrades gracefully. Geocoding only runs for memories-folder files; curated-outside-memories items will permanently render without a place caption until a future v15 widens cron coverage.
-- **Cron sweep reads `collection/v1` (read-only).** After listing the memories folder, the cron unions the curated uuids into the alive set before computing `staleUuids`. Curated-but-non-memories uuids no longer get swept. Reads-only: the admin route remains the sole **writer** of `collection/v1`, preserving the §7 single-writer invariant.
-- **`PCLOUD_SOURCE_FOLDER_ID` returns.** Required for the admin route. Loader returns a tagged `{ status: 'source-folder-id-missing' }` result and the route renders a banner.
-- **`PCLOUD_TOKEN` covers the navigator's `listfolder` + `getthumbslinks` + lazy-mint `stat` + `getfilepublink` calls.** All work with OAuth. `PCLOUD_ADMIN_AUTH` stays gone.
+### Phase 1 — Loader becomes collection-only
 
-### What stays vs. what changes vs. what goes
+- [ ] **T1** — drop `folder/v1` fallback in `src/lib/memories/pcloud.server.ts`
 
-| Surface                                                | Status                                                                                                                        |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | -------------- |
-| `collection-cache` blob + storage shape                | **Stays.** Same `{ refreshedAt, uuids[] }`.                                                                                   |
-| `fetchTodayMemories` (loader)                          | **Stays — unchanged.**                                                                                                        |
-| `AdminFileItem = { uuid, name, kind, thumbUrl }` (v13) | **Renamed/split** → `CollectionItem` (uuid + fileid) and `SourceFileItem` (fileid only).                                      |
-| `CollectionItemsGrid`                                  | **Stays — minor prop type update** to `CollectionItem`. Still uuid-keyed for React + onRemove.                                |
-| `lib/admin/folder-media.{ts,server.ts}` (v13)          | **Deleted.** Superseded by the source-folder navigator.                                                                       |
-| `components/AdminCollectionGrid.tsx` (v13)             | **Deleted.** Superseded by `AdminFolderNavigator`.                                                                            |
-| `lib/admin/source-folder.{ts,server.ts}`               | **Restored** from the v12 design, with the auth client switched to `PCLOUD_TOKEN`.                                            |
-| `components/AdminFolderNavigator.tsx`                  | **Restored** from the v12 design, with the wire format using `SourceFileItem.fileid`.                                         |
-| `collection.ts` `addToCollection` server-fn            | **Wire shape: `{ fileids: number[] }`.** Server resolves to uuids (lazy-mint as needed).                                      |
-| `collection.ts` `removeFromCollection` server-fn       | **Unchanged — still `{ uuids: string[] }`** (removed items always have a uuid).                                               |
-| `refreshMemories` cron                                 | **Sweep updated** to spare curated uuids. New 7th optional arg `collectionReader?: { lookup: () => Promise<CollectionSnapshot | undefined> }`. |
-| `netlify/functions/refresh-memories.ts`                | **Reads `collection-cache`** (read-only) and passes the reader into `refreshMemories`.                                        |
-| `PCLOUD_SOURCE_FOLDER_ID` env var                      | **Restored.** Required for `/admin/collection`.                                                                               |
-| `PCLOUD_ADMIN_AUTH`, `PCLOUD_COLLECTION_ID` env vars   | **Stay gone.** Not needed.                                                                                                    |
+### Checkpoint A — Loader collection-only
 
-## Dependency graph
+- [ ] `pnpm test -- src/lib/memories/pcloud.server` green
+- [ ] `pnpm type-check` clean
 
-```
-lib/admin/source-folder.server.ts       (restored — listfolder + breadcrumbs)
-    └── lib/admin/source-folder.ts      (server-fn; auth-gated; uses PCLOUD_TOKEN)
-            └── /admin/collection route loader
+### Phase 2 — Cron demolition
 
-collection-cache (blob, read-only by cron) ──┐
-                                             │
-lib/admin/collection.server.ts (v13)         │
-    + lazyMintFile(client, fileid, ...)      │
-    + addFileidsToCollection(...)            │
-    └── lib/admin/collection.ts              │
-            └── /admin/collection route handlers
-                                             │
-refreshMemories sweep ───────────────────────┘  (reads collection blob to spare curated uuids)
-```
+- [ ] **T2** — delete the scheduled function + netlify.toml block
+- [ ] **T3** — delete `refresh-memories.server.{ts,test.ts}`
 
-## Task list
+### Checkpoint B — Cron gone
 
-### Phase 1: Source-folder data path
+- [ ] `grep -rn 'refresh-memories\|refreshMemories' src/ netlify/ test/ __mocks__/` returns nothing
+- [ ] `pnpm type-check` clean
+- [ ] `pnpm test` green
 
-#### Task 1: Restore `lib/admin/source-folder.{ts,server.ts}` (+ tests)
+### Phase 3 — Orphan removal
 
-**Description:** Re-add the v12 source-folder module, lightly adapted: `SourceFileItem = { fileid, name, kind, thumbUrl }` (no uuid yet), and the server-fn uses `PCLOUD_TOKEN` (OAuth) instead of the dropped `PCLOUD_ADMIN_AUTH`.
+- [ ] **T4** — delete `src/lib/cache/folder-cache.*` (orphaned by T1+T3)
+- [ ] **T5** — delete `src/lib/media-meta/*` (orphaned by T3)
 
-**Acceptance criteria:**
+### Checkpoint C — Dead modules gone
 
-- [ ] `source-folder.server.ts` exports `fetchAdminSourceFolder(client, { folderid? })`, `assertSourceFolderId()`, `SourceFolderIdMissingError`, `FolderNotPermittedError`, `AdminFolderListing = { folderid, name, breadcrumbs, subfolders, files: SourceFileItem[] }`.
-- [ ] `source-folder.ts` exports `getAdminSourceFolder` server-fn: admin-gated; builds the client from `PCLOUD_TOKEN`; returns `{ status: 'ok' | 'source-folder-id-missing' | 'folder-not-permitted', ... }`.
-- [ ] Breadcrumb walk stops at source root, pCloud root (folderid 0), or depth 10.
-- [ ] Files: media only (`image/*` | `video/*`); thumbs batched via `getthumbslinks` (320x320 jpg, crop=1).
-- [ ] Tests cover: empty folder, root listing, nested navigation, breadcrumb walk, FolderNotPermittedError, SourceFolderIdMissingError, thumbs response with missing entries.
+- [ ] `grep -rn 'folder-cache\|media-meta\|FolderCache\|extractImageMeta\|extractVideoMeta\|reverseGeocode\|geoapify' src/ netlify/ test/ __mocks__/` returns nothing
+- [ ] `pnpm type-check` clean
+- [ ] `pnpm test` green
 
-**Verification:**
+### Phase 4 — Dependencies + scripts
 
-- [ ] `pnpm test -- src/lib/admin/source-folder.server` green.
-- [ ] `pnpm type-check` clean.
+- [ ] **T6** — `package.json`: drop `@netlify/functions`, drop `exifr`, drop the `invoke:refresh-memories` script
+- [ ] **T7** — `pnpm install` to regenerate the lockfile
 
-**Dependencies:** None.
+### Phase 5 — Env + docs
 
-**Files likely touched:**
+- [ ] **T8** — `src/env.d.ts`: remove `PCLOUD_MEMORIES_FOLDER_ID`
+- [ ] **T9** — rewrite the cron + Geoapify + folder-cache sections in `README.md`
+- [ ] **T10** — `SPEC.md`: add §27 (v15 acceptance criteria) + §28 (v14 → v15 changes summary); update §7 boundaries (admin sole writer, retire public-link lifecycle + no-geo-logging rules); update §4 project structure; note §17 EXIF/mvhd-extractor retirement extends to width/height too
 
-- `src/lib/admin/source-folder.server.ts` (new — modeled on the v12 deletion)
-- `src/lib/admin/source-folder.ts` (new — same)
-- `src/lib/admin/source-folder.server.test.ts` (new — based on the v12 deletion, drop any PCLOUD_ADMIN_AUTH refs)
+### Checkpoint D — Repo clean
 
-**Estimated scope:** M (3 files, mostly restoration from git history).
+- [ ] `pnpm type-check` clean
+- [ ] `pnpm test` (both projects) green
+- [ ] `pnpm lint` clean
+- [ ] `pnpm format:check` clean
+- [ ] `pnpm build` clean (after `rm -rf dist .netlify/blobs-serve`)
 
----
+### Phase 6 — Smoke
 
-### Phase 2: Navigator component
+- [ ] **T11** — `pnpm dev:netlify`: load `/admin/collection`, navigate folders, pick + save, confirm `/` renders the curated item without any cron run
+- [ ] **T12** — `curl -I` against the local server confirms `/` still emits `Cache-Control: private` / `no-store`
 
-#### Task 2: Restore `components/AdminFolderNavigator.tsx` (+ browser test)
+### Final checkpoint
 
-**Description:** Re-add the v12 navigator: breadcrumbs row → subfolder grid → file grid → sticky `Guardar (N)` / `Cancelar` footer. Multi-select state lives in the parent route and persists across navigation. Wire format: `fileid: number`.
+- [ ] Checkpoints A–D green
+- [ ] PR open targeting `main`
+- [ ] SPEC.md matches the working tree
 
-**Acceptance criteria:**
+## Task Detail
 
-- [ ] Props: `listing: AdminFolderListing`, `picked: ReadonlySet<number>`, `blocked: ReadonlySet<number>`, `onNavigate: (folderid) => void`, `onToggle: (fileid) => void`, `onSave: (fileids) => void`, `onCancel: () => void`, `saving?: boolean`.
-- [ ] Blocked tiles dimmed + `aria-disabled='true'` + non-interactive.
-- [ ] Save button: `Guardar (N)`; toggles to `Guardando…` and disables while `saving`.
-- [ ] Save/Cancel footer hidden when N=0.
-- [ ] Sub-folder tiles trigger `onNavigate(folderid)`; file tiles trigger `onToggle(fileid)`.
-- [ ] Browser test asserts: navigation click forwards folderid, file click forwards fileid, blocked tile aria-disabled + ignores click, saving disables Save.
+### T1 — Loader drops the folder-cache fallback
 
-**Verification:**
+**Acceptance criteria**
 
-- [ ] `pnpm test:browser -- AdminFolderNavigator` green.
+- `fetchTodayMemories` reads only `collection/v1` + `media/<uuid>`.
+- When `collection/v1` is absent, returns `[]` (with the existing warn log,
+  reworded to "no curated collection yet").
+- No import of `folder-cache` from `pcloud.server.ts`.
 
-**Dependencies:** Task 1 (`AdminFolderListing` type).
+**Verification**
 
-**Files likely touched:**
+- `pnpm test -- src/lib/memories/pcloud.server` green
+- `grep -n 'folder-cache\|folderCache' src/lib/memories/pcloud.server.ts` empty
 
-- `src/components/AdminFolderNavigator.tsx` (new — modeled on the v12 deletion)
-- `src/components/AdminFolderNavigator.browser.test.tsx` (new)
+**Files**
 
-**Estimated scope:** M.
+- `src/lib/memories/pcloud.server.ts`
+- `src/lib/memories/pcloud.server.test.ts`
 
----
+**Scope:** S
 
-### Phase 3: Save path — fileid → uuid resolution + lazy-mint
+### T2 — Delete the scheduled function + netlify.toml block
 
-#### Task 3: `collection.server.ts` — `CollectionItem` shape + `addFileidsToCollection` with lazy-mint
+**Acceptance criteria**
 
-**Description:**
+- `netlify/functions/refresh-memories.ts` deleted.
+- `[functions."refresh-memories"]` block removed from `netlify.toml`.
+- No other file in `netlify/functions/` (directory may be deleted if empty).
 
-1. Update the curated-item type: `CollectionItem = { uuid, fileid, name, kind, thumbUrl }` (was `AdminFileItem` with just uuid). `fetchCuratedItems` populates `fileid` from `media.fileid`.
-2. Add `lazyMintFile(client, fileidIndex, mediaCache, fileid): Promise<string>` — server-side helper that returns the uuid (existing or freshly minted). For an unknown fileid: calls `stat(fileid)` + `getfilepublink(fileid)`, mints a uuid, writes `media/<uuid>` (no extraction → `width=height=location=place=null`, `captureDate` parsed from `file.created`) and `fileid-index/<fileid>`.
-3. Add `addFileidsToCollection(client, fileidIndex, mediaCache, collectionCache, fileids): Promise<void>` — resolves each fileid via `lazyMintFile`, then read-modify-writes the collection blob with the deduped uuid set.
-4. `addUuidsToCollection` is **removed** — the wire shape only takes fileids now.
-5. `removeUuidsFromCollection` is unchanged.
+**Verification**
 
-**Acceptance criteria:**
+- `ls netlify/functions/` — empty or directory gone
+- `grep -n 'refresh-memories' netlify.toml` empty
 
-- [ ] `CollectionItem` exported with `fileid` field; `fetchCuratedItems` populates it from `meta.fileid`.
-- [ ] `lazyMintFile` short-circuits when `fileid-index` already has the fileid (returns the existing uuid; no pCloud calls).
-- [ ] On lazy-mint: exactly one `stat({ fileid })` and one `getfilepublink({ fileid })` call; no `getfilelink` or extractor calls.
-- [ ] Lazy-minted `CachedMedia`: `fileid/hash/code/linkid/kind/contenttype/name/captureDate` populated; `width=height=null`, `location=null`, `place=null`.
-- [ ] `addFileidsToCollection` validates: non-empty array of positive integers; throws `TypeError` otherwise.
-- [ ] Tests cover: known-fileid short-circuit, unknown-fileid mint, mixed batch, dedup, validation errors, error when `stat` fails.
+**Files**
 
-**Verification:**
+- `netlify/functions/refresh-memories.ts`
+- `netlify.toml`
 
-- [ ] `pnpm test -- src/lib/admin/collection.server` green.
-- [ ] `pnpm type-check` clean.
+**Dependencies:** none (cron has no production-path callers)
 
-**Dependencies:** None (but supersedes some v13 helpers).
+**Scope:** XS
 
-**Files likely touched:**
+### T3 — Delete refresh-memories.server.{ts,test.ts}
 
-- `src/lib/admin/collection.server.ts`
-- `src/lib/admin/collection.server.test.ts`
+**Acceptance criteria**
 
-**Estimated scope:** M.
+- `src/lib/memories/refresh-memories.server.ts` and
+  `refresh-memories.server.test.ts` deleted.
+- No remaining import of `refreshMemories`, `RefreshResult`, `GeocodeOpts`,
+  or `CollectionReader` anywhere in the repo.
 
----
+**Verification**
 
-#### Task 4: `collection.ts` server-fn wire-format change
+- `grep -rn 'refreshMemories\|RefreshResult\|GeocodeOpts\|CollectionReader' src/ netlify/ test/ __mocks__/` empty
 
-**Description:** `addToCollection` validator switches from `{ uuids: string[] }` to `{ fileids: number[] }`. The handler builds the OAuth pCloud client (from `PCLOUD_TOKEN`) plus the three store wrappers and calls `addFileidsToCollection`. `removeFromCollection` unchanged.
-
-**Acceptance criteria:**
-
-- [ ] `addToCollection` input validator: `{ fileids: readonly number[] }`; rejects empty arrays, non-integers, non-positives.
-- [ ] Handler imports `createClient` from `pcloud-kit`, reads `PCLOUD_TOKEN`, wires `fileidIndex`/`mediaCache`/`collectionCache` stores, calls `addFileidsToCollection`.
-- [ ] `removeFromCollection` handler unchanged.
-- [ ] `CollectionMediaResult` carries the new `CollectionItem[]`.
-
-**Verification:**
-
-- [ ] `pnpm type-check` clean.
-- [ ] Manual on `pnpm dev:netlify`: a POST to the add server-fn with a valid fileid succeeds; the file appears in `getCollectionMedia` immediately.
-
-**Dependencies:** Task 3.
-
-**Files likely touched:**
-
-- `src/lib/admin/collection.ts`
-
-**Estimated scope:** S.
-
----
-
-### Phase 4: Cron sweep protection
-
-#### Task 5: `refreshMemories` sweep reads the collection blob
-
-**Description:** Add an optional `collectionReader?: { lookup(): Promise<CollectionSnapshot | undefined> }` parameter to `refreshMemories`. When provided, the sweep unions curated uuids into the alive set so they're never marked stale. Reads-only: nothing writes to `collection/v1`.
-
-**Acceptance criteria:**
-
-- [ ] New `CollectionReader` type (subset of `CollectionCache` — only `lookup`).
-- [ ] `refreshMemories(client, folderId, mediaCache, fileidIndex, folderCache, geocodeOpts?, collectionReader?)` — collection reader is optional 7th arg.
-- [ ] Sweep: `protectedSet = new Set([...aliveUuids, ...(curatedUuids ?? [])])`; `staleUuids = allCachedUuids.filter(u => !protectedSet.has(u))`.
-- [ ] When `collectionReader` is absent or returns undefined, sweep behavior is identical to v13.
-- [ ] Tests cover: no reader → unchanged; reader returns undefined → unchanged; reader returns curated uuids → those uuids are spared from sweep even when not in the memories folder; reader returns empty list → sweep is unchanged.
-
-**Verification:**
-
-- [ ] `pnpm test -- src/lib/memories/refresh-memories.server` green.
-
-**Dependencies:** None.
-
-**Files likely touched:**
+**Files**
 
 - `src/lib/memories/refresh-memories.server.ts`
 - `src/lib/memories/refresh-memories.server.test.ts`
 
-**Estimated scope:** M.
+**Dependencies:** T2
 
----
+**Scope:** XS
 
-#### Task 6: Scheduled function wires the collection reader
+### T4 — Delete folder-cache.*
 
-**Description:** `netlify/functions/refresh-memories.ts` builds a `CollectionCache` (via the existing factories) and passes its `lookup` into `refreshMemories` as the read-only collection reader.
+**Acceptance criteria**
 
-**Acceptance criteria:**
+- `src/lib/cache/folder-cache.ts`, `folder-cache.server.ts`,
+  `folder-cache.test.ts`, `folder-cache.server.test.ts` all deleted.
+- No imports of `FolderCache`, `FolderSnapshot`, `FolderCacheStore`,
+  `createFolderCache`, or `getFolderCacheStore` anywhere.
 
-- [ ] Imports `createCollectionCache` + `getCollectionCacheStore` again (removed in v13 T8).
-- [ ] `refreshMemories(...)` call passes a `{ lookup: collectionCache.lookup }` 7th arg.
-- [ ] No writes to `collection/v1` from this file (no `remember` call).
+**Verification**
 
-**Verification:**
+- `grep -rn 'folder-cache\|FolderCache\|FolderSnapshot' src/ netlify/ test/ __mocks__/` empty
 
-- [ ] `pnpm invoke:refresh-memories` against `pnpm dev:netlify` runs end-to-end. Spec-required log lines unchanged.
-- [ ] `pnpm build` clean (after `rm -rf dist .netlify/blobs-serve`).
+**Files**
 
-**Dependencies:** Task 5.
+- `src/lib/cache/folder-cache.ts`
+- `src/lib/cache/folder-cache.server.ts`
+- `src/lib/cache/folder-cache.test.ts`
+- `src/lib/cache/folder-cache.server.test.ts`
 
-**Files likely touched:**
+**Dependencies:** T1 (loader stops importing it), T3 (cron is gone)
 
-- `netlify/functions/refresh-memories.ts`
+**Scope:** XS
 
-**Estimated scope:** XS.
+### T5 — Delete media-meta/*
 
----
+**Acceptance criteria**
 
-### Phase 5: Admin route rewires
+- `src/lib/media-meta/` directory deleted.
+- No remaining import of `extractImageMeta`, `extractVideoMeta`, or
+  `reverseGeocode`.
 
-#### Task 7: `/admin/collection.tsx` uses the navigator with `?folderid=` search param
+**Verification**
 
-**Description:** Loader fan-outs to `getCollectionMedia` + `getAdminSourceFolder({ folderid })`. Drop the v13 flat-grid path. Add the v12 `validateSearch` + `loaderDeps` for `?folderid`. Picker state holds `picked: Map<fileid, SourceFileItem>` so navigation across folders preserves picks. Handlers send fileids to `addToCollection`; remove still sends uuid via `removeFromCollection`. Compute `blocked: Set<fileid>` from `collectionItems.map(m => m.fileid)`.
+- `ls src/lib/media-meta` → not found
+- `grep -rn 'media-meta\|extractImageMeta\|extractVideoMeta\|reverseGeocode\|geoapify' src/ netlify/ test/ __mocks__/` empty
 
-**Acceptance criteria:**
+**Files**
 
-- [ ] Search param: `?folderid=N` (validated as non-negative integer, default unset).
-- [ ] Loader: `Promise.all([getCollectionMedia(), getAdminSourceFolder({ data: { folderid: deps.folderid } })])`.
-- [ ] `blocked` is `new Set(collectionItems.map(m => m.fileid))`.
-- [ ] `handleNavigate(folderid)` → `router.navigate({ to, search: { folderid } })`.
-- [ ] `handleToggle(fileid)` flips Map entry using metadata from `source.listing.files`.
-- [ ] `handleSave(fileids)` → `addToCollection({ data: { fileids } })` + `setPicked(new Map())` + `router.invalidate()`.
-- [ ] Banners restored: `SourceFolderMissingBanner` / `FolderNotPermittedBanner`.
-- [ ] Banner "Los cambios aparecen inmediatamente en la página principal" replaces the dropped 04:00 UTC banner (v13 made edits instant — copy reflects that).
+- `src/lib/media-meta/exif.ts`
+- `src/lib/media-meta/exif.test.ts`
+- `src/lib/media-meta/video-meta.ts`
+- `src/lib/media-meta/video-meta.test.ts`
+- `src/lib/media-meta/geoapify.server.ts`
+- `src/lib/media-meta/geoapify.server.test.ts`
 
-**Verification:**
+**Dependencies:** T3
 
-- [ ] `pnpm dev:netlify` smoke: navigate folders, pick across folders, save, current-collection grid updates without a full reload; remove tile drops it from the blocked set.
+**Scope:** S
 
-**Dependencies:** Tasks 1, 2, 3, 4.
+### T6 — Drop dependencies + invoke script
 
-**Files likely touched:**
+**Acceptance criteria**
 
-- `src/routes/admin/collection.tsx`
+- `dependencies.@netlify/functions` removed from `package.json`.
+- `dependencies.exifr` removed from `package.json`.
+- `scripts.invoke:refresh-memories` removed.
 
-**Estimated scope:** M.
+**Verification**
 
----
+- `grep -n '"@netlify/functions"\|"exifr"\|invoke:refresh-memories' package.json` empty
 
-### Checkpoint: end-to-end navigator path
+**Files**
 
-- [ ] `pnpm type-check` clean.
-- [ ] `pnpm test:unit` green.
-- [ ] `pnpm test:browser` green.
-- [ ] Manual: `/admin/collection` loads source root; navigating into a subfolder updates the URL `?folderid=…`; picks survive navigation; Save adds them to the curated grid; Remove drops a curated tile.
-- [ ] Manual: a file outside `PCLOUD_MEMORIES_FOLDER_ID` can be picked → save succeeds → file appears on the curated grid → cron run does not sweep it.
+- `package.json`
 
----
+**Dependencies:** T2, T5
 
-### Phase 6: Demolition
+**Scope:** XS
 
-#### Task 8: Delete v13's flat-grid path
+### T7 — Regenerate the lockfile
 
-**Description:** Remove the v13 picker pieces that are now superseded.
+**Acceptance criteria**
 
-**Acceptance criteria:**
+- `pnpm install` runs clean, `pnpm-lock.yaml` no longer references `exifr`
+  or `@netlify/functions`.
 
-- [ ] Deleted: `src/lib/admin/folder-media.ts`, `src/lib/admin/folder-media.server.ts`, `src/lib/admin/folder-media.server.test.ts`.
-- [ ] Deleted: `src/components/AdminCollectionGrid.tsx`, `src/components/AdminCollectionGrid.browser.test.tsx`.
-- [ ] `grep -rn 'folder-media\|AdminCollectionGrid\|addUuidsToCollection' src/ netlify/ test/ __mocks__/` returns nothing.
+**Verification**
 
-**Verification:**
+- `grep -n '^  exifr:\|^  @netlify/functions:' pnpm-lock.yaml` returns
+  nothing (note: transitive entries may remain via other deps)
 
-- [ ] `pnpm type-check` clean.
-- [ ] `pnpm test` green.
+**Files**
 
-**Dependencies:** Task 7.
+- `pnpm-lock.yaml`
 
-**Files likely touched:** 5 files deleted.
+**Dependencies:** T6
 
-**Estimated scope:** S.
+**Scope:** XS
 
----
+### T8 — env.d.ts cleanup
 
-### Phase 7: SPEC + verification
+**Acceptance criteria**
 
-#### Task 9: SPEC.md — add §25 (v14 AC) + §26 (v13 → v14 diff)
+- `PCLOUD_MEMORIES_FOLDER_ID` removed from `src/env.d.ts`.
+- `PCLOUD_SOURCE_FOLDER_ID` may transition from optional `?` to optional
+  with a docstring noting the picker banners that fire when unset.
 
-**Description:** Document v14: navigator restored, fileid wire format, lazy-mint, cron sweep protection. Update §7 boundaries: the cron is now a reader of `collection/v1` but still not a writer.
+**Verification**
 
-**Acceptance criteria:**
+- `grep -rn 'PCLOUD_MEMORIES_FOLDER_ID' src/ netlify/` empty
+- `pnpm type-check` clean
 
-- [ ] §25 covers: navigator shape, source-folder env var restored, fileid wire format on `addToCollection`, lazy-mint behavior + skipped extraction, cron sweep union, single-writer invariant preserved (admin route is sole writer).
-- [ ] §26 diff vs. v13: picker scope flipped (was flat memories-cache grid, now source-folder navigator); `addToCollection` wire shape switched from uuids to fileids; `PCLOUD_SOURCE_FOLDER_ID` env var returns.
-- [ ] §7 "Always do" — clarify cron is **sole writer** of `media/*` + `fileid-index/*` + `folder/v1` and a **read-only consumer** of `collection/v1`.
-- [ ] §7 "Never do" — keep the "no pCloud `collection_*`" rule from v13.
-- [ ] §23 (v13) annotated as superseded by §25 for the picker scope; the storage portion of v13 is still current.
+**Files**
 
-**Verification:**
+- `src/env.d.ts`
 
-- [ ] SPEC reads top-to-bottom; file paths cross-check against the working tree.
+**Dependencies:** T2
 
-**Dependencies:** Tasks 1–8.
+**Scope:** XS
 
-**Files likely touched:**
+### T9 — README rewrite
+
+**Acceptance criteria**
+
+- Stack: drop the "Netlify Scheduled Function ... refreshes the cache daily"
+  line. Drop the Geoapify bullet. `folder/v1` reference removed from the
+  Netlify Blobs line.
+- Prerequisites: drop `PCLOUD_MEMORIES_FOLDER_ID`, `GEOAPIFY_API_KEY`,
+  `RECUERDEA_GEOCODE_MAX_PER_RUN`, `PCLOUD_COLLECTION_ID`,
+  `PCLOUD_ADMIN_AUTH`. `PCLOUD_SOURCE_FOLDER_ID` becomes the only pCloud
+  folder env var.
+- Getting started: replace the "trigger the scheduled function once" block
+  with "navigate to `/admin/collection/add` and pick at least one file".
+- Scripts table: drop `pnpm invoke:refresh-memories`.
+- Project layout: drop `media-meta/` and the `refresh-memories` callout
+  from `memories/`; drop `netlify/functions/` block; drop `folder-cache`
+  from `cache/`.
+- Deployment: drop "trigger the cron once via the Netlify dashboard".
+
+**Verification**
+
+- `grep -in 'refresh-memories\|geoapify\|folder/v1\|folder-cache\|media-meta\|PCLOUD_MEMORIES_FOLDER_ID\|PCLOUD_COLLECTION_ID\|PCLOUD_ADMIN_AUTH\|GEOAPIFY_API_KEY' README.md` empty
+
+**Files**
+
+- `README.md`
+
+**Dependencies:** T2–T6
+
+**Scope:** S
+
+### T10 — SPEC.md update
+
+**Acceptance criteria**
+
+- New §27 ("v15 Acceptance Criteria") records:
+  - Loader is collection-only; absent `collection/v1` → empty.
+  - Admin route via `lazyMintFile` is the sole writer of `media/<uuid>`,
+    `fileid-index/<fileid>`, and `collection/v1`.
+  - `width` / `height` / `location` / `place` stay null on lazy-mint —
+    UI degrades gracefully. Existing place captions on pre-v15 entries
+    persist until the file is removed and re-added.
+  - Public-link lifecycle: links accumulate on file deletion in pCloud —
+    documented trade-off, not a bug.
+  - No cron, no scheduled function, no `@netlify/functions` dependency,
+    no `exifr`, no Geoapify.
+- New §28 ("v14 → v15 changes summary") diff against §25 / §26.
+- §7 Boundaries:
+  - Drop "cron is the only writer" bullet; replace with admin-route
+    single-writer rule.
+  - Drop "public-link lifecycle owned by the cron" bullet; replace with
+    "links may accumulate — single-user trade-off".
+  - Drop "Never log any geo-derived data" rule (no geocoder left to log).
+  - Keep the IP-bound URL boundary; keep the `Cache-Control: private`
+    rule.
+- §4 Project Structure:
+  - Remove `netlify/functions/refresh-memories.ts`.
+  - Remove `src/lib/memories/refresh-memories.server.ts`.
+  - Remove `src/lib/media-meta/` block.
+  - Remove `folder-cache.{ts,server.ts}` from `cache/` block.
+  - `pcloud.server.ts` description: collection-only loader.
+- §17 (v10): annotate the EXIF/mvhd-retirement rule as also covering
+  `width`/`height` post-v15 (i.e. the entire `media-meta/` package is
+  gone, not just capture-date extraction).
+- §23 (v13): annotate `folder/v1` fallback rule as superseded by §27.
+
+**Verification**
+
+- `wc -l SPEC.md` shows the new sections present
+- A reader can answer "where does `media/<uuid>` get written?" from the
+  SPEC alone (answer: the admin route's `addToCollection` server-fn via
+  `lazyMintFile`).
+
+**Files**
 
 - `SPEC.md`
 
-**Estimated scope:** S.
+**Dependencies:** T1–T8
 
----
+**Scope:** M
 
-#### Task 10: CI gate + deploy-preview smoke
+### T11 — Local smoke
 
-**Description:** Full local gate + deploy-preview confirmation.
+**Acceptance criteria**
 
-**Acceptance criteria:**
+- `pnpm dev:netlify` boots; `/admin/collection/add` lists the source
+  folder.
+- Picking a file + Save writes `media/<uuid>` + `fileid-index/<fileid>` +
+  `collection/v1` (verify via blob inspection or the Netlify dashboard).
+- `/` renders the saved item on its capture date without any background
+  job running.
+- Removing the item via `/admin/collection` clears it from `collection/v1`
+  and from `/`.
 
-- [ ] `pnpm type-check`, `pnpm test`, scoped `oxlint`, `pnpm format:check`, `pnpm build` all clean.
-- [ ] Deploy preview: provision `PCLOUD_TOKEN`, `PCLOUD_MEMORIES_FOLDER_ID`, `PCLOUD_SOURCE_FOLDER_ID` (+ optional `GEOAPIFY_API_KEY`). Trigger the cron once. Navigate `/admin/collection`, pick from a subfolder outside memories, save, confirm `/` shows it immediately (no cron required).
-- [ ] After save, manually run the cron a second time — confirm the curated-outside-memories uuid survives the sweep.
-- [ ] `curl -I` the deploy-preview `/` → `Cache-Control: private` or `no-store`.
+**Verification**
 
-**Dependencies:** Tasks 1–9.
+- Manual browser walkthrough on `localhost:8888`.
 
-**Estimated scope:** XS.
+**Dependencies:** T1–T10
 
----
+**Scope:** S
 
-### Final checkpoint
+### T12 — Cache-Control regression check
 
-- [ ] All checkpoints passed.
-- [ ] PR open targeting `main`.
-- [ ] SPEC.md matches the working tree.
+**Acceptance criteria**
 
-## Risks and mitigations
+- `curl -I http://localhost:8888/` reports `Cache-Control: private` or
+  `no-store` (SPEC §7 invariant).
 
-| Risk                                                                                         | Impact | Mitigation                                                                                                                                                                                                               |
-| -------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Lazy-mint races with the cron (both write `media/<uuid>` for the same fileid at once)        | Med    | Single-user app; concurrent admin save + cron is extremely unlikely. If it happens, last-write-wins on the per-uuid blob; cron pass would just overwrite with extracted dimensions/location. Not data-loss; just timing. |
-| Lazy-minted files outside the memories folder never get extracted                            | Low    | Spec'd as a v14 limitation. UI handles null fields. v15 can widen cron coverage.                                                                                                                                         |
-| Cron sweep reads collection blob, breaking the "cron doesn't touch collection" rule from v13 | Low    | The rule was "doesn't **write**"; read-only is fine. Spec §25 updates §7 wording to make this explicit.                                                                                                                  |
-| User picks a fileid that no longer exists in pCloud (deleted between listfolder and save)    | Low    | `stat()` returns an error → lazy-mint throws → the admin save reports a server error. Acceptable for the rare edge case.                                                                                                 |
-| `getthumbslinks` rate limit on large source folders                                          | Low    | pCloud's documented threshold is high; the v12 navigator already batched. Same behavior in v14.                                                                                                                          |
-| v13 `AdminFileItem` references in other files                                                | Low    | Type rename surfaces every consumer via type-check; fix progressively. Two known consumers: `CollectionItemsGrid` (route loader output → prop type) and the route itself.                                                |
+**Verification**
 
-## Parallelization
+- Output of `curl -I` pasted into the PR description.
 
-- Phases 1, 2, 3 are mostly independent; can be developed in parallel branches but committed in dependency order.
-- Phase 4 (cron) is fully independent of Phases 1–3; can land any time.
-- Phases 5, 6, 7 are sequential.
+**Dependencies:** T11
 
-## Open questions
+**Scope:** XS
 
-- **None.** Both clarifying questions (lazy-mint vs reject; cron coverage for curated-outside-memories) were answered before the plan was finalized.
+## Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| Production `collection/v1` is empty when v15 lands → `/` shows empty state | Medium (single-user, low surprise) | Pre-merge: curator confirms `collection/v1` populated against the deploy preview; or seeds via the admin route after merge |
+| Lazy-minted entries miss `place` forever | Low (UI degrades; existing captions persist) | Documented in SPEC §27 as accepted trade-off |
+| `deletepublink` no longer runs → pCloud link panel accumulates | Low (single user, manual cleanup possible) | Documented in SPEC §27 |
+| Hash invalidation gone → edits in pCloud don't propagate | Low (rare workflow for this app) | Curator can remove + re-add to refresh the entry |
+| Loader still imports something cron-only after T1 → build break | Low (T1 has its own verification) | Type-check + tests in Checkpoint A catch it before T2 lands |
+| Removing `PCLOUD_MEMORIES_FOLDER_ID` from `env.d.ts` while prod still has it set | None (env vars are loose; type only) | Confirm in Netlify dashboard but no action needed |
