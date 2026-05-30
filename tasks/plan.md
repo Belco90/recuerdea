@@ -195,7 +195,7 @@ cache the app still has.
 
 **Scope:** XS
 
-### T4 — Delete folder-cache.*
+### T4 — Delete folder-cache.\*
 
 **Acceptance criteria**
 
@@ -219,7 +219,7 @@ cache the app still has.
 
 **Scope:** XS
 
-### T5 — Delete media-meta/*
+### T5 — Delete media-meta/\*
 
 **Acceptance criteria**
 
@@ -425,11 +425,11 @@ cache the app still has.
 
 ## Risks and Mitigations
 
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Production `collection/v1` is empty when v15 lands → `/` shows empty state | Medium (single-user, low surprise) | Pre-merge: curator confirms `collection/v1` populated against the deploy preview; or seeds via the admin route after merge |
-| Lazy-minted entries miss `place` forever | Low (UI degrades; existing captions persist) | Documented in SPEC §27 as accepted trade-off |
-| `deletepublink` no longer runs → pCloud link panel accumulates | Low (single user, manual cleanup possible) | Documented in SPEC §27 |
-| Hash invalidation gone → edits in pCloud don't propagate | Low (rare workflow for this app) | Curator can remove + re-add to refresh the entry |
-| Loader still imports something cron-only after T1 → build break | Low (T1 has its own verification) | Type-check + tests in Checkpoint A catch it before T2 lands |
-| Removing `PCLOUD_MEMORIES_FOLDER_ID` from `env.d.ts` while prod still has it set | None (env vars are loose; type only) | Confirm in Netlify dashboard but no action needed |
+| Risk                                                                             | Impact                                       | Mitigation                                                                                                                 |
+| -------------------------------------------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Production `collection/v1` is empty when v15 lands → `/` shows empty state       | Medium (single-user, low surprise)           | Pre-merge: curator confirms `collection/v1` populated against the deploy preview; or seeds via the admin route after merge |
+| Lazy-minted entries miss `place` forever                                         | Low (UI degrades; existing captions persist) | Documented in SPEC §27 as accepted trade-off                                                                               |
+| `deletepublink` no longer runs → pCloud link panel accumulates                   | Low (single user, manual cleanup possible)   | Documented in SPEC §27                                                                                                     |
+| Hash invalidation gone → edits in pCloud don't propagate                         | Low (rare workflow for this app)             | Curator can remove + re-add to refresh the entry                                                                           |
+| Loader still imports something cron-only after T1 → build break                  | Low (T1 has its own verification)            | Type-check + tests in Checkpoint A catch it before T2 lands                                                                |
+| Removing `PCLOUD_MEMORIES_FOLDER_ID` from `env.d.ts` while prod still has it set | None (env vars are loose; type only)         | Confirm in Netlify dashboard but no action needed                                                                          |
