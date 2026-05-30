@@ -140,13 +140,41 @@ describe('fetchAdminSourceFolder', () => {
 				name: 'photo.jpg',
 				kind: 'image',
 				thumbUrl: '/api/admin/thumb/100',
+				created: null,
 			},
 			{
 				fileid: 200,
 				name: 'clip.mp4',
 				kind: 'video',
 				thumbUrl: '/api/admin/thumb/200',
+				created: null,
 			},
+		])
+	})
+
+	it('normalizes file.created to an ISO instant, or null when unparseable', async () => {
+		const client = makeClient(async (method) => {
+			if (method === 'listfolder') {
+				return {
+					metadata: makeFolder(ROOT_ID, {
+						parentfolderid: 0,
+						contents: [
+							makeFile(100, { created: 'Mon, 15 Apr 2024 10:00:00 +0000' }),
+							makeFile(200, { created: '' }),
+							makeFile(300, { created: 'not a date' }),
+						],
+					}),
+				}
+			}
+			throw new Error(`unexpected method: ${method}`)
+		})
+
+		const result = await fetchAdminSourceFolder(client)
+
+		expect(result.files.map((f) => f.created)).toEqual([
+			new Date('Mon, 15 Apr 2024 10:00:00 +0000').toISOString(),
+			null,
+			null,
 		])
 	})
 
@@ -271,6 +299,7 @@ describe('fetchAdminSourceFolder', () => {
 			name: 'f-1000.jpg',
 			kind: 'image',
 			thumbUrl: '/api/admin/thumb/1000',
+			created: null,
 		})
 		// One listfolder call for the target; no per-file API calls.
 		expect(methodsSeen).toEqual(['listfolder'])

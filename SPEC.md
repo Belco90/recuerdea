@@ -568,6 +568,7 @@ Files picked from outside `PCLOUD_MEMORIES_FOLDER_ID` get **lazy-minted** at adm
 
 - `/admin/collection/add?folderid=N` (search param, validated as non-negative integer; defaults to source root when absent).
 - Loader fetches `getAdminSourceFolder({ folderid })`. The curated list (for `blocked`) comes from the parent layout's loader; the picker route does not re-fetch it.
+- **Date filter** (`?date=YYYY-MM-DD`, validated against `^\d{4}-\d{2}-\d{2}$`): `AdminMediaDateFilter` offers two relative presets (**Hoy** / **Mañana**) plus a calendar input for any single day. It filters **only the media grid** by exact local calendar day against each file's `created` (the same `file.created` used for `captureDate`); folders/breadcrumbs are never filtered. Filtering is **client-side** — `date` is deliberately kept out of `loaderDeps`, so toggling it re-filters in place without re-fetching pCloud. The filter **persists across folder navigation** (`handleNavigate` carries `date` forward), so nested folders stay filtered, not just the root. When no media matches, the navigator shows a date-specific empty state and subfolders remain navigable.
 - Picker is `AdminFolderNavigator`: breadcrumbs row → subfolder grid → file grid → sticky `Guardar (N)` / `Cancelar` footer. Sub-folder clicks navigate via `?folderid`; file clicks toggle selection. Picks survive folder navigation within `/add` (route state is `Map<fileid, SourceFileItem>`); they are discarded on Save (after navigating back) or Cancel.
 - Save: `addToCollection({ fileids })` → `await router.invalidate()` → `router.navigate({ to: '/admin/collection' })`. The curated grid renders the new items immediately on landing.
 - Cancel: `router.navigate({ to: '/admin/collection' })`. No persisted picked state.
@@ -608,7 +609,8 @@ Files picked from outside `PCLOUD_MEMORIES_FOLDER_ID` get **lazy-minted** at adm
 
 - Restored: `src/lib/admin/source-folder.{ts,server.ts}` (uses `PCLOUD_TOKEN` OAuth, not the dropped `PCLOUD_ADMIN_AUTH`), `src/components/AdminFolderNavigator.tsx`.
 - Renamed type: `AdminFileItem` (v13) → `CollectionItem` (v14, uuid + fileid + name + kind + thumbUrl).
-- New type: `SourceFileItem` (fileid + name + kind + thumbUrl) — what `fetchAdminSourceFolder` returns; no uuid yet.
+- New type: `SourceFileItem` (fileid + name + kind + thumbUrl + `created`) — what `fetchAdminSourceFolder` returns; no uuid yet. `created` is `file.created` normalized to an ISO instant (or `null`), carried to the browser so the picker can filter by day.
+- Date-filter helpers live in `src/lib/admin/date-filter.ts` (`localDay`, `filterFilesByDay`, `todayLocal`, `tomorrowLocal`) — pure + Node-unit-testable; the UI is `src/components/AdminMediaDateFilter.tsx`.
 - New helpers: `lazyMintFile`, `addFileidsToCollection` in `collection.server.ts`. `addUuidsToCollection` is removed.
 - Deleted: `src/lib/admin/folder-media.{ts,server.ts}`, `src/components/AdminCollectionGrid.tsx` (v13 flat picker).
 - `PCLOUD_SOURCE_FOLDER_ID` env var: restored (optional; absence triggers a banner).
@@ -628,3 +630,4 @@ For readers diffing this spec against v13:
 - §7 Boundaries: "Always do" cron-writer bullet narrows to `media/<uuid>` + `fileid-index/<fileid>` (v15: `folder/v1` is gone — see §25 Loader section). The admin-writer bullet is annotated with the v14 fact that the cron is now a **read-only consumer** of `collection/v1`, plus the v15 fact that the home loader reads `collection/v1` as the sole source of uuids.
 - §23 (v13): superseded by §25 for the picker scope (flat-grid → navigable view of `PCLOUD_SOURCE_FOLDER_ID`) and for the loader semantics (v15: no `folder/v1` fallback). Storage shape + admin-writer rule from v13 are still current.
 - §25 (new): v14 + v15 acceptance criteria — navigator restored, fileid wire format with lazy-mint, cron sweep protection, env var restored, and (v15) `collection/v1` as the sole loader source with the `folder-cache` module deleted. The picker page lives at `/admin/collection/add`; `/admin/collection` is the curated-list view. Source-folder thumbnails proxy through `/api/admin/thumb/<fileid>` because `getthumblink` URLs are IP-bound (§17).
+- §25 picker (later addition): the picker gained a **date filter** (`?date=YYYY-MM-DD`, Hoy/Mañana presets + calendar) that filters only the media grid by exact local day against `file.created`, client-side (out of `loaderDeps`), and persists across nested-folder navigation. `SourceFileItem` now carries `created`; helpers in `src/lib/admin/date-filter.ts`, UI in `src/components/AdminMediaDateFilter.tsx`.

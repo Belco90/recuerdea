@@ -14,6 +14,8 @@ type AdminFolderNavigatorProps = {
 	onSave: (fileids: readonly number[]) => void
 	onCancel: () => void
 	saving?: boolean
+	/** True when a date filter is hiding media in the current folder. */
+	dateFilterActive?: boolean
 }
 
 export function AdminFolderNavigator({
@@ -25,6 +27,7 @@ export function AdminFolderNavigator({
 	onSave,
 	onCancel,
 	saving = false,
+	dateFilterActive = false,
 }: AdminFolderNavigatorProps) {
 	const hasPicked = picked.size > 0
 	return (
@@ -36,7 +39,7 @@ export function AdminFolderNavigator({
 			{listing.files.length > 0 ? (
 				<FileGrid files={listing.files} picked={picked} blocked={blocked} onToggle={onToggle} />
 			) : (
-				<EmptyMedia />
+				<EmptyMedia dateFilterActive={dateFilterActive} />
 			)}
 			{hasPicked && (
 				<StickyFooter
@@ -235,7 +238,7 @@ function FileGrid({
 	)
 }
 
-function EmptyMedia() {
+function EmptyMedia({ dateFilterActive }: { dateFilterActive: boolean }) {
 	return (
 		<Box
 			borderWidth="1px"
@@ -246,7 +249,11 @@ function EmptyMedia() {
 			textAlign="center"
 			color="ink.muted"
 		>
-			<Text fontSize="sm">Esta carpeta no contiene fotos ni vídeos.</Text>
+			<Text fontSize="sm">
+				{dateFilterActive
+					? 'No hay fotos ni vídeos de esta fecha en esta carpeta.'
+					: 'Esta carpeta no contiene fotos ni vídeos.'}
+			</Text>
 		</Box>
 	)
 }

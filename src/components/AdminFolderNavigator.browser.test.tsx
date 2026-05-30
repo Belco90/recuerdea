@@ -20,12 +20,14 @@ const rootListing: AdminFolderListing = {
 			name: 'photo.jpg',
 			kind: 'image',
 			thumbUrl: 'https://example.test/thumb-100.jpg',
+			created: '2024-04-15T10:00:00.000Z',
 		},
 		{
 			fileid: 200,
 			name: 'clip.mp4',
 			kind: 'video',
 			thumbUrl: 'https://example.test/thumb-200.jpg',
+			created: '2024-04-15T11:00:00.000Z',
 		},
 	],
 }
@@ -46,8 +48,17 @@ const deepListing: AdminFolderListing = {
 			name: 'photo.jpg',
 			kind: 'image',
 			thumbUrl: 'https://example.test/thumb-100.jpg',
+			created: '2024-04-15T10:00:00.000Z',
 		},
 	],
+}
+
+const emptyListing: AdminFolderListing = {
+	folderid: 1000,
+	name: 'Raíz',
+	breadcrumbs: [{ folderid: 1000, name: 'Raíz' }],
+	subfolders: [{ folderid: 11, name: 'Sub A' }],
+	files: [],
 }
 
 const baseProps = {
@@ -154,6 +165,18 @@ describe('AdminFolderNavigator', () => {
 	it('marks video tiles with the VÍDEO badge', async () => {
 		await render(<AdminFolderNavigator listing={rootListing} {...baseProps} />)
 		await expect.element(page.getByText('VÍDEO')).toBeVisible()
+	})
+
+	it('shows the date-specific empty message when the filter hides all media', async () => {
+		await render(<AdminFolderNavigator listing={emptyListing} {...baseProps} dateFilterActive />)
+		await expect
+			.element(page.getByText('No hay fotos ni vídeos de esta fecha en esta carpeta.'))
+			.toBeVisible()
+	})
+
+	it('shows the generic empty message when no filter is active', async () => {
+		await render(<AdminFolderNavigator listing={emptyListing} {...baseProps} />)
+		await expect.element(page.getByText('Esta carpeta no contiene fotos ni vídeos.')).toBeVisible()
 	})
 
 	it('disables Save while saving', async () => {

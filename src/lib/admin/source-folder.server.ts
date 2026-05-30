@@ -5,6 +5,10 @@ export type SourceFileItem = {
 	name: string
 	kind: 'image' | 'video' | 'other'
 	thumbUrl: string
+	// pCloud `file.created`, normalized to an ISO instant (or null when absent /
+	// unparseable). Same source the collection uses for `captureDate`. Carried to
+	// the browser so the picker can filter the media grid by day.
+	created: string | null
 }
 
 export type AdminFolderListing = {
@@ -50,6 +54,14 @@ function kindFromContenttype(ct: string): 'image' | 'video' | 'other' {
 
 function isMediaFile(file: FileMetadata): boolean {
 	return file.contenttype.startsWith('image/') || file.contenttype.startsWith('video/')
+}
+
+// Mirrors `parseCapturedDate` in collection.server.ts: pCloud returns dates as
+// RFC-2822-ish strings (e.g. "Mon, 15 Apr 2024 10:00:00 +0000"); normalize to
+// an ISO instant, or null when unparseable.
+function toIso(raw: string): string | null {
+	const ms = Date.parse(raw)
+	return Number.isNaN(ms) ? null : new Date(ms).toISOString()
 }
 
 async function buildBreadcrumbs(
@@ -101,6 +113,7 @@ function buildFiles(files: readonly FileMetadata[]): SourceFileItem[] {
 		name: f.name,
 		kind: kindFromContenttype(f.contenttype),
 		thumbUrl: `/api/admin/thumb/${f.fileid}`,
+		created: toIso(f.created),
 	}))
 }
 
