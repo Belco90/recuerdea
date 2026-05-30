@@ -2,7 +2,7 @@ import type { SourceFileItem } from '#/lib/admin/source-folder.server'
 
 import { describe, expect, it } from 'vitest'
 
-import { filterFilesByDay, localDay, todayLocal, tomorrowLocal } from './date-filter'
+import { filterFilesByDay, localDay, localMonthDay, todayLocal, tomorrowLocal } from './date-filter'
 
 function file(fileid: number, created: string | null): SourceFileItem {
 	return { fileid, name: `f-${fileid}.jpg`, kind: 'image', thumbUrl: '', created }
@@ -28,6 +28,17 @@ describe('localDay', () => {
 	})
 })
 
+describe('localMonthDay', () => {
+	it('returns the local MM-DD for a valid instant', () => {
+		expect(localMonthDay(localNoonIso(2023, 5, 30))).toBe('05-30')
+	})
+
+	it('returns null for null/invalid input', () => {
+		expect(localMonthDay(null)).toBeNull()
+		expect(localMonthDay('not a date')).toBeNull()
+	})
+})
+
 describe('filterFilesByDay', () => {
 	const files = [
 		file(1, localNoonIso(2024, 4, 15)),
@@ -39,12 +50,24 @@ describe('filterFilesByDay', () => {
 		expect(filterFilesByDay(files, undefined).map((f) => f.fileid)).toEqual([1, 2, 3])
 	})
 
-	it('keeps only files on the given day', () => {
+	it('keeps only files on the given month+day', () => {
 		expect(filterFilesByDay(files, '2024-04-15').map((f) => f.fileid)).toEqual([1])
 	})
 
+	it('matches by month+day across years (the on-this-day regression)', () => {
+		// Three photos from 2023-05-30; filtering by today (a 2026-05-30) must
+		// surface them even though the years differ.
+		const may30 = [
+			file(10, localNoonIso(2023, 5, 30)),
+			file(11, localNoonIso(2023, 5, 30)),
+			file(12, localNoonIso(2023, 5, 30)),
+			file(13, localNoonIso(2022, 5, 31)),
+		]
+		expect(filterFilesByDay(may30, '2026-05-30').map((f) => f.fileid)).toEqual([10, 11, 12])
+	})
+
 	it('drops files with a null created when a day is active', () => {
-		expect(filterFilesByDay(files, '2024-04-16').map((f) => f.fileid)).toEqual([2])
+		expect(filterFilesByDay(files, '2030-04-16').map((f) => f.fileid)).toEqual([2])
 	})
 
 	it('returns empty when nothing matches', () => {

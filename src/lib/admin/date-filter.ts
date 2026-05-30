@@ -20,17 +20,26 @@ export function localDay(iso: string | null): string | null {
 	return formatLocalDay(new Date(ms))
 }
 
+/** ISO instant → local `MM-DD`, or null for null/invalid input. */
+export function localMonthDay(iso: string | null): string | null {
+	const day = localDay(iso)
+	return day === null ? null : day.slice(5)
+}
+
 /**
- * Keep only files whose `created` falls on `day` (local calendar day). When
- * `day` is undefined the list is returned unchanged. Files with a null/invalid
- * `created` are dropped while a filter is active.
+ * Keep only files whose `created` shares the **month and day** of `day`,
+ * ignoring the year — the same "on this day" rule the home loader uses
+ * (`src/lib/memories/pcloud.server.ts`). `day` is a full `YYYY-MM-DD` but only
+ * its `MM-DD` portion matters. When `day` is undefined the list is returned
+ * unchanged. Files with a null/invalid `created` are dropped while active.
  */
 export function filterFilesByDay(
 	files: ReadonlyArray<SourceFileItem>,
 	day: string | undefined,
 ): SourceFileItem[] {
 	if (!day) return [...files]
-	return files.filter((f) => localDay(f.created) === day)
+	const monthDay = day.slice(5)
+	return files.filter((f) => localMonthDay(f.created) === monthDay)
 }
 
 /** Local `YYYY-MM-DD` for today. */
