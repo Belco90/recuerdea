@@ -6,6 +6,7 @@ import {
 	FolderNotPermittedError,
 	SourceFolderIdMissingError,
 	assertSourceFolderId,
+	fetchAdminSourceDayMedia,
 	fetchAdminSourceFolder,
 } from './source-folder.server'
 
@@ -303,5 +304,100 @@ describe('fetchAdminSourceFolder', () => {
 		})
 		// One listfolder call for the target; no per-file API calls.
 		expect(methodsSeen).toEqual(['listfolder'])
+	})
+})
+
+describe('fetchAdminSourceDayMedia', () => {
+	// Midday May 15 — today in Spain is { month: 5, day: 15 }.
+	const NOW = new Date('2026-05-15T12:00:00.000Z')
+
+	function dayClient(root: FolderMetadata, calls: Array<{ method: string; params: unknown }> = []) {
+		return makeClient(async (method, params) => {
+			calls.push({ method, params })
+			if (method === 'listfolder') return { metadata: root }
+			throw new Error(`unexpected method: ${method}`)
+		})
+	}
+
+	it('flattens media matching the day across nested folders, ignoring the year', async () => {
+		const root = makeFolder(ROOT_ID, {
+			parentfolderid: 0,
+			contents: [
+				makeFile(100, { created: 'Thu, 15 May 2025 09:00:00 +0000' }),
+				makeFolder(11, {
+					name: 'Sub',
+					contents: [
+						makeFile(200, { created: 'Wed, 15 May 2024 09:00:00 +0000' }),
+						makeFolder(12, {
+							name: 'Deep',
+							contents: [makeFile(300, { created: 'Tue, 15 May 2018 09:00:00 +0000' })],
+						}),
+						makeFile(400, { created: 'Fri, 16 May 2025 09:00:00 +0000' }), // wrong day
+					],
+				}),
+			],
+		})
+
+		const result = await fetchAdminSourceDayMedia(dayClient(root), { which: 'today', now: NOW })
+
+		expect(result.which).toBe('today')
+		expect(result.target).toEqual({ month: 5, day: 15 })
+		// Newest year first: 2025, 2024, 2018. File 400 (May 16) excluded.
+		expect(result.files.map((f) => f.fileid)).toEqual([100, 200, 300])
+	})
+
+	it('requests the source root recursively', async () => {
+		const calls: Array<{ method: string; params: unknown }> = []
+		const root = makeFolder(ROOT_ID, { parentfolderid: 0, contents: [] })
+
+		await fetchAdminSourceDayMedia(dayClient(root, calls), { which: 'today', now: NOW })
+
+		expect(calls).toEqual([
+			{ method: 'listfolder', params: { folderid: ROOT_ID, recursive: 1, noshares: 1 } },
+		])
+	})
+
+	it('skips non-media files and drops null/unparseable created dates', async () => {
+		const root = makeFolder(ROOT_ID, {
+			parentfolderid: 0,
+			contents: [
+				makeFile(100, {
+					contenttype: 'application/pdf',
+					created: 'Thu, 15 May 2025 09:00:00 +0000',
+				}),
+				makeFile(200, { contenttype: 'image/jpeg', created: '' }),
+				makeFile(300, { contenttype: 'image/jpeg', created: 'not a date' }),
+				makeFile(400, { contenttype: 'image/jpeg', created: 'Thu, 15 May 2025 09:00:00 +0000' }),
+			],
+		})
+
+		const result = await fetchAdminSourceDayMedia(dayClient(root), { which: 'today', now: NOW })
+
+		expect(result.files.map((f) => f.fileid)).toEqual([400])
+	})
+
+	it('resolves the tomorrow target', async () => {
+		const root = makeFolder(ROOT_ID, {
+			parentfolderid: 0,
+			contents: [
+				makeFile(100, { created: 'Fri, 16 May 2025 09:00:00 +0000' }),
+				makeFile(200, { created: 'Thu, 15 May 2025 09:00:00 +0000' }),
+			],
+		})
+
+		const result = await fetchAdminSourceDayMedia(dayClient(root), { which: 'tomorrow', now: NOW })
+
+		expect(result.which).toBe('tomorrow')
+		expect(result.target).toEqual({ month: 5, day: 16 })
+		expect(result.files.map((f) => f.fileid)).toEqual([100])
+	})
+
+	it('throws SourceFolderIdMissingError when env var is unset', async () => {
+		vi.stubEnv('PCLOUD_SOURCE_FOLDER_ID', '')
+		const root = makeFolder(ROOT_ID, { parentfolderid: 0, contents: [] })
+
+		await expect(
+			fetchAdminSourceDayMedia(dayClient(root), { which: 'today', now: NOW }),
+		).rejects.toThrow(SourceFolderIdMissingError)
 	})
 })

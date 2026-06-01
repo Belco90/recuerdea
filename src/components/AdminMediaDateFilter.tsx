@@ -1,5 +1,4 @@
-import { todayLocal, tomorrowLocal } from '#/lib/admin/date-filter'
-import { Button, DatePicker, HStack, Input, Portal, Text, parseDate } from '@chakra-ui/react'
+import { DatePicker, HStack, Input, Portal, Text, parseDate } from '@chakra-ui/react'
 import { CalendarIcon } from 'lucide-react'
 
 type AdminMediaDateFilterProps = {
@@ -8,35 +7,16 @@ type AdminMediaDateFilterProps = {
 	onChange: (date: string | undefined) => void
 }
 
-// Date filter for the picker media grid. Two relative presets (Hoy / Mañana)
-// plus a calendar for any single day. Purely presentational — the parent owns
-// the URL search-param state, so this stays trivially testable.
+// Date filter for the "Navegar" tab's media grid — a calendar for any single
+// day. (The relative "Hoy"/"Mañana" presets are now top-level tabs.) Purely
+// presentational — the parent owns the URL search-param state, so this stays
+// trivially testable.
 export function AdminMediaDateFilter({ value, onChange }: AdminMediaDateFilterProps) {
-	const today = todayLocal()
-	const tomorrow = tomorrowLocal()
-
 	return (
 		<HStack gap="2" flexWrap="wrap" align="center">
 			<Text fontSize="sm" color="ink.muted" fontFamily="mono">
 				Fecha:
 			</Text>
-
-			<Button
-				size="xs"
-				colorPalette="accent"
-				variant={value === today ? 'solid' : 'outline'}
-				onClick={() => onChange(value === today ? undefined : today)}
-			>
-				Hoy
-			</Button>
-			<Button
-				size="xs"
-				colorPalette="accent"
-				variant={value === tomorrow ? 'solid' : 'outline'}
-				onClick={() => onChange(value === tomorrow ? undefined : tomorrow)}
-			>
-				Mañana
-			</Button>
 
 			<DatePicker.Root
 				maxW="12rem"

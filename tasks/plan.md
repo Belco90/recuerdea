@@ -1,171 +1,216 @@
-# v16 — Loading screens via TanStack Router pending states
+# Admin "Añadir más": three tabs (Hoy / Mañana / Navegar)
 
-## Overview
+## Context
 
-Navigating into the admin curation flow (and, to a lesser extent, the home
-page) currently shows **no feedback while loaders run**. The worst offender is
-folder navigation in `/admin/collection/add`: each subfolder click re-runs the
-`getAdminSourceFolder` loader (a slow pCloud `listfolder` call, because
-`loaderDeps` keys on `folderid`), and the UI just sits on the previous folder's
-content with no indication anything is happening. First entry into
-`/admin/collection` and `/admin/collection/add` also renders a blank `Outlet`
-region until the loader resolves.
+The admin add-content page (`/admin/collection/add`) recently gained a date filter — a
+calendar `DatePicker` plus "Hoy"/"Mañana" preset buttons — but the admin still has to click
+through nested pCloud folders one level at a time to find items. The goal is to flatten that:
+the admin should see **every** matching item across the whole source tree at once.
 
-This work adds loading affordances built on **TanStack Router's own pending
-machinery** — a global navigation progress bar driven by `useRouterState`, plus
-per-route `pendingComponent` skeletons for the routes whose loaders are slow.
+Restructure the page into three Chakra v3 tabs:
 
-Scope is deliberately narrow: feedback for in-flight navigations only. No
-loader speedups, no caching changes, no redesign of the admin flow.
+- **Hoy** — all source media (recursively across nested folders) whose capture month+day match
+  **today in Spain (Europe/Madrid)**, flattened into one grid. No folder navigation.
+- **Mañana** — same, for tomorrow's month+day in Spain.
+- **Navegar** — the existing folder navigator moved here as-is, keeping the calendar
+  `DatePicker`. The "Hoy"/"Mañana" **preset buttons are removed** (they're now tabs).
 
-## Goals
+Confirmed product decisions:
 
-- Show a global progress indicator during **any** pending navigation —
-  including same-route folder switches in the add page, where component state
-  (`picked` selections) must be preserved.
-- Show layout-shaped skeletons on **first entry** to the slow data routes
-  (`/`, `/admin/collection`, `/admin/collection/add`) instead of a blank gap.
-- Use router properties (`defaultPendingMs`, `defaultPendingMinMs`,
-  `pendingComponent`, `defaultPendingComponent`, `useRouterState`) — not
-  ad-hoc loading flags threaded through components.
+- **Timezone:** Hoy/Mañana resolve to Spain (Europe/Madrid), server-side — consistent with the
+  home page memory matcher and the refresh cron. (The Navegar calendar stays browser-local; this
+  divergence is intentional and documented in code.)
+- **Default tab:** `Hoy` (the primary new use case).
+- **Selection:** shared across all tabs — one running `picked` set and one sticky footer;
+  `Guardar (N)` commits picks made across Hoy, Mañana and Navegar together.
 
-## Non-goals
+## Approach
 
-- Speeding up the pCloud loaders or adding folder-listing caches.
-- Preloading folder listings on hover (folder tiles are `<button>`s, not
-  `<Link>`s; out of scope).
-- Skeletons for `/login` (no slow loader) or the API routes.
+Per-tab data loads via a new `tab` URL search param that is a `loaderDep`; the route loader
+**branches** so the slow recursive listing only runs for Hoy/Mañana and the existing folder fetch
+only runs for Navegar. This reuses the route's existing `pendingComponent: AddSkeleton` for free
+tab-switch loading and matches the established `folderid`/`date` URL-state pattern. Picking state
+(`picked`/`saving`/`blocked`) and a single `StickyFooter` live at the page level, outside the tabs.
 
-## Key technical decisions & assumptions
+The recursive listing is one pCloud call: `listfolder` supports `recursive: 1`
+(`ListFolderOptions.recursive`), returning nested `FolderMetadata.contents`; we walk it to collect
+all media files. Day-matching derives each file's month+day from `created` in Europe/Madrid and
+compares (year-agnostic) to the Spain target — the same "on this day" rule the home loader uses.
 
-> These gate the design. **Decision #1 must be verified against TanStack docs
-> and a real browser before building Slices 2–4** (source-driven step in
-> Phase 1/2). If it proves false, the fallback is recorded below.
+## Slices
 
-1. **`pendingComponent` shows only on a route's _initial_ match, not on
-   background reloads of an already-active route.** When you switch folders in
-   `/admin/collection/add`, only `loaderDeps.folderid` changes — the route stays
-   matched, so TanStack does a stale-while-revalidate reload and keeps the
-   component mounted (this is why `picked` survives folder navigation today).
-   Therefore adding a `pendingComponent` to that route is safe: it appears on
-   first entry only and will **not** remount the component (or drop `picked`)
-   on folder switches.
-   - **Verification:** confirm in TanStack Router docs that `pendingComponent`
-     is not rendered for same-route loader reloads, then prove it manually
-     (switch folders with items picked → selections persist, no skeleton
-     flash). See Phase 2, Task 2a.
-   - **Fallback if false:** do **not** add a `pendingComponent` to the add
-     route. Rely on the global progress bar (Slice 1) for folder-switch
-     feedback, and add an inline dimming overlay over the file grid keyed on
-     `useRouterState` pending status (keeps the component mounted). The list
-     and home skeletons (Slices 3–4) are unaffected — those routes don't carry
-     state across reloads.
+Each slice is an independently verifiable path. Build in order.
 
-2. **`useRouterState({ select })` exposes navigation status.** Read pending via
-   a `select` projection (e.g. `s.status === 'pending'` / `s.isLoading`) so the
-   subscription only re-renders on that slice. Exact field name confirmed in
-   Phase 1 against the installed `@tanstack/react-router` version.
+### Slice 1 — Spain date helpers (pure, unit-tested first)
 
-3. **Chakra UI v3 already ships `Skeleton` / `SkeletonText`.** Use them for the
-   skeleton building blocks rather than hand-rolling shimmer. Only the
-   per-route _layout arrangement_ of skeletons is bespoke. (No new dependency —
-   honors SPEC §7 "Ask first" on deps.)
+**Modify `src/lib/utils/spain-today.ts`** — add, reusing the existing `Europe/Madrid` formatter:
 
-4. **Presentational split for testability.** Router-coupled components
-   (`useRouterState`) are hard to unit-test. Each new piece is split into a
-   thin router-reading wrapper + a pure presentational component. Browser tests
-   target the pure part, matching the existing `*.browser.test.tsx` convention
-   (props in, render asserted) — e.g. `AdminMediaDateFilter.browser.test.tsx`.
+- `getTomorrowInSpain(now = new Date()): MonthDay` — resolve **tomorrow's** Madrid month+day.
+  Use calendar (date-component) arithmetic, NOT `+24h` wall-clock: read Madrid's full Y-M-D for
+  `now`, construct a UTC date from those parts, add one day, re-read month/day. Handles
+  month/year rollover and DST correctly.
+- `spainMonthDay(iso: string | null): MonthDay | null` — ISO instant → `{month, day}` in Madrid,
+  or null for null/unparseable input. Used to match a file's `created` against the target.
 
-## Component / dependency graph
+**Modify `src/lib/utils/spain-today.test.ts`** — cases for `getTomorrowInSpain` (normal,
+end-of-month rollover, year rollover, UTC-vs-Madrid late-evening boundary) and `spainMonthDay`
+(valid, null/invalid, UTC-late instant landing on next Madrid day).
 
-```
-__root.tsx
-  └─ <NavigationProgress/>            (Slice 1)  reads useRouterState
-        └─ <ProgressBar active/>      pure, tested
+Verify: `npm run test:unit`, `npm run type-check`.
 
-src/router.tsx
-  └─ defaultPendingMs / MinMs         (Slice 2)  shared config
-  └─ defaultPendingComponent          (Slice 2)  global fallback skeleton
+### Slice 2 — Server: recursive day-media fetch
 
-routes/admin/collection/add.tsx
-  └─ pendingComponent: <AddSkeleton/> (Slice 2)  gated on Decision #1
+**Modify `src/lib/admin/source-folder.server.ts`** — add, reusing existing `isMediaFile`,
+`buildFiles`, `assertSourceFolderId`, `toIso`, `ListfolderResponse`:
 
-routes/admin/collection.tsx (layout) + /index.tsx
-  └─ pendingComponent: <CollectionListSkeleton/> (Slice 3)
+- `collectMediaRecursive(node: FolderMetadata, out: FileMetadata[]): void` — walk `node.contents`;
+  recurse into `item.isfolder`, push media files.
+- `type SourceDayMedia = { which: 'today' | 'tomorrow'; target: MonthDay; files: readonly SourceFileItem[] }`
+- `fetchAdminSourceDayMedia(client, { which, now? }): Promise<SourceDayMedia>`:
+  - `const sourceRoot = assertSourceFolderId()`
+  - `target = which === 'today' ? getTodayInSpain(now) : getTomorrowInSpain(now)`
+  - `client.call<ListfolderResponse>('listfolder', { folderid: sourceRoot, recursive: 1, noshares: 1 })`
+  - collect media recursively, filter by `spainMonthDay(toIso(f.created))` matching `target` month+day,
+    sort newest-first (`Date.parse(b.created) - Date.parse(a.created)`), map via `buildFiles`.
+  - Comment: day-match is in Europe/Madrid (Spain's today/tomorrow), unlike the browser-local
+    Navegar calendar filter. No breadcrumbs / no `FolderNotPermittedError` (always starts at root).
 
-routes/index.tsx (home)
-  └─ pendingComponent: <HomeSkeleton/>           (Slice 4)
-```
+**Modify `src/lib/admin/source-folder.ts`** — add a server fn mirroring `getAdminSourceFolder`'s
+admin-gate + `makeClient` + dynamic `await import('./source-folder.server')` convention:
 
-Dependency notes:
+- `type AdminSourceDayResult = { status: 'ok'; day: SourceDayMedia } | { status: 'source-folder-id-missing' }`
+- `parseDayInput(input): { which: 'today' | 'tomorrow' }`
+- `getAdminSourceDayMedia = createServerFn({ method: 'GET' })` → gate, fetch, map
+  `SourceFolderIdMissingError` to the missing-config status.
+- Re-export the `SourceDayMedia` type alongside the existing re-exports.
 
-- Slice 1 is **fully independent** and the single highest-value change (it is
-  the only thing that gives feedback on folder switches). Do it first.
-- Slices 2–4 share the router pending-timing config (lands in Slice 2) and all
-  depend on the Chakra `Skeleton` primitive being confirmed available (Phase 1).
-- Slice 2 additionally depends on Decision #1's verification gate.
-- Slices 3 and 4 are independent of each other.
+**Modify `src/lib/admin/source-folder.server.test.ts`** — add `describe('fetchAdminSourceDayMedia')`
+reusing the existing `makeClient`/`makeFolder`/`makeFile` test helpers: nested tree with files at
+various `created` dates and mixed media/non-media; pass a fixed `now`; assert only matching
+month-day files returned, flattened across nesting, non-media skipped, null/unparseable `created`
+dropped, newest-first order, and that `listfolder` was called with `recursive: 1`.
 
-## Phases
+Verify: `npm run test:unit`, `npm run type-check`.
 
-### Phase 1 — Foundations & verification (read/confirm only)
+### Slice 3 — Extract shared grid components
 
-Confirm router API surface and skeleton primitives before writing UI.
+**Create `src/components/AdminMediaGrid.tsx`** — move `FileGrid`, `EmptyMedia`, `StickyFooter`
+out of `AdminFolderNavigator.tsx` verbatim (plus `TileButton = chakra('button')` and the lucide
+`Check`/`Play` imports they need); export all three.
 
-- Confirm `useRouterState` pending field name and `defaultPending*` options in
-  the installed router version (source-driven).
-- Confirm Chakra v3 `Skeleton`/`SkeletonText` import path and props.
-- **Checkpoint 1:** API surface confirmed; Decisions #2 and #3 resolved in
-  writing (note findings inline in todo). Proceed.
+- Change `FileGrid`'s `onToggle` to `(item: SourceFileItem) => void` and call `onToggle(file)`
+  (was `onToggle(file.fileid)`) — needed so picks work across multiple datasets without per-dataset
+  lookups (shared-selection decision).
+- Add optional `emptyMessage?: string` to `EmptyMedia` (defaults to the current dateFilter logic)
+  so Hoy/Mañana can show e.g. "No hay fotos ni vídeos de hoy en todo el archivo."
 
-### Phase 2 — Slice 1: global navigation progress bar
+**Modify `src/components/AdminFolderNavigator.tsx`** — import `FileGrid`/`EmptyMedia` from
+`./AdminMediaGrid`; remove their local defs and the now-unused `StickyFooter` (footer moves to page
+level). Drop `onSave`/`onCancel`/`saving` from `AdminFolderNavigatorProps`; change `onToggle` prop
+type to `(item: SourceFileItem) => void`. Keep `Breadcrumbs`/`SubfolderGrid` here (Navegar-only).
 
-Deliver feedback for every navigation, including folder switches.
+**Tests** — move Save/Cancel/footer assertions out of
+`AdminFolderNavigator.browser.test.tsx` into a new `AdminMediaGrid.browser.test.tsx` (covers
+`FileGrid` picked-border / blocked-aria / video-badge / toggle-passes-item, `StickyFooter`
+count+disabled-while-saving+cancel, `EmptyMedia` default/date-filter/custom-message). Update the
+navigator's toggle test to assert it fires with the **item**, not the fileid.
 
-- Task 1a: `ProgressBar` pure component + browser test.
-- Task 1b: `NavigationProgress` wrapper (`useRouterState`) mounted in
-  `__root.tsx`.
-- Task 2a: **Decision #1 verification** — confirm folder switches do not
-  trigger `pendingComponent` / remount (docs + manual). Record result.
-- **Checkpoint 2:** Manually verify the bar appears on: home→admin link,
-  list→add, and folder→folder switches; `picked` selections survive a folder
-  switch. If Decision #1 is false, switch Slice 2 to the fallback approach
-  before continuing.
+Verify: `npm run test:browser`, `npm run type-check`. Regenerate `__screenshots__` baselines for
+moved/renamed tests and review diffs.
 
-### Phase 3 — Slices 2–4: per-route entry skeletons
+### Slice 4 — Date filter: drop preset buttons
 
-One vertical slice per slow route, each independently shippable.
+**Modify `src/components/AdminMediaDateFilter.tsx`** — remove the two preset `Button`s and the
+unused `todayLocal`/`tomorrowLocal` import + locals. Keep the `Text` label + `DatePicker.Root`
+block intact. (`todayLocal`/`tomorrowLocal` remain exported in `date-filter.ts`, still unit-tested,
+just no longer used here.)
 
-- Slice 2: router `defaultPendingMs`/`MinMs` + `defaultPendingComponent` +
-  `AddSkeleton` `pendingComponent` on `/admin/collection/add` (or fallback
-  overlay per Decision #1).
-- Slice 3: `CollectionListSkeleton` `pendingComponent` on `/admin/collection`.
-- Slice 4: `HomeSkeleton` `pendingComponent` on `/`.
-- **Checkpoint 3:** Full pass — `pnpm type-check`, `pnpm lint`, `pnpm test`,
-  `pnpm build`. Manual smoke of all three routes' first-entry skeletons and the
-  global bar. No regression to `picked` persistence or auth redirects.
+**Modify `src/components/AdminMediaDateFilter.browser.test.tsx`** — remove the Hoy/Mañana
+preset-toggle tests; keep/ensure a `DatePicker` onChange test.
+
+Verify: `npm run test:browser`.
+
+### Slice 5 — Route: tabs, branched loader, shared footer
+
+**Modify `src/routes/admin/collection/add.tsx`**:
+
+Search + loader:
+
+- `type TabKey = 'hoy' | 'mañana' | 'navegar'`; add `tab?: TabKey` to `AddSearch`; validate in
+  `validateSearch` (only accept the three literals).
+- `loaderDeps: ({ search }) => ({ folderid: search.folderid, tab: search.tab ?? 'hoy' })`
+  (default **Hoy**). Keep `date` out of `loaderDeps`.
+- Loader returns a discriminated union on `mode`:
+  - `tab` is `hoy`/`mañana` → `{ mode: 'day', day: await getAdminSourceDayMedia({ data: { which } }) }`
+    (`which = tab === 'hoy' ? 'today' : 'tomorrow'`).
+  - else → `{ mode: 'navigate', source: await getAdminSourceFolder({ data: { folderid } }) }`.
+
+Component:
+
+- Read `tab` (default `'hoy'`) and `date` from `Route.useSearch()`. Keep `picked`/`saving`/`blocked`
+  at page level; use item-based `handleToggle(item: SourceFileItem)`.
+- `handleTabChange(next)` → `router.navigate({ search: (prev) => ({ ...prev, tab: next }) })`.
+- Controlled `Tabs.Root value={tab} onValueChange={(e) => handleTabChange(e.value as TabKey)}` with
+  `Tabs.List` of three `Tabs.Trigger` (Hoy/Mañana/Navegar) and three `Tabs.Content`. Render the
+  data-bearing body only in the active tab's `Tabs.Content`, keyed off `loaderData.mode`; inactive
+  panels render nothing (clicking a trigger re-navigates → loader runs → `AddSkeleton`).
+  - **Day body** (`mode === 'day'`): if `day.status === 'source-folder-id-missing'` →
+    `SourceFolderMissingBanner`; else `FileGrid` with `files={day.day.files}`,
+    `picked={new Set(picked.keys())}`, `blocked`, `onToggle={handleToggle}`; empty → `EmptyMedia`
+    with the "todo el archivo" message.
+  - **Navigate body** (`mode === 'navigate'`): existing `source.status` banners, then
+    `<AdminMediaDateFilter value={date} onChange={handleDateChange} />` +
+    `<AdminFolderNavigator listing={{...source.listing, files: filterFilesByDay(source.listing.files, date)}} ... dateFilterActive={date !== undefined} />`
+    (now without `onSave`/`onCancel`/`saving`).
+- **Shared footer:** one `StickyFooter` (from `AdminMediaGrid`) below the Tabs, gated on
+  `picked.size > 0`, wired to `handleSave([...picked.keys()])` and `handleCancel`.
+- Optional polish: add a three-tab strip to `AddSkeleton` in `RouteSkeletons.tsx`.
+
+Optional route-level browser test if the harness supports mounting with mocked loader data;
+otherwise rely on component-level coverage + manual verification.
+
+Verify: `npm run type-check`, `npm run test`, `npm run build`.
+
+## Critical files
+
+- `src/routes/admin/collection/add.tsx` — tabs, branched loader, shared footer, item-toggle
+- `src/lib/admin/source-folder.server.ts` — `collectMediaRecursive`, `fetchAdminSourceDayMedia`
+- `src/lib/admin/source-folder.ts` — `getAdminSourceDayMedia` server fn
+- `src/lib/utils/spain-today.ts` — `getTomorrowInSpain`, `spainMonthDay`
+- `src/components/AdminMediaGrid.tsx` (new) — extracted `FileGrid`/`EmptyMedia`/`StickyFooter`
+- `src/components/AdminFolderNavigator.tsx` — consume shared grid, drop footer/save props
+- `src/components/AdminMediaDateFilter.tsx` — remove preset buttons, keep calendar
+
+## Verification (end-to-end)
+
+1. `npm run type-check` — clean (union loader return, item-based `onToggle`, new server fn types).
+2. `npm run test:unit` — Spain helpers (Slice 1) + recursive day-media (Slice 2) green.
+3. `npm run test:browser` — AdminMediaGrid (new), AdminFolderNavigator/AdminMediaDateFilter
+   (updated); regenerate + review `__screenshots__` baselines.
+4. `npm run lint` (oxlint) and `npm run format:check` (oxfmt).
+5. `npm run build` — confirms the `.server.ts` dynamic-import convention keeps server-only code out
+   of the client bundle.
+6. Manual (`npm run dev`, admin login, `PCLOUD_SOURCE_FOLDER_ID` set):
+   - Land on `/admin/collection/add` → opens on **Hoy** with a flat grid of all subtree items for
+     today's Spain month-day (across nested folders, any year).
+   - **Mañana** → `?tab=mañana`, flat grid for tomorrow.
+   - **Navegar** → `?tab=navegar`, folder navigator + calendar; no Hoy/Mañana preset buttons.
+   - Pick in Hoy, switch to Mañana, pick more, switch to Navegar, pick more → footer count
+     accumulates across tabs; `Guardar (N)` commits all → redirect to `/admin/collection`;
+     committed items show blocked.
+   - Unset `PCLOUD_SOURCE_FOLDER_ID` → all tabs show the missing-config banner.
 
 ## Risks
 
-- **State loss on the add route (high impact)** — mitigated by Decision #1's
-  verification gate and the documented fallback. This is the one thing that
-  could turn a UX improvement into a regression; it is checked before shipping
-  Slice 2.
-- **Skeleton flash on fast loads** — mitigated by `defaultPendingMs` (skeletons
-  only after a threshold) and `defaultPendingMinMs` (no sub-perceptual flash).
-  Tune values during Checkpoint 3.
-- **SSR/hydration** — the progress bar must render consistently on server and
-  client. Keep it presentational and status-driven; verify no hydration
-  warning in the console during Checkpoint 2.
-- **Auth redirect interaction** — `beforeLoad` redirects (login / non-admin)
-  must still fire; skeletons are loader-pending UI and should not mask a
-  redirect. Verified in Checkpoint 3.
+- **Large recursive listing**: one `listfolder recursive:1` on a big archive can be slow/large.
+  Runs server-side, gated, only when Hoy/Mañana active; `pendingComponent` covers latency. Future:
+  server-side cache if needed (out of scope).
+- **Thumbnail proxy load**: a dense day-grid hits `/api/admin/thumb/:fileid` per tile; `FileGrid`'s
+  `loading="lazy"` bounds this to the viewport. Consider pagination later if days are very dense.
+- **TZ edge cases**: `getTomorrowInSpain` must use calendar arithmetic (covered by Slice 1 tests).
+- **Screenshot baselines** churn from moving `FileGrid`/`StickyFooter` and the `onToggle` signature
+  change — regenerate and review.
 
-## Verification (global)
-
-- `pnpm type-check`, `pnpm lint`, `pnpm test` (unit + browser) green.
-- `pnpm build` succeeds; afterwards delete `dist` + Netlify cache (per SPEC).
-- Manual: throttle network (or rely on real pCloud latency) and confirm each
-  affordance described per slice.
-- No new top-level dependency added (Chakra `Skeleton` is already present).
+> Note: this plan lives at the plan-mode path. The `/plan` request also mentioned `tasks/plan.md`
+> and `tasks/todo.md`; those can be created at the start of implementation (plan mode only permits
+> editing this plan file).

@@ -56,7 +56,11 @@ export function AddSkeleton() {
 		<Stack gap={4} data-testid="add-skeleton">
 			<Skeleton h="18px" w="90px" />
 			<Skeleton h="26px" w="140px" />
-			<Skeleton h="36px" w="full" maxW="340px" />
+			<HStack gap={2}>
+				<Skeleton h="32px" w="70px" borderRadius="md" />
+				<Skeleton h="32px" w="80px" borderRadius="md" />
+				<Skeleton h="32px" w="90px" borderRadius="md" />
+			</HStack>
 			<MediaGridSkeleton count={8} />
 		</Stack>
 	)
