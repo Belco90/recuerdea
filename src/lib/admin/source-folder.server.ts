@@ -1,4 +1,7 @@
+import type { MonthDay } from '#/lib/utils/spain-today'
 import type { Client, FileMetadata, FolderMetadata } from 'pcloud-kit'
+
+import { getTodayInSpain, getTomorrowInSpain, spainMonthDay } from '#/lib/utils/spain-today'
 
 export type SourceFileItem = {
 	fileid: number
@@ -152,4 +155,52 @@ export async function fetchAdminSourceFolder(
 		subfolders,
 		files,
 	}
+}
+
+export type SourceDayMedia = {
+	which: 'today' | 'tomorrow'
+	target: MonthDay
+	files: ReadonlyArray<SourceFileItem>
+}
+
+// Depth-first walk of a recursive `listfolder` subtree, collecting every media
+// file regardless of nesting depth.
+function collectMediaRecursive(node: FolderMetadata, out: FileMetadata[]): void {
+	for (const item of node.contents ?? []) {
+		if (item.isfolder) collectMediaRecursive(item, out)
+		else if (isMediaFile(item)) out.push(item)
+	}
+}
+
+// Flatten the whole source tree and keep only media captured on the same
+// month+day as today/tomorrow. A single `recursive: 1` listfolder returns the
+// entire subtree (folders carry their own `contents`).
+//
+// NOTE: day-matching is done in Europe/Madrid — "Hoy"/"Mañana" mean Spain's
+// today/tomorrow, matching the home memory matcher — unlike the browser-local
+// calendar filter in the "Navegar" tab (`filterFilesByDay`).
+export async function fetchAdminSourceDayMedia(
+	client: Client,
+	opts: { which: 'today' | 'tomorrow'; now?: Date },
+): Promise<SourceDayMedia> {
+	const sourceRoot = assertSourceFolderId()
+	const target = opts.which === 'today' ? getTodayInSpain(opts.now) : getTomorrowInSpain(opts.now)
+
+	const res = await client.call<ListfolderResponse>('listfolder', {
+		folderid: sourceRoot,
+		recursive: 1,
+		noshares: 1,
+	})
+
+	const media: FileMetadata[] = []
+	collectMediaRecursive(res.metadata, media)
+
+	const matched = media.filter((f) => {
+		const md = spainMonthDay(toIso(f.created))
+		return md !== null && md.month === target.month && md.day === target.day
+	})
+	// Newest first, mirroring the home loader's "newest year first".
+	matched.sort((a, b) => (Date.parse(b.created) || 0) - (Date.parse(a.created) || 0))
+
+	return { which: opts.which, target, files: buildFiles(matched) }
 }
