@@ -17,7 +17,7 @@
       `defaultPendingMinMs` (default **500**), `defaultPendingComponent`.
 - [x] **T1.2 — Confirm Chakra `Skeleton`.** ✅ `@chakra-ui/react` v3.34 exports
       `Skeleton`, `SkeletonText`, `SkeletonCircle`. `SkeletonProps extends
-  HTMLChakraProps<"div">` → standard `height`/`width`/`borderRadius`/
+HTMLChakraProps<"div">` → standard `height`/`width`/`borderRadius`/
       `aspectRatio` style props. `SkeletonText` has `noOfLines`.
 - [x] **CHECKPOINT 1:** ✅ API surface confirmed; Decisions #2, #3 resolved.
       Decision #1 also gets source support: `load-matches.js:470` — a
