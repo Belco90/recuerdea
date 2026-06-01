@@ -73,8 +73,10 @@ describe('pendingComponent on same-route reload', () => {
 		await expect.element(page.getByTestId('probe')).toBeVisible()
 		const firstInstance = page.getByTestId('probe').element().getAttribute('data-instance')
 
-		// Same-route navigation that re-runs the loader (changed dep).
-		await router.navigate({ to: '/', search: { n: 1 } })
+		// Same-route navigation that re-runs the loader (changed dep). Cast
+		// because the global router-type registration types `to: '/'` against
+		// the real app route, not this throwaway test router.
+		await router.navigate({ to: '/', search: { n: 1 } } as never)
 
 		// The component stays mounted with stale content during the reload and
 		// resolves in place — it is never swapped for the pendingComponent.

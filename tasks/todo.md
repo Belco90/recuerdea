@@ -58,35 +58,28 @@
 
 ## Phase 3 — Slices 2–4: per-route entry skeletons
 
-- [ ] **T3.1 — Router pending config (Slice 2 base).** In `src/router.tsx` add
-      `defaultPendingMs` (~150–200ms) and `defaultPendingMinMs` (~300–500ms),
-      plus a minimal `defaultPendingComponent` (generic centered skeleton) as a
-      global fallback.
-      - *Verify:* `pnpm type-check` green; fast nav shows no skeleton flash.
-- [ ] **T3.2 — `AddSkeleton` + wire to add route (Slice 2).** Build a skeleton
-      shaped like `AdminFolderNavigator` (breadcrumb line + grid of skeleton
-      tiles). Set it as `pendingComponent` on `/admin/collection/add`
-      (createFileRoute), **only if T2.3 PASSed**; otherwise implement the inline
-      file-grid dimming overlay instead.
-      - *Acceptance:* first entry to add shows the skeleton, not a blank gap;
-        folder switches still preserve `picked` (regression guard).
-      - *Verify:* `AddSkeleton.browser.test.tsx` renders the expected tile
-        count; manual first-entry + folder-switch smoke.
-- [ ] **T3.3 — `CollectionListSkeleton` + wire (Slice 3).** Skeleton shaped like
-      the curation list (heading + `CollectionItemsGrid` tiles). Set as
-      `pendingComponent` on `/admin/collection` (and/or its `/index` route).
-      - *Acceptance:* first entry to the curation list shows the skeleton.
-      - *Verify:* browser test for tile count; manual smoke.
-- [ ] **T3.4 — `HomeSkeleton` + wire (Slice 4).** Skeleton shaped like the home
-      timeline (hero block + a year section of polaroid skeletons). Set as
-      `pendingComponent` on `/`.
-      - *Acceptance:* slow home load shows the skeleton, not a blank gap;
-        empty-state and populated timeline still render after load.
-      - *Verify:* browser test; manual smoke with date override.
-- [ ] **CHECKPOINT 3 (ship gate):** `pnpm type-check`, `pnpm lint`,
-      `pnpm test`, `pnpm build` all green; delete `dist` + Netlify cache after
-      build. Manual: all three routes' first-entry skeletons + global bar; auth
-      redirects (login / non-admin) still fire; no `picked` regression.
+- [x] **T3.1 — Router pending config (Slice 2 base).** ✅ `src/router.tsx`:
+      `defaultPendingMs: 200`, `defaultPendingMinMs: 300`,
+      `defaultPendingComponent: RoutePendingFallback`.
+- [x] **T3.2 — `AddSkeleton` + wire to add route (Slice 2).** ✅ Decision #1
+      PASSed → skeleton approach. `AddSkeleton` (back-link + heading + date
+      filter + `MediaGridSkeleton`) wired as `pendingComponent` on
+      `/admin/collection/add`. Renders inside the already-present layout Outlet.
+      Folder-switch `picked` preservation guaranteed by the T2.3 gate.
+- [x] **T3.3 — `CollectionListSkeleton` + wire (Slice 3).** ✅ Full-page skeleton
+      (header strip + heading + alert + `MediaGridSkeleton`) wired as
+      `pendingComponent` on the `/admin/collection` **layout** route (its
+      `getCollectionMedia` loader is what's slow; the `/index` child has no
+      loader of its own).
+- [x] **T3.4 — `HomeSkeleton` + wire (Slice 4).** ✅ Full-page skeleton (header
+      strip + hero block + polaroid grid) wired as `pendingComponent` on `/`.
+- [x] **CHECKPOINT 3 (ship gate):** ✅ `pnpm type-check` green; `pnpm test`
+      green (unit 243, browser 61); `pnpm build` exit 0 (dist + Netlify cache
+      deleted). Per-file `oxfmt --check` + `oxlint` clean (whole-repo
+      `pnpm lint` OOMs pre-existing). **Remaining for the PR deploy preview:**
+      live first-entry skeleton smoke on all three routes, global-bar visual,
+      auth redirects, and `picked` survival on folder switch — none exercisable
+      locally without Netlify Identity + pCloud.
 
 ---
 
