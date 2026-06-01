@@ -1,108 +1,92 @@
-# v15 — Demolish the refresh-memories cron
+# v16 — Loading screens via TanStack Router pending states
 
-> Admin curation already lazy-mints everything the home page needs
-> (`lazyMintFile`, SPEC §25). The daily scheduled function is dead
-> weight. Delete the cron and the modules that only existed for it.
-> Loader becomes collection-only. See `tasks/plan.md` for rationale,
-> trade-offs, and risks.
+> Feedback for in-flight navigations. Global progress bar (covers folder
+> switches, preserves state) + per-route entry skeletons for slow loaders.
+> See `tasks/plan.md` for rationale, the dependency graph, and risks.
+> **Gate:** Decision #1 (Task 2a) must pass before Slice 2 ships.
 
-## Phase 1 — Loader becomes collection-only
+---
 
-- [ ] **T1**: Drop `folder/v1` fallback in `src/lib/memories/pcloud.server.ts`
-  - [ ] Stop importing `createFolderCache` / `getFolderCacheStore`
-  - [ ] When `collection/v1` is absent → return `[]` + warn ("no curated collection yet")
-  - [ ] Update `pcloud.server.test.ts`: drop folder-store mocks and the
-        "falls back to folder snapshot" cases; add an "empty when
-        collection blob absent" case
+## Phase 1 — Foundations & verification
 
-### Checkpoint A — Loader collection-only
+- [x] **T1.1 — Confirm router pending API.** ✅ `RouterState` (router-core
+      1.168.15 `router.d.ts:390`) has `status: 'pending' | 'idle'`,
+      `isLoading: boolean`, `isTransitioning: boolean`. Use
+      `useRouterState({ select: (s) => s.status === 'pending' })` for the global
+      bar. `createRouter` options: `defaultPendingMs` (default **1000**),
+      `defaultPendingMinMs` (default **500**), `defaultPendingComponent`.
+- [x] **T1.2 — Confirm Chakra `Skeleton`.** ✅ `@chakra-ui/react` v3.34 exports
+      `Skeleton`, `SkeletonText`, `SkeletonCircle`. `SkeletonProps extends
+      HTMLChakraProps<"div">` → standard `height`/`width`/`borderRadius`/
+      `aspectRatio` style props. `SkeletonText` has `noOfLines`.
+- [x] **CHECKPOINT 1:** ✅ API surface confirmed; Decisions #2, #3 resolved.
+      Decision #1 also gets source support: `load-matches.js:470` — a
+      previously-successful match reloads in the background returning the prior
+      resolved match, so the component stays mounted (not replaced by
+      `pendingComponent`) on same-route reloads. Still confirmed manually at
+      Checkpoint 2.
 
-- [ ] `pnpm test -- src/lib/memories/pcloud.server` green
-- [ ] `pnpm type-check` clean
+---
 
-## Phase 2 — Cron demolition
+## Phase 2 — Slice 1: global navigation progress bar
 
-- [ ] **T2**: Delete the scheduled function + netlify.toml block
-  - [ ] `rm netlify/functions/refresh-memories.ts`
-  - [ ] Remove `[functions."refresh-memories"]` block from `netlify.toml`
-  - [ ] Remove the `netlify/functions/` directory if empty
+- [x] **T2.1 — `ProgressBar` (pure).** ✅ `src/components/ProgressBar.tsx`:
+      fixed-top `role="progressbar"` bar (`aria-label="Cargando"`), accent
+      indeterminate sweep (`progressSlide` keyframe added to `theme.ts`),
+      returns `null` when inactive. Browser test
+      `ProgressBar.browser.test.tsx` asserts both states — `pnpm test:browser`
+      green (55 tests pass).
+- [x] **T2.2 — `NavigationProgress` (wrapper).** ✅
+      `src/components/NavigationProgress.tsx` reads
+      `useRouterState({ select: (s) => s.status === 'pending' })`; mounted in
+      `RootDocument` (`__root.tsx`) inside the providers, above `{children}`.
+      Type-check + build green.
+- [ ] **T2.3 — Decision #1 verification (GATE).** Confirm via TanStack docs that
+      `pendingComponent` is not rendered on same-route loader reloads, then
+      prove manually: in `/admin/collection/add`, pick ≥1 item, switch folders.
+      - *Acceptance:* selections persist; no full skeleton swap on the switch
+        (only the global bar shows). Record PASS/FAIL + the doc reference here.
+      - *If FAIL:* mark Slice 2 to use the fallback overlay approach (plan,
+        Decision #1) before starting T3.x.
+- [ ] **CHECKPOINT 2:** Bar verified on home→admin link, list→add, and
+      folder→folder; `picked` survives a folder switch. No hydration warning in
+      console.
 
-- [ ] **T3**: Delete `refresh-memories.server.{ts,test.ts}`
-  - [ ] `rm src/lib/memories/refresh-memories.server.ts`
-  - [ ] `rm src/lib/memories/refresh-memories.server.test.ts`
+---
 
-### Checkpoint B — Cron gone
+## Phase 3 — Slices 2–4: per-route entry skeletons
 
-- [ ] `grep -rn 'refresh-memories\|refreshMemories\|RefreshResult\|GeocodeOpts\|CollectionReader' src/ netlify/ test/ __mocks__/` returns nothing
-- [ ] `pnpm type-check` clean
-- [ ] `pnpm test` (both projects) green
+- [ ] **T3.1 — Router pending config (Slice 2 base).** In `src/router.tsx` add
+      `defaultPendingMs` (~150–200ms) and `defaultPendingMinMs` (~300–500ms),
+      plus a minimal `defaultPendingComponent` (generic centered skeleton) as a
+      global fallback.
+      - *Verify:* `pnpm type-check` green; fast nav shows no skeleton flash.
+- [ ] **T3.2 — `AddSkeleton` + wire to add route (Slice 2).** Build a skeleton
+      shaped like `AdminFolderNavigator` (breadcrumb line + grid of skeleton
+      tiles). Set it as `pendingComponent` on `/admin/collection/add`
+      (createFileRoute), **only if T2.3 PASSed**; otherwise implement the inline
+      file-grid dimming overlay instead.
+      - *Acceptance:* first entry to add shows the skeleton, not a blank gap;
+        folder switches still preserve `picked` (regression guard).
+      - *Verify:* `AddSkeleton.browser.test.tsx` renders the expected tile
+        count; manual first-entry + folder-switch smoke.
+- [ ] **T3.3 — `CollectionListSkeleton` + wire (Slice 3).** Skeleton shaped like
+      the curation list (heading + `CollectionItemsGrid` tiles). Set as
+      `pendingComponent` on `/admin/collection` (and/or its `/index` route).
+      - *Acceptance:* first entry to the curation list shows the skeleton.
+      - *Verify:* browser test for tile count; manual smoke.
+- [ ] **T3.4 — `HomeSkeleton` + wire (Slice 4).** Skeleton shaped like the home
+      timeline (hero block + a year section of polaroid skeletons). Set as
+      `pendingComponent` on `/`.
+      - *Acceptance:* slow home load shows the skeleton, not a blank gap;
+        empty-state and populated timeline still render after load.
+      - *Verify:* browser test; manual smoke with date override.
+- [ ] **CHECKPOINT 3 (ship gate):** `pnpm type-check`, `pnpm lint`,
+      `pnpm test`, `pnpm build` all green; delete `dist` + Netlify cache after
+      build. Manual: all three routes' first-entry skeletons + global bar; auth
+      redirects (login / non-admin) still fire; no `picked` regression.
 
-## Phase 3 — Orphan removal
+---
 
-- [ ] **T4**: Delete `src/lib/cache/folder-cache.*`
-  - [ ] `rm src/lib/cache/folder-cache.ts`
-  - [ ] `rm src/lib/cache/folder-cache.server.ts`
-  - [ ] `rm src/lib/cache/folder-cache.test.ts`
-  - [ ] `rm src/lib/cache/folder-cache.server.test.ts`
-
-- [ ] **T5**: Delete `src/lib/media-meta/*`
-  - [ ] `rm -rf src/lib/media-meta`
-
-### Checkpoint C — Dead modules gone
-
-- [ ] `grep -rn 'folder-cache\|media-meta\|FolderCache\|FolderSnapshot\|extractImageMeta\|extractVideoMeta\|reverseGeocode\|geoapify' src/ netlify/ test/ __mocks__/` returns nothing
-- [ ] `pnpm type-check` clean
-- [ ] `pnpm test` green
-
-## Phase 4 — Dependencies + scripts
-
-- [ ] **T6**: `package.json` cleanup
-  - [ ] Remove `dependencies["@netlify/functions"]`
-  - [ ] Remove `dependencies.exifr`
-  - [ ] Remove `scripts["invoke:refresh-memories"]`
-
-- [ ] **T7**: `pnpm install` to regenerate the lockfile
-
-## Phase 5 — Env + docs
-
-- [ ] **T8**: `src/env.d.ts` — remove `PCLOUD_MEMORIES_FOLDER_ID`
-
-- [ ] **T9**: `README.md` rewrite
-  - [ ] Stack: drop scheduled-function line, drop Geoapify bullet, drop `folder/v1` mention
-  - [ ] Prerequisites: drop `PCLOUD_MEMORIES_FOLDER_ID`, `GEOAPIFY_API_KEY`, `RECUERDEA_GEOCODE_MAX_PER_RUN`, `PCLOUD_COLLECTION_ID`, `PCLOUD_ADMIN_AUTH`; `PCLOUD_SOURCE_FOLDER_ID` becomes the only pCloud folder env var
-  - [ ] Getting started: replace cron-trigger block with "navigate to `/admin/collection/add` and pick at least one file"
-  - [ ] Scripts table: drop `invoke:refresh-memories`
-  - [ ] Project layout: drop `media-meta/`, `refresh-memories` callout, `netlify/functions/` block, `folder-cache` mention
-  - [ ] Deployment: drop "trigger the cron once via the Netlify dashboard"
-
-- [ ] **T10**: `SPEC.md` rewrite
-  - [ ] New §27 (v15 Acceptance Criteria): collection-only loader; admin sole writer of `media/<uuid>` + `fileid-index/<fileid>` + `collection/v1`; null `width`/`height`/`location`/`place` on lazy-mint with documented UI degradation; public-link accumulation accepted; no cron, no `@netlify/functions`, no `exifr`, no Geoapify
-  - [ ] New §28 (v14 → v15 changes summary)
-  - [ ] §7 Boundaries: drop "cron sole writer" + "public-link lifecycle owned by cron" + "Never log any geo-derived data"; add "admin route sole writer" + "public links may accumulate (single-user trade-off)"; keep IP-bound URL + `Cache-Control: private` rules
-  - [ ] §4 Project Structure: drop `netlify/functions/refresh-memories.ts`, `refresh-memories.server.ts`, `media-meta/`, `folder-cache.*`; update `pcloud.server.ts` description
-  - [ ] §17: annotate EXIF/mvhd retirement rule as also covering `width`/`height` post-v15
-  - [ ] §23: annotate `folder/v1` fallback as superseded by §27
-
-### Checkpoint D — Repo clean
-
-- [ ] `pnpm type-check` clean
-- [ ] `pnpm test` (both projects) green
-- [ ] `pnpm lint` clean
-- [ ] `pnpm format:check` clean
-- [ ] `pnpm build` clean (after `rm -rf dist .netlify/blobs-serve`)
-
-## Phase 6 — Smoke
-
-- [ ] **T11**: Manual local smoke
-  - [ ] `pnpm dev:netlify` boots
-  - [ ] `/admin/collection/add` lists the source folder
-  - [ ] Pick + Save → `/` renders the curated item on its capture date
-  - [ ] Remove via `/admin/collection` → item drops from `/`
-
-- [ ] **T12**: `curl -I http://localhost:8888/` reports `Cache-Control: private` / `no-store`
-
-## Final checkpoint
-
-- [ ] All Checkpoints A/B/C/D green
-- [ ] PR open targeting `main`
-- [ ] SPEC.md matches the working tree
+## Notes / findings
+<!-- Record T1.1/T1.2 field+prop names and the T2.3 PASS/FAIL + doc ref here. -->

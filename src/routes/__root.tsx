@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 
+import { NavigationProgress } from '#/components/NavigationProgress'
 import { IdentityProvider } from '#/lib/auth/identity-context'
 import { system } from '#/theme'
 import { ChakraProvider } from '@chakra-ui/react'
@@ -50,6 +51,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 			<body>
 				<ChakraProvider value={system}>
 					<IdentityProvider>
+						<NavigationProgress />
 						{children}
 						<TanStackDevtools
 							config={{ position: 'bottom-right' }}
