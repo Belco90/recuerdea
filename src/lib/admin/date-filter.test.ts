@@ -2,7 +2,7 @@ import type { SourceFileItem } from '#/lib/admin/source-folder.server'
 
 import { describe, expect, it } from 'vitest'
 
-import { filterFilesByDay, localDay, localMonthDay, todayLocal, tomorrowLocal } from './date-filter'
+import { filterFilesByDay, localDay, localMonthDay } from './date-filter'
 
 function file(fileid: number, created: string | null): SourceFileItem {
 	return { fileid, name: `f-${fileid}.jpg`, kind: 'image', thumbUrl: '', created }
@@ -72,16 +72,5 @@ describe('filterFilesByDay', () => {
 
 	it('returns empty when nothing matches', () => {
 		expect(filterFilesByDay(files, '2024-04-17')).toEqual([])
-	})
-})
-
-describe('todayLocal / tomorrowLocal', () => {
-	it('produce YYYY-MM-DD strings exactly one day apart', () => {
-		const today = todayLocal()
-		const tomorrow = tomorrowLocal()
-		expect(today).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-		expect(tomorrow).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-		const diffMs = Date.parse(`${tomorrow}T00:00:00`) - Date.parse(`${today}T00:00:00`)
-		expect(diffMs).toBe(24 * 60 * 60 * 1000)
 	})
 })

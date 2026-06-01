@@ -20,14 +20,19 @@ function partsToNumber(
 	return Number(parts.find((part) => part.type === type)?.value)
 }
 
-export function getTodayInSpain(now: Date = new Date()): MonthDay {
-	const parts = spainDayFormatter.formatToParts(now)
+// Read the month+day of an arbitrary instant in Europe/Madrid.
+function monthDayInSpain(date: Date): MonthDay {
+	const parts = spainDayFormatter.formatToParts(date)
 	const month = partsToNumber(parts, 'month')
 	const day = partsToNumber(parts, 'day')
 	if (!Number.isInteger(month) || !Number.isInteger(day)) {
-		throw new Error(`failed to resolve today in timezone ${SPAIN_TIME_ZONE}`)
+		throw new Error(`failed to resolve month-day in timezone ${SPAIN_TIME_ZONE}`)
 	}
 	return { month, day }
+}
+
+export function getTodayInSpain(now: Date = new Date()): MonthDay {
+	return monthDayInSpain(now)
 }
 
 /**
@@ -58,5 +63,5 @@ export function spainMonthDay(iso: string | null): MonthDay | null {
 	if (iso === null) return null
 	const ms = Date.parse(iso)
 	if (Number.isNaN(ms)) return null
-	return getTodayInSpain(new Date(ms))
+	return monthDayInSpain(new Date(ms))
 }

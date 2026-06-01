@@ -41,15 +41,3 @@ export function filterFilesByDay(
 	const monthDay = day.slice(5)
 	return files.filter((f) => localMonthDay(f.created) === monthDay)
 }
-
-/** Local `YYYY-MM-DD` for today. */
-export function todayLocal(): string {
-	return formatLocalDay(new Date())
-}
-
-/** Local `YYYY-MM-DD` for tomorrow. */
-export function tomorrowLocal(): string {
-	const d = new Date()
-	d.setDate(d.getDate() + 1)
-	return formatLocalDay(d)
-}
