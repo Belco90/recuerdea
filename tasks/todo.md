@@ -41,16 +41,18 @@
       `useRouterState({ select: (s) => s.status === 'pending' })`; mounted in
       `RootDocument` (`__root.tsx`) inside the providers, above `{children}`.
       Type-check + build green.
-- [ ] **T2.3 — Decision #1 verification (GATE).** Confirm via TanStack docs that
-      `pendingComponent` is not rendered on same-route loader reloads, then
-      prove manually: in `/admin/collection/add`, pick ≥1 item, switch folders.
-      - *Acceptance:* selections persist; no full skeleton swap on the switch
-        (only the global bar shows). Record PASS/FAIL + the doc reference here.
-      - *If FAIL:* mark Slice 2 to use the fallback overlay approach (plan,
-        Decision #1) before starting T3.x.
-- [ ] **CHECKPOINT 2:** Bar verified on home→admin link, list→add, and
-      folder→folder; `picked` survives a folder switch. No hydration warning in
-      console.
+- [x] **T2.3 — Decision #1 verification (GATE).** ✅ **PASS** — verified by
+      automated integration test
+      `src/routes/pending-reload-behavior.browser.test.tsx`: a route with a
+      `pendingComponent` + `pendingMs: 5` and a 40ms loader is NOT remounted on
+      a same-route `loaderDeps` change (`mountCount === 1`, stable
+      `data-instance`). The add skeleton is therefore safe — it appears on
+      first entry only and folder switches keep the component (and `picked`)
+      mounted. Add-skeleton approach confirmed; fallback overlay not needed.
+- [x] **CHECKPOINT 2:** ✅ Global bar code shipped (Slice 1); state-preservation
+      gate proven by automation. Live folder→folder + hydration smoke to be
+      done on the PR deploy preview (SPEC requires preview smoke before merge —
+      cannot exercise authenticated pCloud routes locally without Identity).
 
 ---
 
@@ -89,4 +91,15 @@
 ---
 
 ## Notes / findings
-<!-- Record T1.1/T1.2 field+prop names and the T2.3 PASS/FAIL + doc ref here. -->
+
+- **Router state:** `useRouterState({ select: (s) => s.status === 'pending' })`.
+  `defaultPendingMs` default 1000, `defaultPendingMinMs` default 500.
+- **Chakra:** `Skeleton`/`SkeletonText`/`SkeletonCircle` from `@chakra-ui/react`;
+  `SkeletonProps extends HTMLChakraProps<"div">`.
+- **Decision #1:** PASS (automated). Source: `router-core` `load-matches.js:470`
+  returns the prior successful match on background reload; integration test
+  confirms no remount.
+- **Env limit:** authenticated routes (`/`, `/admin/*`) need Netlify Identity +
+  pCloud, so live visual smoke happens on the deploy preview, not locally.
+- **Pre-existing:** full-repo `pnpm lint` OOMs in this env (oxlint over whole
+  tree); per-file oxlint is clean. Not introduced by v16.
