@@ -42,7 +42,7 @@ loader speedups, no caching changes, no redesign of the admin flow.
 > and a real browser before building Slices 2–4** (source-driven step in
 > Phase 1/2). If it proves false, the fallback is recorded below.
 
-1. **`pendingComponent` shows only on a route's *initial* match, not on
+1. **`pendingComponent` shows only on a route's _initial_ match, not on
    background reloads of an already-active route.** When you switch folders in
    `/admin/collection/add`, only `loaderDeps.folderid` changes — the route stays
    matched, so TanStack does a stale-while-revalidate reload and keeps the
@@ -68,7 +68,7 @@ loader speedups, no caching changes, no redesign of the admin flow.
 
 3. **Chakra UI v3 already ships `Skeleton` / `SkeletonText`.** Use them for the
    skeleton building blocks rather than hand-rolling shimmer. Only the
-   per-route *layout arrangement* of skeletons is bespoke. (No new dependency —
+   per-route _layout arrangement_ of skeletons is bespoke. (No new dependency —
    honors SPEC §7 "Ask first" on deps.)
 
 4. **Presentational split for testability.** Router-coupled components
@@ -99,6 +99,7 @@ routes/index.tsx (home)
 ```
 
 Dependency notes:
+
 - Slice 1 is **fully independent** and the single highest-value change (it is
   the only thing that gives feedback on folder switches). Do it first.
 - Slices 2–4 share the router pending-timing config (lands in Slice 2) and all
@@ -109,7 +110,9 @@ Dependency notes:
 ## Phases
 
 ### Phase 1 — Foundations & verification (read/confirm only)
+
 Confirm router API surface and skeleton primitives before writing UI.
+
 - Confirm `useRouterState` pending field name and `defaultPending*` options in
   the installed router version (source-driven).
 - Confirm Chakra v3 `Skeleton`/`SkeletonText` import path and props.
@@ -117,7 +120,9 @@ Confirm router API surface and skeleton primitives before writing UI.
   writing (note findings inline in todo). Proceed.
 
 ### Phase 2 — Slice 1: global navigation progress bar
+
 Deliver feedback for every navigation, including folder switches.
+
 - Task 1a: `ProgressBar` pure component + browser test.
 - Task 1b: `NavigationProgress` wrapper (`useRouterState`) mounted in
   `__root.tsx`.
@@ -129,7 +134,9 @@ Deliver feedback for every navigation, including folder switches.
   before continuing.
 
 ### Phase 3 — Slices 2–4: per-route entry skeletons
+
 One vertical slice per slow route, each independently shippable.
+
 - Slice 2: router `defaultPendingMs`/`MinMs` + `defaultPendingComponent` +
   `AddSkeleton` `pendingComponent` on `/admin/collection/add` (or fallback
   overlay per Decision #1).
