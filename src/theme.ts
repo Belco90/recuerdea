@@ -22,6 +22,13 @@ const config = defineConfig({
 		button: { fontFamily: 'inherit', cursor: 'pointer' },
 	},
 	theme: {
+		keyframes: {
+			// Indeterminate sweep for the global navigation progress bar.
+			progressSlide: {
+				'0%': { transform: 'translateX(-100%)' },
+				'100%': { transform: 'translateX(320%)' },
+			},
+		},
 		breakpoints: {
 			// `md` overridden to 720px to match the prototype's media-query breakpoint.
 			sm: '30em',

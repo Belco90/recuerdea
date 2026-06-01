@@ -3,6 +3,7 @@ import { AppShell } from '#/components/AppShell'
 import { EmptyState } from '#/components/EmptyState'
 import { Hero } from '#/components/Hero'
 import { Lightbox } from '#/components/Lightbox'
+import { HomeSkeleton } from '#/components/RouteSkeletons'
 import { Timeline } from '#/components/Timeline'
 import { Topbar } from '#/components/Topbar'
 import { YearSection } from '#/components/YearSection'
@@ -58,6 +59,7 @@ export const Route = createFileRoute('/')({
 			isAdmin: context.user.isAdmin,
 		}
 	},
+	pendingComponent: HomeSkeleton,
 	component: Home,
 })
 

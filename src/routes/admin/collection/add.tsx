@@ -2,6 +2,7 @@ import type { SourceFileItem } from '#/lib/admin/source-folder.server'
 
 import { AdminFolderNavigator } from '#/components/AdminFolderNavigator'
 import { AdminMediaDateFilter } from '#/components/AdminMediaDateFilter'
+import { AddSkeleton } from '#/components/RouteSkeletons'
 import { addToCollection } from '#/lib/admin/collection'
 import { filterFilesByDay } from '#/lib/admin/date-filter'
 import { getAdminSourceFolder } from '#/lib/admin/source-folder'
@@ -39,6 +40,7 @@ export const Route = createFileRoute('/admin/collection/add')({
 	loader: async ({ deps }) => ({
 		source: await getAdminSourceFolder({ data: { folderid: deps.folderid } }),
 	}),
+	pendingComponent: AddSkeleton,
 	component: AdminCollectionAddPage,
 })
 

@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
 
+import { NavigationProgress } from '#/components/NavigationProgress'
 import { IdentityProvider } from '#/lib/auth/identity-context'
 import { system } from '#/theme'
 import { ChakraProvider } from '@chakra-ui/react'
 import { TanStackDevtools } from '@tanstack/react-devtools'
-import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import { HeadContent, Outlet, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 
 import fontsCss from '../fonts.css?url'
@@ -39,7 +40,20 @@ export const Route = createRootRoute({
 		],
 	}),
 	shellComponent: RootDocument,
+	component: RootComponent,
 })
+
+// Reactive app root: rendered inside the client-reactive match subtree (unlike
+// `shellComponent`, which is a one-shot server snapshot), so `useRouterState`
+// consumers like NavigationProgress update on every navigation.
+function RootComponent() {
+	return (
+		<>
+			<NavigationProgress />
+			<Outlet />
+		</>
+	)
+}
 
 function RootDocument({ children }: { children: ReactNode }) {
 	return (

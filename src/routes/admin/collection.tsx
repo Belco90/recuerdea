@@ -1,4 +1,5 @@
 import { AppShell } from '#/components/AppShell'
+import { CollectionListSkeleton } from '#/components/RouteSkeletons'
 import { Topbar } from '#/components/Topbar'
 import { getCollectionMedia } from '#/lib/admin/collection'
 import { getServerUser } from '#/lib/auth/auth'
@@ -13,6 +14,7 @@ export const Route = createFileRoute('/admin/collection')({
 		return { user }
 	},
 	loader: async () => ({ collection: await getCollectionMedia() }),
+	pendingComponent: CollectionListSkeleton,
 	component: AdminCollectionLayout,
 })
 
